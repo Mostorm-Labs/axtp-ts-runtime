@@ -379,7 +379,11 @@ function resolveSpecPath(): string | undefined {
     "third_party/axtp-spec",
     ".axtp-spec"
   ]) {
-    if (candidate !== undefined && fs.existsSync(path.join(candidate, "conformance/manifest.yaml"))) {
+    if (
+      candidate !== undefined &&
+      (fs.existsSync(path.join(candidate, "docs/conformance/manifest.yaml")) ||
+        fs.existsSync(path.join(candidate, "conformance/manifest.yaml")))
+    ) {
       return candidate;
     }
   }
