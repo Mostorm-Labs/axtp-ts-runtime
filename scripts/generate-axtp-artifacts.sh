@@ -33,3 +33,5 @@ const outDir = path.join(root, "src/generated");
 await emitTsFiles(spec, outDir);
 console.log(`[OK] generated TypeScript artifacts: ${outDir}`);
 NODE
+
+AXTP_SPEC_PATH="$spec" node "$root/scripts/axtp-versioning.mjs" generate --runtime-name axtp-ts-runtime

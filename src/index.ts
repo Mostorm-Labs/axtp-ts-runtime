@@ -10,3 +10,4 @@ export * from "./jsonRpcAdapter.js";
 export * from "./sdk.js";
 export * from "./generated/axtp_ids_generated.js";
 export * from "./generated/registry_generated.js";
+export * from "./generated/axtpGeneratedVersion.js";
