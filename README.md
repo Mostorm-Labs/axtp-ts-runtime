@@ -1,7 +1,20 @@
-# AXTP Node Runtime
+# AXTP TypeScript Runtime
 
-This repository contains the AXTP Node.js and TypeScript runtime extracted from
-the AXTP specification repository.
+AXTP TypeScript Runtime provides protocol runtime and SDK utilities for AXTP
+clients and tools.
+
+It is written in TypeScript and can support multiple JavaScript environments,
+including:
+
+- Browser WebSocket clients
+- Node.js adapters
+- CLI tools
+- Mock clients
+- Electron or web management applications
+
+This repository is not the AXTP Spec source of truth. Protocol documents,
+registries, schemas, domain specs, flow specs, and conformance cases are
+maintained in the AXTP main specification repository.
 
 The runtime layout is intentionally kept as copied:
 
@@ -72,8 +85,8 @@ scripts/check-axtp-spec-lock.sh
 ```
 
 After upgrading, run generator checks, TypeScript build/tests, and conformance
-tests before merging. TODO: no dedicated Node runtime conformance test script
-exists yet.
+tests before merging. TODO: no dedicated TypeScript runtime conformance test
+script exists yet.
 
 ## Local Generator
 

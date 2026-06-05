@@ -1,6 +1,6 @@
-# AXTP Node Runtime Generator
+# AXTP TypeScript Runtime Generator
 
-This generator is owned by `axtp-node-runtime`.
+This generator is owned by `axtp-ts-runtime`.
 
 It consumes the AXTP spec checkout selected by `AXTP_SPEC_PATH`, or
 `third_party/axtp-spec` when the environment variable is unset. The checkout must
