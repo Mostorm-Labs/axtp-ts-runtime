@@ -7,15 +7,19 @@ if [[ $# -ne 1 ]]; then
 fi
 
 tag="$1"
-if [[ "$tag" == "main" || ! "$tag" =~ ^spec/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "Expected a released AXTP Spec tag, for example spec/v0.1.0" >&2
+if [[ "$tag" == "main" || "$tag" == "unreleased" || ! "$tag" =~ ^spec/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Expected a released AXTP Spec tag, for example spec/v0.3.0" >&2
   exit 2
 fi
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 lock="$root/AXTP_SPEC.lock.yaml"
 repo="${AXTP_SPEC_REPOSITORY:-https://github.com/Mostorm-Labs/axtp.git}"
-commit="$(git ls-remote --tags "$repo" "refs/tags/$tag" | awk 'NR == 1 { print $1 }')"
+
+commit="$(git ls-remote "$repo" "refs/tags/$tag^{}" | awk 'NR == 1 { print $1 }')"
+if [[ -z "$commit" ]]; then
+  commit="$(git ls-remote "$repo" "refs/tags/$tag" | awk 'NR == 1 { print $1 }')"
+fi
 
 if [[ -z "$commit" ]]; then
   echo "Could not resolve $tag from $repo" >&2
@@ -75,7 +79,7 @@ fi
 
 if [[ -n "$spec_path" && -d "$spec_path/registry" ]]; then
   if [[ -x "$root/scripts/generate-axtp-artifacts.sh" && -f "$root/generators/dist/sourceLoader.js" ]]; then
-    echo "Regenerating AXTP TypeScript artifacts from $spec_path"
+    echo "Regenerating AXTP artifacts from $spec_path"
     AXTP_SPEC_PATH="$spec_path" "$root/scripts/generate-axtp-artifacts.sh"
   elif [[ -x "$root/scripts/generate-axtp-artifacts.sh" ]]; then
     echo "Skipping generated artifacts: generator is not built. Run: pnpm --dir generators build"
