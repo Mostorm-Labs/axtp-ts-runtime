@@ -46,5 +46,45 @@ if [[ -d "$root/third_party/axtp-spec/.git" ]]; then
   git -C "$root/third_party/axtp-spec" checkout "$tag"
 fi
 
+if [[ -f "$root/package.json" ]]; then
+  AXTP_RUNTIME_ROOT="$root" \
+  AXTP_SPEC_REPOSITORY_METADATA="https://github.com/Mostorm-Labs/axtp" \
+  AXTP_SPEC_TAG_METADATA="$tag" \
+  AXTP_SPEC_VERSION_METADATA="$version" \
+  node --input-type=module <<'NODE'
+import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+const packageJsonPath = path.join(process.env.AXTP_RUNTIME_ROOT, "package.json");
+const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+packageJson.axtp = {
+  ...(packageJson.axtp ?? {}),
+  specRepository: process.env.AXTP_SPEC_REPOSITORY_METADATA,
+  specTag: process.env.AXTP_SPEC_TAG_METADATA,
+  specVersion: process.env.AXTP_SPEC_VERSION_METADATA
+};
+await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
+NODE
+  echo "Updated package.json AXTP spec metadata"
+fi
+
+spec_path="${AXTP_SPEC_PATH:-}"
+if [[ -z "$spec_path" && -d "$root/third_party/axtp-spec/registry" ]]; then
+  spec_path="$root/third_party/axtp-spec"
+fi
+
+if [[ -n "$spec_path" && -d "$spec_path/registry" ]]; then
+  if [[ -x "$root/scripts/generate-axtp-artifacts.sh" && -f "$root/generators/dist/sourceLoader.js" ]]; then
+    echo "Regenerating AXTP TypeScript artifacts from $spec_path"
+    AXTP_SPEC_PATH="$spec_path" "$root/scripts/generate-axtp-artifacts.sh"
+  elif [[ -x "$root/scripts/generate-axtp-artifacts.sh" ]]; then
+    echo "Skipping generated artifacts: generator is not built. Run: pnpm --dir generators build"
+  else
+    echo "Skipping generated artifacts: scripts/generate-axtp-artifacts.sh is missing"
+  fi
+else
+  echo "Skipping generated artifacts: no AXTP spec checkout found via AXTP_SPEC_PATH or third_party/axtp-spec"
+fi
+
 echo "Updated AXTP_SPEC.lock.yaml to $tag at $commit"
 echo "No commit was created."

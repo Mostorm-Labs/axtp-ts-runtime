@@ -19,5 +19,10 @@
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },
+  "axtp": {
+    "specRepository": "https://github.com/Mostorm-Labs/axtp",
+    "specTag": "spec/v0.0.1",
+    "specVersion": "0.0.1"
+  },
   "packageManager": "pnpm@11.3.0"
 }
