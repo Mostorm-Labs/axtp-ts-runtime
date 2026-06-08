@@ -111,7 +111,7 @@ export class WebSocketJsonRpcAdapter implements ByteSink {
       op: requestOp === RpcOp.RequestBatch ? RpcOp.RequestBatchResponse : RpcOp.RequestResponse,
       requestId,
       statusCode: code,
-      bodyEncoding: RpcBodyEncoding.RawBytes,
+      bodyEncoding: RpcBodyEncoding.None,
       meta: {
         ...defaultPayloadMeta(),
         sourceProtocol: SourceProtocol.JsonRpc,

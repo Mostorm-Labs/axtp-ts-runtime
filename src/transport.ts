@@ -1,6 +1,7 @@
 import type { Bytes } from "./bytes.js";
 import type { ByteSink } from "./io.js";
 import { RpcEncoding } from "./generated/axtp_ids_generated.js";
+import { rpcEncodingJsonBinary } from "./rpcEncoding.js";
 
 export enum TransportKind {
   Tcp = "tcp",
@@ -39,7 +40,7 @@ export function defaultTransportProfile(): TransportProfile {
   return {
     kind: TransportKind.Custom,
     wireMode: AxtpWireMode.FramedBinary,
-    defaultRpcEncoding: RpcEncoding.Tlv,
+    defaultRpcEncoding: rpcEncodingJsonBinary,
     messageOriented: false,
     supportsTextMessage: false,
     supportsBinaryMessage: true,
@@ -55,7 +56,7 @@ export class MockTransport implements ITransport {
   constructor(private readonly transportProfile: TransportProfile = {
     kind: TransportKind.Mock,
     wireMode: AxtpWireMode.FramedBinary,
-    defaultRpcEncoding: RpcEncoding.Tlv,
+    defaultRpcEncoding: rpcEncodingJsonBinary,
     messageOriented: false,
     supportsTextMessage: false,
     supportsBinaryMessage: true,

@@ -34,6 +34,7 @@ import {
   type RpcPayload,
   type StreamPayload
 } from "./index.js";
+import { rpcEncodingJsonBinary } from "./rpcEncoding.js";
 import { ControlOpcode } from "./generated/axtp_ids_generated.js";
 
 class CapturePayloadSink implements PayloadSink {
@@ -132,7 +133,7 @@ describe("model IO", () => {
 describe("framed binary pipeline", () => {
   it("decodes split input, concatenated frames, resync noise, and drops CRC-invalid frames", () => {
     const first = encodeRpc(rpcPayload({
-      encoding: RpcEncoding.Tlv,
+      encoding: rpcEncodingJsonBinary,
       op: RpcOp.Request,
       requestId: 7,
       methodOrEventId: MethodId.AudioGetAlgorithmConfig,
@@ -147,14 +148,14 @@ describe("framed binary pipeline", () => {
     expect(sink.rpcs[0].requestId).toBe(7);
 
     const second = encodeRpc(rpcPayload({
-      encoding: RpcEncoding.Tlv,
+      encoding: rpcEncodingJsonBinary,
       op: RpcOp.Request,
       requestId: 8,
       methodOrEventId: MethodId.AudioGetAlgorithmConfig,
       bodyEncoding: RpcBodyEncoding.Tlv8
     }));
     const third = encodeRpc(rpcPayload({
-      encoding: RpcEncoding.Tlv,
+      encoding: rpcEncodingJsonBinary,
       op: RpcOp.Request,
       requestId: 9,
       methodOrEventId: MethodId.AudioGetAlgorithmConfig,
@@ -175,11 +176,11 @@ describe("framed binary pipeline", () => {
   it("round-trips fragmented messages and wraps message ids", () => {
     const body = Uint8Array.from({ length: 40 }, (_, index) => index);
     const encoded = encodeRpc(rpcPayload({
-      encoding: RpcEncoding.Tlv,
+      encoding: rpcEncodingJsonBinary,
       op: RpcOp.Request,
       requestId: 43,
       methodOrEventId: MethodId.AudioGetAlgorithmConfig,
-      bodyEncoding: RpcBodyEncoding.RawBytes,
+      bodyEncoding: RpcBodyEncoding.None,
       body
     }), 24);
     const frames = splitFrames(encoded);
@@ -231,7 +232,7 @@ describe("core and endpoint", () => {
 
     core.expectRpcResponse(55);
     core.byteSink.onBytes(encodeRpc(rpcPayload({
-      encoding: RpcEncoding.Tlv,
+      encoding: rpcEncodingJsonBinary,
       op: RpcOp.RequestResponse,
       requestId: 55,
       methodOrEventId: MethodId.AudioGetAlgorithmConfig,
@@ -252,7 +253,7 @@ describe("core and endpoint", () => {
     });
 
     transport.injectIncoming(encodeRpc(rpcPayload({
-      encoding: RpcEncoding.Tlv,
+      encoding: rpcEncodingJsonBinary,
       op: RpcOp.Request,
       requestId: 900,
       methodOrEventId: MethodId.AudioGetAlgorithmConfig,
@@ -353,12 +354,12 @@ describe("websocket json rpc", () => {
 });
 
 describe("sdk dynamic calls", () => {
-  it("supports local JSON/TLV/raw calls and unavailable/timeout errors", async () => {
+  it("supports local JSON/JSON_BINARY byte calls and unavailable/timeout errors", async () => {
     const client = new AxtpClient({ timeoutMs: 5 });
     client.registry().addMethod(0x90010001, "vendor.echo");
     client.registerMethod(MethodId.AudioGetAlgorithmConfig, () => toBytes('{"ok":true}'));
     client.registerMethod(MethodId.AudioSetAlgorithmConfig, (request) => {
-      expect(request.encoding).toBe(RpcEncoding.Tlv);
+      expect(request.encoding).toBe(rpcEncodingJsonBinary);
       return new Uint8Array();
     });
     client.registerMethod(0x90010001, (request) => request.body);

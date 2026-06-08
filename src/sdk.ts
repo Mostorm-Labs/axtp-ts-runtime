@@ -4,6 +4,7 @@ import { AxtpEndpoint } from "./endpoint.js";
 import { ErrorCode, RpcBodyEncoding, RpcEncoding, RpcOp } from "./generated/axtp_ids_generated.js";
 import { MethodRegistry } from "./generated/registry_generated.js";
 import { SourceProtocol, rpcPayload, type RpcPayload } from "./model.js";
+import { bodyEncodingForRpcEncoding, isJsonBinaryRpcEncoding, rpcEncodingJsonBinary } from "./rpcEncoding.js";
 import { AxtpWireMode, type ITransport } from "./transport.js";
 
 export interface ClientOptions {
@@ -129,11 +130,11 @@ export class AxtpClient {
       this.lastErrorValue = { ok: false, code: ErrorCode.RpcMethodNotFound, message: "method not found" };
       return new Uint8Array();
     }
-    return this.callRaw(methodId, RpcEncoding.Tlv, tlvBody, { ...options, encoding: RpcEncoding.Tlv });
+    return this.callRaw(methodId, rpcEncodingJsonBinary, tlvBody, { ...options, encoding: rpcEncodingJsonBinary });
   }
 
   async callRawBytes(methodId: number, body: Bytes, options: CallOptions = {}): Promise<Bytes> {
-    return this.callRaw(methodId, RpcEncoding.Raw, body, { ...options, encoding: RpcEncoding.Raw });
+    return this.callRaw(methodId, rpcEncodingJsonBinary, body, { ...options, encoding: rpcEncodingJsonBinary });
   }
 
   emitRaw(eventPayload: RpcPayload): void {
@@ -204,8 +205,7 @@ export class AxtpClient {
     }
     if (
       request.bodyEncoding === RpcBodyEncoding.Tlv8 &&
-      request.encoding !== RpcEncoding.Tlv &&
-      request.encoding !== RpcEncoding.Binary
+      !isJsonBinaryRpcEncoding(request.encoding)
     ) {
       request.bodyEncoding = bodyEncodingFor(request.encoding);
     }
@@ -269,9 +269,7 @@ export class AxtpServer {
 }
 
 function bodyEncodingFor(encoding: RpcEncoding): RpcBodyEncoding {
-  return encoding === RpcEncoding.Tlv || encoding === RpcEncoding.Binary
-    ? RpcBodyEncoding.Tlv8
-    : RpcBodyEncoding.RawBytes;
+  return bodyEncodingForRpcEncoding(encoding);
 }
 
 function sleep(ms: number): Promise<void> {

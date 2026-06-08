@@ -16,6 +16,7 @@ export const kStandardFrameCrcSize = 2;
 export const kControlPayloadHeaderSize = 5;
 export const kBinaryRpcHeaderSize = 11;
 export const kStreamPayloadHeaderSize = 16;
+export const kRpcEncodingJsonBinaryValue = 0x04;
 
 export enum SourceProtocol {
   AxtpV1 = 0x01,
@@ -110,7 +111,7 @@ export function rpcPayload(partial: Partial<RpcPayload> = {}): RpcPayload {
     requestId: 0,
     methodOrEventId: 0,
     statusCode: ErrorCode.Success,
-    bodyEncoding: RpcBodyEncoding.Tlv8,
+    bodyEncoding: RpcBodyEncoding.None,
     body: new Uint8Array(),
     ...partial,
     meta

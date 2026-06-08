@@ -427,7 +427,7 @@ export class JsonRpcDecoder implements ByteSink {
         op: RpcOp.RequestResponse,
         requestId: parseRequestId(d),
         statusCode: ErrorCode.RpcMethodNotFound,
-        bodyEncoding: RpcBodyEncoding.RawBytes,
+        bodyEncoding: RpcBodyEncoding.None,
         meta: {
           ...defaultPayloadMeta(),
           sourceProtocol: SourceProtocol.JsonRpc,
@@ -444,7 +444,7 @@ export class JsonRpcDecoder implements ByteSink {
       op: RpcOp.Request,
       requestId,
       methodOrEventId: methodId,
-      bodyEncoding: RpcBodyEncoding.RawBytes,
+      bodyEncoding: RpcBodyEncoding.None,
       meta: {
         ...defaultPayloadMeta(),
         sourceProtocol: SourceProtocol.JsonRpc,
@@ -465,7 +465,7 @@ export class JsonRpcDecoder implements ByteSink {
       op: RpcOp.Event,
       requestId: 0,
       methodOrEventId: eventId,
-      bodyEncoding: RpcBodyEncoding.RawBytes,
+      bodyEncoding: RpcBodyEncoding.None,
       meta: {
         ...defaultPayloadMeta(),
         sourceProtocol: SourceProtocol.JsonRpc,
@@ -480,7 +480,7 @@ export class JsonRpcDecoder implements ByteSink {
     this.sink.onRpc(rpcPayload({
       encoding: RpcEncoding.Json,
       op,
-      bodyEncoding: RpcBodyEncoding.RawBytes,
+      bodyEncoding: RpcBodyEncoding.None,
       meta: {
         ...defaultPayloadMeta(),
         sourceProtocol: SourceProtocol.JsonRpc,
@@ -497,7 +497,7 @@ export class JsonRpcDecoder implements ByteSink {
       op: RpcOp.RequestBatchResponse,
       requestId,
       statusCode: ErrorCode.RpcBatchUnsupported,
-      bodyEncoding: RpcBodyEncoding.RawBytes,
+      bodyEncoding: RpcBodyEncoding.None,
       meta: {
         ...defaultPayloadMeta(),
         sourceProtocol: SourceProtocol.JsonRpc,
@@ -529,7 +529,7 @@ export class JsonRpcEncoder {
     return rpcPayload({
       encoding: RpcEncoding.Json,
       op: RpcOp.Hello,
-      bodyEncoding: RpcBodyEncoding.RawBytes,
+      bodyEncoding: RpcBodyEncoding.None,
       meta: { ...defaultPayloadMeta(), sourceProtocol: SourceProtocol.JsonRpc }
     });
   }
@@ -538,7 +538,7 @@ export class JsonRpcEncoder {
     return rpcPayload({
       encoding: RpcEncoding.Json,
       op: RpcOp.Identified,
-      bodyEncoding: RpcBodyEncoding.RawBytes,
+      bodyEncoding: RpcBodyEncoding.None,
       meta: { ...defaultPayloadMeta(), sourceProtocol: SourceProtocol.JsonRpc, jsonSid: sid }
     });
   }

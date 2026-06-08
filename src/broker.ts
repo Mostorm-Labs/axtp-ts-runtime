@@ -3,6 +3,7 @@ import { ErrorCode, RpcBodyEncoding, RpcEncoding, RpcOp } from "./generated/axtp
 import { MethodRegistry } from "./generated/registry_generated.js";
 import type { ControlPayload, RpcPayload, StreamPayload } from "./model.js";
 import { rpcPayload } from "./model.js";
+import { bodyEncodingForRpcEncoding, rpcEncodingJsonBinary } from "./rpcEncoding.js";
 
 export enum BrokerTaskType {
   RpcRequest = "rpcRequest",
@@ -128,7 +129,7 @@ export class BusinessRouter {
     const methodId = typeof method === "number" ? method : this.methodRegistry.findMethodId(method);
     if (methodId === undefined) return;
     this.registerRawMethod(methodId, async (context, request) => ({
-      encoding: RpcEncoding.Tlv,
+      encoding: rpcEncodingJsonBinary,
       body: await handler(context, request.body),
       overrideEncoding: true
     }));
@@ -172,10 +173,7 @@ export class BusinessRouter {
       const data = await handler(context, view);
       if (data.overrideEncoding) {
         response.encoding = data.encoding;
-        response.bodyEncoding =
-          data.encoding === RpcEncoding.Tlv || data.encoding === RpcEncoding.Binary
-            ? RpcBodyEncoding.Tlv8
-            : RpcBodyEncoding.RawBytes;
+        response.bodyEncoding = bodyEncodingForRpcEncoding(data.encoding);
       }
       response.body = data.body;
     } catch {
