@@ -1,6 +1,6 @@
 {
   "name": "@axtp/runtime",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "TypeScript runtime / SDK for AXTP, with optional Node.js and Browser adapters.",
   "private": true,
   "type": "module",
@@ -22,8 +22,8 @@
   },
   "axtp": {
     "specRepository": "https://github.com/Mostorm-Labs/axtp",
-    "specTag": "spec/v0.5.0",
-    "specVersion": "0.5.0"
+    "specTag": "spec/v0.5.1",
+    "specVersion": "0.5.1"
   },
   "packageManager": "pnpm@11.3.0"
 }
