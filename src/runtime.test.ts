@@ -95,7 +95,7 @@ function splitFrames(bytes: Bytes): Bytes[] {
   const frames: Bytes[] = [];
   let offset = 0;
   while (offset < bytes.length) {
-    const length = bytes[offset + 4] | (bytes[offset + 5] << 8);
+    const length = (bytes[offset + 4] << 8) | bytes[offset + 5];
     const total = 12 + length + 2;
     frames.push(bytes.slice(offset, offset + total));
     offset += total;
@@ -108,14 +108,14 @@ async function settle(): Promise<void> {
 }
 
 describe("model IO", () => {
-  it("uses little-endian byte IO and CRC16-CCITT-FALSE", () => {
+  it("uses network byte order IO and CRC16-CCITT-FALSE", () => {
     const writer = new ByteWriter();
     writer.writeU8(0x12);
     writer.writeU16(0x3456);
     writer.writeU32(0x789abcde);
     writer.writeU64(0x1122334455667788n);
     expect([...writer.bytes()]).toEqual([
-      0x12, 0x56, 0x34, 0xde, 0xbc, 0x9a, 0x78, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11
+      0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88
     ]);
 
     const reader = new ByteReader(writer.bytes());

@@ -16,15 +16,15 @@ export class ByteWriter {
   }
 
   writeU16(value: number): void {
-    this.values.push(value & 0xff, (value >> 8) & 0xff);
+    this.values.push((value >> 8) & 0xff, value & 0xff);
   }
 
   writeU32(value: number): void {
-    this.values.push(value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff, (value >> 24) & 0xff);
+    this.values.push((value >> 24) & 0xff, (value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff);
   }
 
   writeU64(value: bigint): void {
-    for (let shift = 0n; shift < 64n; shift += 8n) {
+    for (let shift = 56n; shift >= 0n; shift -= 8n) {
       this.values.push(Number((value >> shift) & 0xffn));
     }
   }
@@ -60,7 +60,7 @@ export class ByteReader {
 
   readU16(): number | undefined {
     if (!this.hasRemaining(2)) return undefined;
-    const value = this.data[this.cursor] | (this.data[this.cursor + 1] << 8);
+    const value = (this.data[this.cursor] << 8) | this.data[this.cursor + 1];
     this.cursor += 2;
     return value;
   }
@@ -68,10 +68,10 @@ export class ByteReader {
   readU32(): number | undefined {
     if (!this.hasRemaining(4)) return undefined;
     const value =
-      this.data[this.cursor] |
-      (this.data[this.cursor + 1] << 8) |
-      (this.data[this.cursor + 2] << 16) |
-      (this.data[this.cursor + 3] << 24);
+      (this.data[this.cursor] << 24) |
+      (this.data[this.cursor + 1] << 16) |
+      (this.data[this.cursor + 2] << 8) |
+      this.data[this.cursor + 3];
     this.cursor += 4;
     return value >>> 0;
   }
@@ -79,7 +79,7 @@ export class ByteReader {
   readU64(): bigint | undefined {
     if (!this.hasRemaining(8)) return undefined;
     let value = 0n;
-    for (let shift = 0n; shift < 64n; shift += 8n) {
+    for (let shift = 56n; shift >= 0n; shift -= 8n) {
       value |= BigInt(this.data[this.cursor++]) << shift;
     }
     return value;
