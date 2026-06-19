@@ -1,15 +1,16 @@
 import { BrokerResultType, type BrokerResult } from "./broker.js";
 import { type Bytes } from "./bytes.js";
-import { InboundProcessor, OutboundProcessor, type PayloadSink } from "./codec.js";
+import { InboundProcessor, JsonRpcEncoder, OutboundProcessor, type PayloadSink } from "./codec.js";
 import { ControlOpcode, ErrorCode, RpcOp } from "./generated/axtp_ids_generated.js";
 import {
   SourceProtocol,
   controlPayload,
+  rpcPayload,
   type ControlPayload,
   type RpcPayload,
   type StreamPayload
 } from "./model.js";
-import { defaultTransportProfile, type TransportProfile } from "./transport.js";
+import { AxtpWireMode, defaultTransportProfile, type TransportProfile } from "./transport.js";
 
 export enum CoreEventType {
   RpcRequest = "rpcRequest",
@@ -75,12 +76,30 @@ class PendingCallTable {
 class ControlSession {
   private open = false;
   private lastOpcodeValue = ControlOpcode.Open;
+  private pendingOpenId: number | undefined;
+
+  makeOpen(controlId: number): ControlPayload {
+    this.open = false;
+    this.pendingOpenId = controlId;
+    return controlPayload({ opcode: ControlOpcode.Open, controlId, statusCode: ErrorCode.Success });
+  }
 
   handle(payload: ControlPayload): ControlPayload | undefined {
     this.lastOpcodeValue = payload.opcode;
     if (payload.opcode === ControlOpcode.Open) {
       this.open = true;
       return this.makeResponse(ControlOpcode.Accept, payload);
+    }
+    if (payload.opcode === ControlOpcode.Accept) {
+      if (
+        this.pendingOpenId !== undefined &&
+        payload.controlId === this.pendingOpenId &&
+        payload.statusCode === ErrorCode.Success
+      ) {
+        this.open = true;
+        this.pendingOpenId = undefined;
+      }
+      return undefined;
     }
     if (payload.opcode === ControlOpcode.Ping) {
       return this.makeResponse(ControlOpcode.Pong, payload);
@@ -113,9 +132,13 @@ class ControlSession {
 export class AxtpCore {
   private readonly events: CoreEvent[] = [];
   private readonly outboundBytes: Bytes[] = [];
+  private readonly sessionRpcs: RpcPayload[] = [];
+  private readonly controlNotices: ControlPayload[] = [];
   private readonly controlSessionValue = new ControlSession();
   private readonly pendingCalls = new PendingCallTable();
   private transportProfile = defaultTransportProfile();
+  private appReady = false;
+  private nextSessionId = 1;
   private readonly payloadSink: PayloadSink = {
     onControl: (payload) => this.handleControl(payload),
     onRpc: (payload) => this.handleRpc(payload),
@@ -174,6 +197,26 @@ export class AxtpCore {
     return this.pendingCalls.tryTakeResolved(requestId);
   }
 
+  tryTakeSessionRpc(op: RpcOp): RpcPayload | undefined {
+    const count = this.sessionRpcs.length;
+    for (let index = 0; index < count; index += 1) {
+      const payload = this.sessionRpcs.shift()!;
+      if (payload.op === op) return payload;
+      this.sessionRpcs.push(payload);
+    }
+    return undefined;
+  }
+
+  tryTakeControlNotice(opcode: ControlOpcode): ControlPayload | undefined {
+    const count = this.controlNotices.length;
+    for (let index = 0; index < count; index += 1) {
+      const payload = this.controlNotices.shift()!;
+      if (payload.opcode === opcode) return payload;
+      this.controlNotices.push(payload);
+    }
+    return undefined;
+  }
+
   tryPopOutboundBytes(): Bytes | undefined {
     return this.outboundBytes.shift();
   }
@@ -182,19 +225,52 @@ export class AxtpCore {
     return this.controlSessionValue.isOpen();
   }
 
+  sendControlOpen(controlId: number): void {
+    this.outbound.sendControl(this.controlSessionValue.makeOpen(controlId));
+  }
+
   sendRpcRequest(payload: RpcPayload): void {
     this.outbound.sendRpcRequest(payload);
   }
 
+  sendRpcSession(payload: RpcPayload): void {
+    this.outbound.sendRpc(payload);
+  }
+
   private handleControl(payload: ControlPayload): void {
+    const opcode = payload.opcode;
     const response = this.controlSessionValue.handle(payload);
+    this.controlNotices.push(payload);
     if (response !== undefined) {
       this.outbound.sendControl(response);
+      if (opcode === ControlOpcode.Open && this.controlSessionValue.isOpen()) {
+        this.outbound.sendRpc(JsonRpcEncoder.makeHello());
+      }
+    }
+    if (opcode === ControlOpcode.Close) {
+      this.appReady = false;
     }
   }
 
   private handleRpc(payload: RpcPayload): void {
+    if (payload.op === RpcOp.Identify || payload.op === RpcOp.Reidentify) {
+      this.sessionRpcs.push(payload);
+      this.appReady = true;
+      this.outbound.sendRpc(JsonRpcEncoder.makeIdentified(this.makeSessionId(payload.meta.randomSeed)));
+      return;
+    }
+    if (payload.op === RpcOp.Hello || payload.op === RpcOp.Identified) {
+      if (payload.op === RpcOp.Identified) {
+        this.appReady = true;
+      }
+      this.sessionRpcs.push(payload);
+      return;
+    }
     if (payload.op === RpcOp.Request) {
+      if (this.transportProfile.wireMode === AxtpWireMode.FramedBinary && (!this.controlSessionValue.isOpen() || !this.appReady)) {
+        this.outbound.sendRpcResponse(this.makeErrorResponse(payload, ErrorCode.ControlOpenRequired));
+        return;
+      }
       this.events.push(CoreEvent.rpcRequest(payload));
       return;
     }
@@ -216,6 +292,28 @@ export class AxtpCore {
   }
 
   private handleStream(payload: StreamPayload): void {
+    if (this.transportProfile.wireMode === AxtpWireMode.FramedBinary && (!this.controlSessionValue.isOpen() || !this.appReady)) {
+      return;
+    }
     this.events.push(CoreEvent.streamData(payload));
+  }
+
+  private makeErrorResponse(request: RpcPayload, code: ErrorCode): RpcPayload {
+    return rpcPayload({
+      encoding: request.encoding,
+      op: RpcOp.RequestResponse,
+      requestId: request.requestId,
+      methodOrEventId: request.methodOrEventId,
+      statusCode: code,
+      bodyEncoding: request.bodyEncoding,
+      meta: request.meta
+    });
+  }
+
+  private makeSessionId(randomSeed = 0): string {
+    let mixed = (randomSeed ^ (this.nextSessionId * 0x9e3779b9)) >>> 0;
+    this.nextSessionId += 1;
+    if (mixed === 0) mixed = this.nextSessionId;
+    return mixed.toString(16).padStart(8, "0");
   }
 }

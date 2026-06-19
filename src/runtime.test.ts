@@ -3,6 +3,7 @@ import {
   AxtpClient,
   AxtpCore,
   AxtpEndpoint,
+  AxtpServer,
   AxtpWireMode,
   BasicBroker,
   ByteReader,
@@ -34,6 +35,7 @@ import {
   type RpcPayload,
   type StreamPayload
 } from "./index.js";
+import { NodeTcpClientTransport, NodeTcpServerTransport } from "./node.js";
 import { rpcEncodingJsonBinary } from "./rpcEncoding.js";
 import { ControlOpcode } from "./generated/axtp_ids_generated.js";
 
@@ -105,6 +107,68 @@ function splitFrames(bytes: Bytes): Bytes[] {
 
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function makeJsonRpcTransport(): MockTransport {
+  return new MockTransport({
+    kind: TransportKind.Mock,
+    wireMode: AxtpWireMode.WebSocketJsonRpc,
+    defaultRpcEncoding: RpcEncoding.Json,
+    messageOriented: true,
+    supportsTextMessage: true,
+    supportsBinaryMessage: false,
+    preferredFrameSize: 4096
+  });
+}
+
+function bridge(left: MockTransport, right: MockTransport): void {
+  while (true) {
+    const chunk = left.tryPopOutgoing();
+    if (chunk === undefined) return;
+    right.injectIncoming(chunk);
+  }
+}
+
+function drainOutgoing(transport: MockTransport): void {
+  while (transport.tryPopOutgoing() !== undefined) {
+    // Drain queued frames produced by session startup.
+  }
+}
+
+async function pumpJsonRpcRuntime(
+  client: AxtpClient,
+  clientTransport: MockTransport,
+  endpoint: AxtpEndpoint,
+  serverTransport: MockTransport,
+  adapter: WebSocketJsonRpcAdapter
+): Promise<void> {
+  bridge(clientTransport, serverTransport);
+  await settle();
+  await adapter.poll();
+  await endpoint.poll();
+  await settle();
+  bridge(serverTransport, clientTransport);
+  await client.poll();
+}
+
+function startJsonRpcPump(
+  client: AxtpClient,
+  clientTransport: MockTransport,
+  endpoint: AxtpEndpoint,
+  serverTransport: MockTransport,
+  adapter: WebSocketJsonRpcAdapter
+): () => Promise<void> {
+  let active = true;
+  const done = (async () => {
+    while (active) {
+      await pumpJsonRpcRuntime(client, clientTransport, endpoint, serverTransport, adapter);
+      await settle();
+    }
+  })();
+  return async () => {
+    active = false;
+    await done;
+  };
 }
 
 describe("model IO", () => {
@@ -216,6 +280,11 @@ describe("core and endpoint", () => {
     const openSink = new CapturePayloadSink();
     new InboundProcessor(openSink).onBytes(openResponse!);
     expect(openSink.controls[0].opcode).toBe(ControlOpcode.Accept);
+    const helloBytes = core.tryPopOutboundBytes();
+    expect(helloBytes).toBeDefined();
+    const helloSink = new CapturePayloadSink();
+    new InboundProcessor(helloSink).onBytes(helloBytes!);
+    expect(helloSink.rpcs[0].op).toBe(RpcOp.Hello);
 
     core.byteSink.onBytes(encodeControl(ControlOpcode.Ping, 2));
     const pingResponse = core.tryPopOutboundBytes();
@@ -251,6 +320,13 @@ describe("core and endpoint", () => {
       expect(request.requestId).toBe(900);
       return Uint8Array.of(0x77);
     });
+
+    transport.injectIncoming(encodeControl(ControlOpcode.Open, 1));
+    await endpoint.poll();
+    drainOutgoing(transport);
+    transport.injectIncoming(encodeRpc(JsonRpcEncoder.makeIdentify(1234)));
+    await endpoint.poll();
+    drainOutgoing(transport);
 
     transport.injectIncoming(encodeRpc(rpcPayload({
       encoding: rpcEncodingJsonBinary,
@@ -375,5 +451,160 @@ describe("sdk dynamic calls", () => {
     await timeoutClient.attachTransport(new MockTransport());
     const timeout = await timeoutClient.callRaw(rpcPayload({ methodOrEventId: MethodId.AudioGetAlgorithmConfig }));
     expect(timeout.statusCode).toBe(ErrorCode.RpcResponseTimeout);
+  });
+
+  it("performs WebSocket JSON-RPC app-ready and reuses sid on SDK requests", async () => {
+    const broker = new BasicBroker();
+    const endpoint = new AxtpEndpoint(broker);
+    const clientTransport = makeJsonRpcTransport();
+    const serverTransport = makeJsonRpcTransport();
+    endpoint.attachTransport(serverTransport);
+    const adapter = new WebSocketJsonRpcAdapter(endpoint, serverTransport);
+    serverTransport.bind(adapter);
+    serverTransport.open();
+
+    const client = new AxtpClient({
+      timeoutMs: 200,
+      wireMode: AxtpWireMode.WebSocketJsonRpc
+    });
+    await client.attachTransport(clientTransport);
+
+    broker.registerJsonMethod("audio.getAlgorithmConfig", () => '{"ok":true}');
+    const stopPump = startJsonRpcPump(client, clientTransport, endpoint, serverTransport, adapter);
+    try {
+      const ready = await client.ensureAppReady({ timeoutMs: 200, randomSeed: 1234, eventMasks: "0901" });
+      expect(ready.ok).toBe(true);
+      expect(client.isAppReady()).toBe(true);
+      expect(client.sessionSid()).toBe(ready.sid);
+      expect(client.lastAppReadyResult().sid).toBe(ready.sid);
+    } finally {
+      await stopPump();
+    }
+
+    const call = client.callJson("audio.getAlgorithmConfig", "{}");
+    await settle();
+    const requestBytes = clientTransport.tryPopOutgoing();
+    expect(requestBytes).toBeDefined();
+    const request = JSON.parse(bytesToText(requestBytes!));
+    expect(request.sid).toBe(client.sessionSid());
+    expect(request.op).toBe(RpcOp.Request);
+
+    serverTransport.injectIncoming(requestBytes!);
+    await settle();
+    bridge(serverTransport, clientTransport);
+    await client.poll();
+    await expect(call).resolves.toBe('{"ok":true}');
+  });
+
+  it("auto-identifies before WebSocket JSON-RPC SDK requests and reports app-ready timeout", async () => {
+    const broker = new BasicBroker();
+    const endpoint = new AxtpEndpoint(broker);
+    const clientTransport = makeJsonRpcTransport();
+    const serverTransport = makeJsonRpcTransport();
+    endpoint.attachTransport(serverTransport);
+    const adapter = new WebSocketJsonRpcAdapter(endpoint, serverTransport);
+    serverTransport.bind(adapter);
+    serverTransport.open();
+
+    const client = new AxtpClient({
+      timeoutMs: 200,
+      wireMode: AxtpWireMode.WebSocketJsonRpc
+    });
+    await client.attachTransport(clientTransport);
+    broker.registerJsonMethod("audio.getAlgorithmConfig", () => '{"ok":true}');
+
+    const stopPump = startJsonRpcPump(client, clientTransport, endpoint, serverTransport, adapter);
+    try {
+      await expect(client.callJson("audio.getAlgorithmConfig", "{}")).resolves.toBe('{"ok":true}');
+      expect(client.isAppReady()).toBe(true);
+      expect(client.sessionSid()).not.toBe("");
+    } finally {
+      await stopPump();
+    }
+
+    const timeoutClient = new AxtpClient({
+      timeoutMs: 5,
+      wireMode: AxtpWireMode.WebSocketJsonRpc
+    });
+    await timeoutClient.attachTransport(makeJsonRpcTransport());
+    const ready = await timeoutClient.ensureAppReady({ timeoutMs: 5 });
+    expect(ready.ok).toBe(false);
+    expect(ready.statusCode).toBe(ErrorCode.RpcResponseTimeout);
+    expect(timeoutClient.isAppReady()).toBe(false);
+  });
+});
+
+describe("node tcp transport", () => {
+  async function startServer(server: AxtpServer): Promise<() => Promise<void>> {
+    let active = true;
+    const loop = (async () => {
+      while (active) {
+        await server.poll();
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    })();
+    return async () => {
+      active = false;
+      await loop;
+      await server.close();
+    };
+  }
+
+  it("performs framed app-ready and RPC over loopback TCP", async () => {
+    const server = new AxtpServer();
+    const serverTransport = new NodeTcpServerTransport({ host: "127.0.0.1", port: 0 });
+    server.onJson("audio.getAlgorithmConfig", () => '{"ok":true}');
+    await server.attachTransport(serverTransport);
+    const stopServer = await startServer(server);
+
+    const client = new AxtpClient({ timeoutMs: 500 });
+    try {
+      await client.attachTransport(new NodeTcpClientTransport({
+        host: "127.0.0.1",
+        port: serverTransport.localPort()
+      }));
+      const ready = await client.ensureAppReady({ timeoutMs: 500, randomSeed: 0x12345678 });
+      expect(ready.ok).toBe(true);
+      expect(client.isAppReady()).toBe(true);
+      expect(client.sessionSid()).not.toBe("");
+      await expect(client.callJson("audio.getAlgorithmConfig", "{}")).resolves.toBe('{"ok":true}');
+    } finally {
+      await client.close();
+      await stopServer();
+    }
+  });
+
+  it("rejects framed RPC before CONTROL OPEN", async () => {
+    const server = new AxtpServer();
+    const serverTransport = new NodeTcpServerTransport({ host: "127.0.0.1", port: 0 });
+    server.onJson("audio.getAlgorithmConfig", () => '{"ok":true}');
+    await server.attachTransport(serverTransport);
+    const stopServer = await startServer(server);
+
+    const client = new AxtpClient({ autoIdentify: false, timeoutMs: 500 });
+    try {
+      await client.attachTransport(new NodeTcpClientTransport({
+        host: "127.0.0.1",
+        port: serverTransport.localPort()
+      }));
+      const response = await client.callRaw(rpcPayload({
+        encoding: RpcEncoding.Json,
+        op: RpcOp.Request,
+        methodOrEventId: MethodId.AudioGetAlgorithmConfig,
+        bodyEncoding: RpcBodyEncoding.None,
+        meta: {
+          sourceProtocol: SourceProtocol.JsonRpc,
+          sessionId: 0,
+          requestId: 0,
+          jsonSid: "",
+          jsonMethodOrEventName: "audio.getAlgorithmConfig"
+        },
+        body: toBytes("{}")
+      }));
+      expect(response.statusCode).toBe(ErrorCode.ControlOpenRequired);
+    } finally {
+      await client.close();
+      await stopServer();
+    }
   });
 });

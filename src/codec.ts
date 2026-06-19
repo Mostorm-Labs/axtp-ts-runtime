@@ -26,6 +26,7 @@ import {
   type ControlPayload,
   type Frame,
   type Message,
+  type PayloadMeta,
   type RpcPayload,
   type StreamPayload
 } from "./model.js";
@@ -280,7 +281,11 @@ export class MessageFragmenter {
 }
 
 export class PayloadDecoder {
-  constructor(private readonly next: PayloadSink) {}
+  private readonly framedJsonRpcDecoder: JsonRpcDecoder;
+
+  constructor(private readonly next: PayloadSink) {
+    this.framedJsonRpcDecoder = new JsonRpcDecoder(this.next, SourceProtocol.AxtpV1);
+  }
 
   onMessage(message: Message): void {
     switch (message.payloadType) {
@@ -313,6 +318,14 @@ export class PayloadDecoder {
   }
 
   private decodeRpc(message: Message): void {
+    if (
+      message.body.length >= 2 &&
+      message.body[0] === RpcEncoding.Json &&
+      (message.body[1] === 0x7b || message.body[1] === 0x5b)
+    ) {
+      this.framedJsonRpcDecoder.onBytes(message.body.slice(1));
+      return;
+    }
     if (message.body.length < kBinaryRpcHeaderSize) return;
     const reader = new ByteReader(message.body);
     const encoding = reader.readU8();
@@ -358,6 +371,8 @@ export class PayloadDecoder {
 }
 
 export class PayloadEncoder {
+  private readonly jsonRpcEncoder = new JsonRpcEncoder();
+
   encodeControl(payload: ControlPayload): Message {
     const writer = new ByteWriter();
     writer.writeU8(payload.opcode);
@@ -368,6 +383,13 @@ export class PayloadEncoder {
   }
 
   encodeRpc(payload: RpcPayload): Message {
+    if (payload.meta.sourceProtocol === SourceProtocol.JsonRpc && payload.encoding === RpcEncoding.Json) {
+      const writer = new ByteWriter();
+      writer.writeU8(payload.encoding);
+      writer.writeBytes(this.jsonRpcEncoder.encode(payload));
+      return { messageId: 0, payloadType: PayloadType.Rpc, body: writer.takeBytes() };
+    }
+
     const writer = new ByteWriter();
     writer.writeU8(payload.encoding);
     writer.writeU8(payload.op);
@@ -390,7 +412,10 @@ export class PayloadEncoder {
 }
 
 export class JsonRpcDecoder implements ByteSink {
-  constructor(private readonly sink: PayloadSink) {}
+  constructor(
+    private readonly sink: PayloadSink,
+    private readonly sourceProtocol = SourceProtocol.JsonRpc
+  ) {}
 
   onBytes(bytes: Bytes): void {
     try {
@@ -406,7 +431,20 @@ export class JsonRpcDecoder implements ByteSink {
         this.decodeEvent(object, d);
         return;
       }
-      if (op === RpcOp.Identify || op === RpcOp.Reidentify) {
+      if (op === RpcOp.RequestResponse) {
+        this.decodeResponse(object, d, op);
+        return;
+      }
+      if (op === RpcOp.RequestBatchResponse) {
+        this.decodeResponse(object, d, op);
+        return;
+      }
+      if (
+        op === RpcOp.Hello ||
+        op === RpcOp.Identify ||
+        op === RpcOp.Identified ||
+        op === RpcOp.Reidentify
+      ) {
         this.decodeSessionRpc(object, d, op);
         return;
       }
@@ -428,12 +466,12 @@ export class JsonRpcDecoder implements ByteSink {
         requestId: parseRequestId(d),
         statusCode: ErrorCode.RpcMethodNotFound,
         bodyEncoding: RpcBodyEncoding.None,
-        meta: {
-          ...defaultPayloadMeta(),
-          sourceProtocol: SourceProtocol.JsonRpc,
-          jsonSid: parseSid(object),
-          jsonMethodOrEventName: d.method
-        }
+      meta: {
+        ...defaultPayloadMeta(),
+        sourceProtocol: this.sourceProtocol,
+        jsonSid: parseSid(object),
+        jsonMethodOrEventName: d.method
+      }
       }));
       return;
     }
@@ -447,7 +485,7 @@ export class JsonRpcDecoder implements ByteSink {
       bodyEncoding: RpcBodyEncoding.None,
       meta: {
         ...defaultPayloadMeta(),
-        sourceProtocol: SourceProtocol.JsonRpc,
+        sourceProtocol: this.sourceProtocol,
         requestId,
         jsonSid: parseSid(object),
         jsonMethodOrEventName: d.method
@@ -468,7 +506,7 @@ export class JsonRpcDecoder implements ByteSink {
       bodyEncoding: RpcBodyEncoding.None,
       meta: {
         ...defaultPayloadMeta(),
-        sourceProtocol: SourceProtocol.JsonRpc,
+        sourceProtocol: this.sourceProtocol,
         jsonSid: parseSid(object),
         jsonMethodOrEventName: d.event
       },
@@ -477,15 +515,28 @@ export class JsonRpcDecoder implements ByteSink {
   }
 
   private decodeSessionRpc(object: JsonObject, d: JsonObject, op: RpcOp): void {
+    const meta: PayloadMeta = {
+      ...defaultPayloadMeta(),
+      sourceProtocol: this.sourceProtocol,
+      jsonSid: parseSid(object)
+    };
+    if (
+      (op === RpcOp.Identify || op === RpcOp.Reidentify) &&
+      typeof d.randomSeed === "number" &&
+      Number.isInteger(d.randomSeed) &&
+      d.randomSeed >= 0 &&
+      d.randomSeed <= 0xffffffff
+    ) {
+      meta.randomSeed = d.randomSeed;
+    }
+    if ((op === RpcOp.Identify || op === RpcOp.Reidentify) && typeof d.eventMasks === "string") {
+      meta.jsonEventMasks = d.eventMasks;
+    }
     this.sink.onRpc(rpcPayload({
       encoding: RpcEncoding.Json,
       op,
       bodyEncoding: RpcBodyEncoding.None,
-      meta: {
-        ...defaultPayloadMeta(),
-        sourceProtocol: SourceProtocol.JsonRpc,
-        jsonSid: parseSid(object)
-      },
+      meta,
       body: jsonToBytes(d)
     }));
   }
@@ -500,11 +551,30 @@ export class JsonRpcDecoder implements ByteSink {
       bodyEncoding: RpcBodyEncoding.None,
       meta: {
         ...defaultPayloadMeta(),
-        sourceProtocol: SourceProtocol.JsonRpc,
+        sourceProtocol: this.sourceProtocol,
         requestId,
         jsonSid: parseSid(object)
       },
       body: jsonToBytes(d)
+    }));
+  }
+
+  private decodeResponse(object: JsonObject, d: JsonObject, op: RpcOp.RequestResponse | RpcOp.RequestBatchResponse): void {
+    const requestId = parseRequestId(d);
+    const result = d.result;
+    this.sink.onRpc(rpcPayload({
+      encoding: RpcEncoding.Json,
+      op,
+      requestId,
+      statusCode: parseStatusCode(d),
+      bodyEncoding: RpcBodyEncoding.None,
+      meta: {
+        ...defaultPayloadMeta(),
+        sourceProtocol: this.sourceProtocol,
+        requestId,
+        jsonSid: parseSid(object)
+      },
+      body: result === undefined ? new Uint8Array() : jsonToBytes(result)
     }));
   }
 }
@@ -516,6 +586,10 @@ export class JsonRpcEncoder {
         return toBytes(JSON.stringify({ sid: "", op: RpcOp.Hello, d: { axtpVersion: "1.0.0", rpcVersion: 1 } }));
       case RpcOp.Identified:
         return toBytes(JSON.stringify({ sid: payload.meta.jsonSid, op: RpcOp.Identified, d: { negotiatedRpcVersion: 1 } }));
+      case RpcOp.Identify:
+        return toBytes(JSON.stringify(this.serializeIdentify(payload)));
+      case RpcOp.Request:
+        return toBytes(JSON.stringify(this.serializeRequest(payload)));
       case RpcOp.Event:
         return toBytes(JSON.stringify(this.serializeEvent(payload)));
       case RpcOp.RequestBatchResponse:
@@ -541,6 +615,39 @@ export class JsonRpcEncoder {
       bodyEncoding: RpcBodyEncoding.None,
       meta: { ...defaultPayloadMeta(), sourceProtocol: SourceProtocol.JsonRpc, jsonSid: sid }
     });
+  }
+
+  static makeIdentify(randomSeed?: number, eventMasks = ""): RpcPayload {
+    const d: JsonObject = { rpcVersion: 1 };
+    if (randomSeed !== undefined) d.randomSeed = randomSeed;
+    if (eventMasks.length > 0) d.eventMasks = eventMasks;
+    return rpcPayload({
+      encoding: RpcEncoding.Json,
+      op: RpcOp.Identify,
+      bodyEncoding: RpcBodyEncoding.None,
+      meta: { ...defaultPayloadMeta(), sourceProtocol: SourceProtocol.JsonRpc, randomSeed, jsonEventMasks: eventMasks },
+      body: toBytes(JSON.stringify(d))
+    });
+  }
+
+  private serializeIdentify(payload: RpcPayload): JsonObject {
+    const d = bytesToJson(payload.body);
+    return {
+      sid: "",
+      op: RpcOp.Identify,
+      d: isJsonObject(d) ? d : { rpcVersion: 1 }
+    };
+  }
+
+  private serializeRequest(payload: RpcPayload): JsonObject {
+    const methodName = payload.meta.jsonMethodOrEventName || RegistryLookup.methodById(payload.methodOrEventId)?.name || String(payload.methodOrEventId);
+    const d: JsonObject = {
+      id: payload.requestId,
+      method: methodName
+    };
+    const params = bytesToJson(payload.body);
+    if (params !== undefined) d.params = params;
+    return { sid: payload.meta.jsonSid, op: RpcOp.Request, d };
   }
 
   private serializeResponse(payload: RpcPayload): JsonObject {
@@ -671,6 +778,10 @@ function asObject(value: JsonValue | undefined): JsonObject {
   return value;
 }
 
+function isJsonObject(value: JsonValue | undefined): value is JsonObject {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function parseOp(object: JsonObject): RpcOp {
   if (typeof object.op !== "number" || !Number.isInteger(object.op) || object.op < 0 || object.op > 0xff) {
     throw new Error("invalid op");
@@ -687,6 +798,14 @@ function parseRequestId(d: JsonObject): number {
     throw new Error("invalid id");
   }
   return d.id;
+}
+
+function parseStatusCode(d: JsonObject): ErrorCode {
+  const status = asObject(d.status);
+  if (typeof status.code !== "number" || !Number.isInteger(status.code)) {
+    throw new Error("invalid status code");
+  }
+  return status.code as ErrorCode;
 }
 
 function jsonToBytes(value: JsonValue | undefined): Bytes {

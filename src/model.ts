@@ -27,8 +27,10 @@ export interface PayloadMeta {
   sourceProtocol: SourceProtocol;
   sessionId: number;
   requestId: number;
+  randomSeed?: number;
   jsonSid: string;
   jsonMethodOrEventName: string;
+  jsonEventMasks?: string;
 }
 
 export interface ControlPayload {

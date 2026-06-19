@@ -1,5 +1,6 @@
 import { BasicBroker, BrokerTaskType } from "./broker.js";
-import type { RpcPayload } from "./model.js";
+import { ControlOpcode } from "./generated/axtp_ids_generated.js";
+import type { ControlPayload, RpcPayload } from "./model.js";
 import { rpcPayload } from "./model.js";
 import { AxtpCore, CoreEventType } from "./core.js";
 import type { Bytes } from "./bytes.js";
@@ -48,6 +49,24 @@ export class AxtpEndpoint<TBroker extends BasicBroker = BasicBroker> {
 
   tryTakeRpcResponse(requestId: number): RpcPayload | undefined {
     return this.coreValue.tryTakeRpcResponse(requestId);
+  }
+
+  tryTakeSessionRpc(op: RpcPayload["op"]): RpcPayload | undefined {
+    return this.coreValue.tryTakeSessionRpc(op);
+  }
+
+  tryTakeControlNotice(opcode: ControlOpcode): ControlPayload | undefined {
+    return this.coreValue.tryTakeControlNotice(opcode);
+  }
+
+  async sendControlOpen(controlId: number): Promise<void> {
+    this.coreValue.sendControlOpen(controlId);
+    await this.flushOutbound();
+  }
+
+  async sendRpcSession(payload: RpcPayload): Promise<void> {
+    this.coreValue.sendRpcSession(payload);
+    await this.flushOutbound();
   }
 
   async flushOutbound(): Promise<void> {
