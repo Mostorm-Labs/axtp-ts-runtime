@@ -16,16 +16,40 @@ This repository is not the AXTP Spec source of truth. Protocol documents,
 registries, schemas, domain specs, flow specs, and conformance cases are
 maintained in the AXTP main specification repository.
 
-The runtime layout is intentionally kept as copied:
+## Architecture
+
+The repository is layered in the same direction as the C++ runtime: protocol
+facts come from the locked AXTP spec, low-level byte and wire helpers sit below
+the runtime core, and SDK/transports stay above the core contracts.
 
 ```text
-src/
-package.json
-pnpm-lock.yaml
-pnpm-workspace.yaml
-tsconfig.json
-vitest.config.ts
+devtools/generators -> src/core/protocol/generated
+src/core/support/io -> src/core/protocol -> src/core/runtime -> src/sdk
+src/core/runtime/transport -> src/transports
+src/core/runtime -> src/json_rpc
 ```
+
+## Repository Layout
+
+| Path | Purpose |
+|---|---|
+| `src/index.ts` | Stable package entry that re-exports the public runtime, protocol, SDK, and generated types. |
+| `src/node.ts` | Node-specific package entry for optional Node transports. |
+| `src/core/support/io/` | Byte helpers, readers/writers, sinks, and CRC utilities. |
+| `src/core/protocol/model/` | Protocol value types, payload helpers, frame/message models, and constants. |
+| `src/core/protocol/generated/` | Generated AXTP IDs, registries, and generated version constants. Do not edit by hand. |
+| `src/core/protocol/wire/` | Framed binary and WebSocket JSON-RPC payload codecs plus inbound/outbound processors. |
+| `src/core/runtime/core/` | `AxtpCore`, core events, session state, and request/response coordination. |
+| `src/core/runtime/broker/` | `BasicBroker`, business routing, task/result queues, and handler contracts. |
+| `src/core/runtime/endpoint/` | Endpoint glue between core, broker, and transports. |
+| `src/core/runtime/transport/` | Transport profile and `ITransport` contracts plus mock transport. |
+| `src/sdk/` | Higher-level client/server SDK APIs. |
+| `src/json_rpc/` | Optional WebSocket JSON-RPC adapter layer above the runtime. |
+| `src/transports/` | Optional concrete transports, currently Node TCP. |
+| `tests/` | Unit and integration tests for the runtime layers. |
+| `devtools/generators/` | TypeScript generator that consumes the AXTP spec and emits runtime artifacts. |
+| `devtools/scripts/` | Spec lock, generation, versioning, conformance, and release helper scripts. |
+| `devtools/conformance/` | Runtime conformance profile and Vitest conformance runner. |
 
 ## AXTP Spec Compatibility
 
@@ -70,7 +94,7 @@ pnpm test
 ## Spec Lock Checks
 
 ```bash
-scripts/check-axtp-spec-lock.sh
+devtools/scripts/check-axtp-spec-lock.sh
 ```
 
 ## AXTP Spec Upgrade
@@ -80,8 +104,8 @@ This runtime follows AXTP Spec via `AXTP_SPEC.lock.yaml`.
 To upgrade:
 
 ```bash
-scripts/upgrade-axtp-spec.sh spec/v0.3.0
-scripts/check-axtp-spec-lock.sh
+devtools/scripts/upgrade-axtp-spec.sh spec/v0.3.0
+devtools/scripts/check-axtp-spec-lock.sh
 ```
 
 After upgrading, run generator checks, TypeScript build/tests, and the
@@ -93,7 +117,7 @@ Conformance cases are owned by the AXTP spec repository. Point the runner at the
 locked spec checkout and run:
 
 ```bash
-AXTP_SPEC_PATH=/path/to/axtp scripts/run-conformance.sh
+AXTP_SPEC_PATH=/path/to/axtp devtools/scripts/run-conformance.sh
 ```
 
 The runner writes `conformance-results/result.json`. Required failures exit
@@ -124,22 +148,22 @@ Repository settings must allow GitHub Actions to create PRs, enable auto-merge, 
 
 ## Local Generator
 
-This repository maintains its own generator under `generators/`.
+This repository maintains its own generator under `devtools/generators/`.
 
 ```bash
 export AXTP_SPEC_PATH=/path/to/axtp
-pnpm --dir generators install
-pnpm --dir generators build
-pnpm --dir generators test
-pnpm --dir generators generate:runtime
+pnpm --dir devtools/generators install
+pnpm --dir devtools/generators build
+pnpm --dir devtools/generators test
+pnpm --dir devtools/generators generate:runtime
 ```
 
-Generated TypeScript artifacts are written to `src/generated/`.
+Generated TypeScript artifacts are written to `src/core/protocol/generated/`.
 
 To move to a later released spec tag:
 
 ```bash
-scripts/upgrade-axtp-spec.sh spec/v0.1.0
+devtools/scripts/upgrade-axtp-spec.sh spec/v0.1.0
 ```
 
 ## Versioning
@@ -151,7 +175,7 @@ separate:
 - Runtime releases use `vX.Y.Z`.
 - Generated artifact metadata is recorded in `generated/axtp_generated_manifest.json`.
 
-Use `scripts/check-generated-version.sh` to verify that the lock file,
+Use `devtools/scripts/check-generated-version.sh` to verify that the lock file,
 generated manifest, runtime version, and generated constants are aligned.
 
 See `docs/generator/GENERATED_VERSIONING.md` for generator versioning details.
