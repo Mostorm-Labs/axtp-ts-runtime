@@ -146,6 +146,10 @@ function resolveSpecRoot() {
   return path.join(root, "third_party/axtp-spec");
 }
 
+function firstExistingDirectory(...directories) {
+  return directories.find((dir) => existsSync(dir)) ?? directories[0];
+}
+
 function generatedAt() {
   return process.env.AXTP_GENERATED_AT || new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
@@ -278,6 +282,7 @@ async function writeVersionMetadata(runtimeName) {
   const lock = await readSpecLock();
   const generator = await readGeneratorMetadata();
   const specRoot = resolveSpecRoot();
+  const contractRoot = firstExistingDirectory(path.join(specRoot, "contract"), specRoot);
   const manifest = {
     generatedAt: generatedAt(),
     generator,
@@ -293,8 +298,14 @@ async function writeVersionMetadata(runtimeName) {
       commit: gitValue(["rev-parse", "HEAD"])
     },
     inputs: {
-      registryHash: await hashDirectory(path.join(specRoot, "registry")),
-      schemasHash: await hashDirectory(path.join(specRoot, "schemas")),
+      registryHash: await hashDirectory(firstExistingDirectory(
+        path.join(specRoot, "registry"),
+        path.join(contractRoot, "registry")
+      )),
+      schemasHash: await hashDirectory(firstExistingDirectory(
+        path.join(specRoot, "schemas"),
+        path.join(contractRoot, "schemas")
+      )),
       conformanceHash: (await hashDirectory(path.join(specRoot, "docs", "conformance"))) ?? await hashDirectory(path.join(specRoot, "conformance"))
     }
   };
