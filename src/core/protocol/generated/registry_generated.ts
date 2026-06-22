@@ -71,6 +71,24 @@ export const kMethodRegistry = [
   { id: 0x0E12, name: "network.getWifiCapabilities", domain: "network", requestSchema: "NetworkGetWifiCapabilitiesParams", responseSchema: "NetworkWifiCapabilities" },
   { id: 0x0E13, name: "network.getApCapabilities", domain: "network", requestSchema: "NetworkGetApCapabilitiesParams", responseSchema: "NetworkApCapabilities" },
   { id: 0x0E14, name: "network.getApClients", domain: "network", requestSchema: "NetworkGetApConfigParams", responseSchema: "NetworkApClients" },
+  { id: 0x1601, name: "cast.getSession", domain: "cast", requestSchema: "CastGetSessionParams", responseSchema: "CastSessionState" },
+  { id: 0x1602, name: "cast.stopSession", domain: "cast", requestSchema: "CastStopSessionParams", responseSchema: "CastStopSessionResult" },
+  { id: 0x1603, name: "cast.getAirPlayName", domain: "cast", requestSchema: "Empty", responseSchema: "CastAirPlayNameState" },
+  { id: 0x1604, name: "cast.setAirPlayName", domain: "cast", requestSchema: "CastSetAirPlayNameParams", responseSchema: "CastAirPlayNameState" },
+  { id: 0x1605, name: "cast.getAudio", domain: "cast", requestSchema: "CastGetAudioParams", responseSchema: "CastAudioState" },
+  { id: 0x1606, name: "cast.setAudio", domain: "cast", requestSchema: "CastSetAudioParams", responseSchema: "CastAudioState" },
+  { id: 0x1607, name: "cast.setMuted", domain: "cast", requestSchema: "CastSetMutedParams", responseSchema: "CastAudioState" },
+  { id: 0x1608, name: "cast.getPinCodeConfig", domain: "cast", requestSchema: "CastGetPinCodeConfigParams", responseSchema: "CastPinCodeConfig" },
+  { id: 0x1609, name: "cast.setPinCodeConfig", domain: "cast", requestSchema: "CastSetPinCodeConfigParams", responseSchema: "CastPinCodeConfig" },
+  { id: 0x160A, name: "cast.setPinCode", domain: "cast", requestSchema: "CastSetPinCodeParams", responseSchema: "CastPinCodeConfig" },
+  { id: 0x160B, name: "cast.getWindowState", domain: "cast", requestSchema: "Empty", responseSchema: "CastWindowState" },
+  { id: 0x160C, name: "cast.setWindowState", domain: "cast", requestSchema: "CastSetWindowStateParams", responseSchema: "CastWindowState" },
+  { id: 0x160D, name: "cast.getBackendStatus", domain: "cast", requestSchema: "CastGetBackendStatusParams", responseSchema: "CastBackendStatus" },
+  { id: 0x160E, name: "cast.restartBackend", domain: "cast", requestSchema: "CastRestartBackendParams", responseSchema: "CastRestartBackendResult" },
+  { id: 0x160F, name: "cast.getFlowControlState", domain: "cast", requestSchema: "CastGetFlowControlStateParams", responseSchema: "CastFlowControlState" },
+  { id: 0x1610, name: "cast.setRenderFps", domain: "cast", requestSchema: "CastSetRenderFpsParams", responseSchema: "CastFlowControlState" },
+  { id: 0x1611, name: "cast.setFlowPolicy", domain: "cast", requestSchema: "CastSetFlowPolicyParams", responseSchema: "CastFlowControlState" },
+  { id: 0x1612, name: "cast.getStatus", domain: "cast", requestSchema: "CastGetStatusParams", responseSchema: "CastStatus" },
 ] as const satisfies readonly MethodDescriptor[];
 
 export const kEventRegistry = [
@@ -91,6 +109,19 @@ export const kEventRegistry = [
   { id: 0x0E06, name: "network.apConfigChanged", domain: "network", eventSchema: "NetworkApConfigChangedEvent" },
   { id: 0x0E07, name: "network.apStateChanged", domain: "network", eventSchema: "NetworkApStateChangedEvent" },
   { id: 0x0E08, name: "network.apClientChanged", domain: "network", eventSchema: "NetworkApClientChangedEvent" },
+  { id: 0x1601, name: "cast.sessionIncoming", domain: "cast", eventSchema: "CastSessionIncomingEvent" },
+  { id: 0x1602, name: "cast.sessionStateChanged", domain: "cast", eventSchema: "CastSessionStateChangedEvent" },
+  { id: 0x1603, name: "cast.sessionStarted", domain: "cast", eventSchema: "CastSessionStartedEvent" },
+  { id: 0x1604, name: "cast.sessionStopped", domain: "cast", eventSchema: "CastSessionStoppedEvent" },
+  { id: 0x1605, name: "cast.sessionFailed", domain: "cast", eventSchema: "CastSessionFailedEvent" },
+  { id: 0x1606, name: "cast.audioChanged", domain: "cast", eventSchema: "CastAudioChangedEvent" },
+  { id: 0x1607, name: "cast.pinCodeChanged", domain: "cast", eventSchema: "CastPinCodeChangedEvent" },
+  { id: 0x1608, name: "cast.pinCodeRequired", domain: "cast", eventSchema: "CastPinCodeRequiredEvent" },
+  { id: 0x1609, name: "cast.pinCodeAuthFailed", domain: "cast", eventSchema: "CastPinCodeAuthFailedEvent" },
+  { id: 0x160A, name: "cast.windowChanged", domain: "cast", eventSchema: "CastWindowChangedEvent" },
+  { id: 0x160B, name: "cast.backendChanged", domain: "cast", eventSchema: "CastBackendChangedEvent" },
+  { id: 0x160C, name: "cast.flowControlChanged", domain: "cast", eventSchema: "CastFlowControlChangedEvent" },
+  { id: 0x160D, name: "cast.statusChanged", domain: "cast", eventSchema: "CastStatusChangedEvent" },
 ] as const satisfies readonly EventDescriptor[];
 
 export const kErrorRegistry = [
@@ -264,6 +295,13 @@ export const kCapabilityRegistry = [
   { id: 0x0E02, name: "network.ip", domain: "network", type: "object", schema: "NetworkIpCapability" },
   { id: 0x0E03, name: "network.wifi", domain: "network", type: "object", schema: "NetworkWifiCapabilities" },
   { id: 0x0E04, name: "network.ap", domain: "network", type: "object", schema: "NetworkApCapabilities" },
+  { id: 0x1601, name: "cast.session", domain: "cast", type: "object", schema: "CastSessionCapability" },
+  { id: 0x1602, name: "cast.audio", domain: "cast", type: "object", schema: "CastAudioCapability" },
+  { id: 0x1603, name: "cast.pinCode", domain: "cast", type: "object", schema: "CastPinCodeCapability" },
+  { id: 0x1604, name: "cast.window", domain: "cast", type: "object", schema: "CastWindowCapability" },
+  { id: 0x1605, name: "cast.backend", domain: "cast", type: "object", schema: "CastBackendCapability" },
+  { id: 0x1606, name: "cast.flowControl", domain: "cast", type: "object", schema: "CastFlowControlCapability" },
+  { id: 0x1607, name: "cast.status", domain: "cast", type: "object", schema: "CastStatusCapability" },
 ] as const satisfies readonly CapabilityDescriptor[];
 
 export class RegistryLookup {
