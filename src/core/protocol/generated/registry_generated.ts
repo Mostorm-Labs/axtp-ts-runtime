@@ -34,6 +34,9 @@ export interface CapabilityDescriptor {
 
 export const kMethodRegistry = [
   { id: 0x0101, name: "device.getInfo", domain: "device", requestSchema: "GetDeviceInfoParams", responseSchema: "DeviceInfo" },
+  { id: 0x0102, name: "device.getPairingCode", domain: "device", requestSchema: "DeviceGetPairingCodeParams", responseSchema: "DevicePairingCodeInfo" },
+  { id: 0x0103, name: "device.getEnrollmentState", domain: "device", requestSchema: "DeviceGetEnrollmentStateParams", responseSchema: "DeviceEnrollmentInfo" },
+  { id: 0x0104, name: "device.setEnrollmentState", domain: "device", requestSchema: "DeviceSetEnrollmentStateParams", responseSchema: "DeviceSetEnrollmentStateResult" },
   { id: 0x0401, name: "firmware.getUpdateCapabilities", domain: "firmware", requestSchema: "Empty", responseSchema: "FirmwareUpdateCapabilities" },
   { id: 0x0402, name: "firmware.beginUpdate", domain: "firmware", requestSchema: "BeginUpdateParams", responseSchema: "BeginUpdateResult" },
   { id: 0x0408, name: "firmware.getUpdateState", domain: "firmware", requestSchema: "GetUpdateStateParams", responseSchema: "FirmwareUpdateState" },
@@ -53,6 +56,11 @@ export const kMethodRegistry = [
   { id: 0x0911, name: "audio.closeStream", domain: "audio", requestSchema: "AudioCloseStreamParams", responseSchema: "AudioCloseStreamResult" },
   { id: 0x0912, name: "audio.getStreamState", domain: "audio", requestSchema: "AudioGetStreamStateParams", responseSchema: "AudioStreamState" },
   { id: 0x0913, name: "audio.getStreamSourceState", domain: "audio", requestSchema: "AudioGetStreamSourceStateParams", responseSchema: "AudioStreamSourceState" },
+  { id: 0x0D01, name: "signage.getPlaylistCapabilities", domain: "signage", requestSchema: "SignageGetPlaylistCapabilitiesParams", responseSchema: "SignagePlaylistCapabilitiesResult" },
+  { id: 0x0D02, name: "signage.getPlaylistConfig", domain: "signage", requestSchema: "SignageGetPlaylistConfigParams", responseSchema: "SignagePlaylistConfigResult" },
+  { id: 0x0D03, name: "signage.setPlaylistConfig", domain: "signage", requestSchema: "SignageSetPlaylistConfigParams", responseSchema: "SignageSetPlaylistConfigResult" },
+  { id: 0x0D04, name: "signage.resetPlaylistConfig", domain: "signage", requestSchema: "SignageResetPlaylistConfigParams", responseSchema: "SignagePlaylistConfigResult" },
+  { id: 0x0D05, name: "signage.getPlaylistItemUrl", domain: "signage", requestSchema: "SignageGetPlaylistItemUrlParams", responseSchema: "SignageGetPlaylistItemUrlResult" },
   { id: 0x0E02, name: "network.getIpConfig", domain: "network", requestSchema: "NetworkGetIpConfigParams", responseSchema: "NetworkIpConfig" },
   { id: 0x0E03, name: "network.setIpConfig", domain: "network", requestSchema: "NetworkSetIpConfigParams", responseSchema: "NetworkSetIpConfigResult" },
   { id: 0x0E04, name: "network.getWifiConfig", domain: "network", requestSchema: "NetworkGetWifiConfigParams", responseSchema: "NetworkWifiConfig" },
@@ -89,9 +97,16 @@ export const kMethodRegistry = [
   { id: 0x1610, name: "cast.setRenderFps", domain: "cast", requestSchema: "CastSetRenderFpsParams", responseSchema: "CastFlowControlState" },
   { id: 0x1611, name: "cast.setFlowPolicy", domain: "cast", requestSchema: "CastSetFlowPolicyParams", responseSchema: "CastFlowControlState" },
   { id: 0x1612, name: "cast.getStatus", domain: "cast", requestSchema: "CastGetStatusParams", responseSchema: "CastStatus" },
+  { id: 0x1701, name: "software.getConfig", domain: "software", requestSchema: "SoftwareGetConfigParams", responseSchema: "SoftwareConfig" },
+  { id: 0x1702, name: "software.setConfig", domain: "software", requestSchema: "SoftwareSetConfigParams", responseSchema: "SoftwareSetConfigResult" },
+  { id: 0x1703, name: "software.resetConfig", domain: "software", requestSchema: "SoftwareResetConfigParams", responseSchema: "SoftwareConfig" },
+  { id: 0x1704, name: "software.getUpdatePolicy", domain: "software", requestSchema: "SoftwareGetUpdatePolicyParams", responseSchema: "SoftwareUpdatePolicy" },
+  { id: 0x1705, name: "software.setUpdatePolicy", domain: "software", requestSchema: "SoftwareSetUpdatePolicyParams", responseSchema: "SoftwareSetUpdatePolicyResult" },
+  { id: 0x1706, name: "software.resetUpdatePolicy", domain: "software", requestSchema: "SoftwareResetUpdatePolicyParams", responseSchema: "SoftwareUpdatePolicy" },
 ] as const satisfies readonly MethodDescriptor[];
 
 export const kEventRegistry = [
+  { id: 0x0102, name: "device.enrollmentStateChanged", domain: "device", eventSchema: "DeviceEnrollmentStateChangedEvent" },
   { id: 0x0402, name: "firmware.updateProgressReported", domain: "firmware", eventSchema: "FirmwareUpdateProgressEvent" },
   { id: 0x0403, name: "firmware.updateStateChanged", domain: "firmware", eventSchema: "FirmwareUpdateStateChangedEvent" },
   { id: 0x0806, name: "video.streamStateChanged", domain: "video", eventSchema: "VideoStreamStateChangedEvent" },
@@ -101,6 +116,7 @@ export const kEventRegistry = [
   { id: 0x0902, name: "audio.streamStateChanged", domain: "audio", eventSchema: "AudioStreamStateChangedEvent" },
   { id: 0x0903, name: "audio.streamSourceStateChanged", domain: "audio", eventSchema: "AudioStreamSourceStateChangedEvent" },
   { id: 0x0904, name: "audio.streamStatsReported", domain: "audio", eventSchema: "AudioStreamStatsReportedEvent" },
+  { id: 0x0D01, name: "signage.playlistConfigChanged", domain: "signage", eventSchema: "SignagePlaylistConfigChangedEvent" },
   { id: 0x0E01, name: "network.interfaceStateChanged", domain: "network", eventSchema: "NetworkInterfaceStateChangedEvent" },
   { id: 0x0E02, name: "network.ipConfigChanged", domain: "network", eventSchema: "NetworkIpConfigChangedEvent" },
   { id: 0x0E03, name: "network.wifiConfigChanged", domain: "network", eventSchema: "NetworkWifiConfigChangedEvent" },
@@ -122,6 +138,8 @@ export const kEventRegistry = [
   { id: 0x160B, name: "cast.backendChanged", domain: "cast", eventSchema: "CastBackendChangedEvent" },
   { id: 0x160C, name: "cast.flowControlChanged", domain: "cast", eventSchema: "CastFlowControlChangedEvent" },
   { id: 0x160D, name: "cast.statusChanged", domain: "cast", eventSchema: "CastStatusChangedEvent" },
+  { id: 0x1701, name: "software.configChanged", domain: "software", eventSchema: "SoftwareConfigChangedEvent" },
+  { id: 0x1702, name: "software.updatePolicyChanged", domain: "software", eventSchema: "SoftwareUpdatePolicyChangedEvent" },
 ] as const satisfies readonly EventDescriptor[];
 
 export const kErrorRegistry = [
@@ -193,6 +211,8 @@ export const kErrorRegistry = [
   { id: 0x0107, name: "DEVICE_MODE_CONFLICT", domain: "device", retryable: false },
   { id: 0x0108, name: "DEVICE_RESOURCE_BUSY", domain: "device", retryable: true },
   { id: 0x0109, name: "DEVICE_HARDWARE_FAILURE", domain: "device", retryable: false },
+  { id: 0x010A, name: "ENROLLMENT_CODE_EXPIRED", domain: "device", retryable: true },
+  { id: 0x010B, name: "ENROLLMENT_CODE_ALREADY_USED", domain: "device", retryable: false },
   { id: 0x0201, name: "CAPABILITY_NOT_FOUND", domain: "capability", retryable: false },
   { id: 0x0202, name: "CAPABILITY_DOMAIN_NOT_FOUND", domain: "capability", retryable: false },
   { id: 0x0203, name: "CAPABILITY_METHOD_UNSUPPORTED", domain: "capability", retryable: false },
@@ -287,10 +307,12 @@ export const kCapabilityRegistry = [
   { id: 0x0003, name: "protocol.payload.stream", domain: "protocol", type: "bool", schema: "" },
   { id: 0x0009, name: "protocol.reservedRequestIdWidth", domain: "protocol", type: "reserved", schema: "" },
   { id: 0x0101, name: "device.info", domain: "device", type: "object", schema: "DeviceInfoCapability" },
+  { id: 0x0102, name: "device.enrollment", domain: "device", type: "object", schema: "DeviceEnrollmentCapability" },
   { id: 0x0401, name: "firmware.update", domain: "firmware", type: "object", schema: "FirmwareUpdateCapabilities" },
   { id: 0x0801, name: "video.stream", domain: "video", type: "object", schema: "VideoStreamCapabilities" },
   { id: 0x0901, name: "audio.algorithm", domain: "audio", type: "object", schema: "AudioAlgorithmCapability" },
   { id: 0x0902, name: "audio.stream", domain: "audio", type: "object", schema: "AudioStreamCapabilities" },
+  { id: 0x0D01, name: "signage.playlist", domain: "signage", type: "object", schema: "SignagePlaylistCapability" },
   { id: 0x0E01, name: "network.interface", domain: "network", type: "object", schema: "NetworkInterfaceCapability" },
   { id: 0x0E02, name: "network.ip", domain: "network", type: "object", schema: "NetworkIpCapability" },
   { id: 0x0E03, name: "network.wifi", domain: "network", type: "object", schema: "NetworkWifiCapabilities" },
@@ -302,6 +324,8 @@ export const kCapabilityRegistry = [
   { id: 0x1605, name: "cast.backend", domain: "cast", type: "object", schema: "CastBackendCapability" },
   { id: 0x1606, name: "cast.flowControl", domain: "cast", type: "object", schema: "CastFlowControlCapability" },
   { id: 0x1607, name: "cast.status", domain: "cast", type: "object", schema: "CastStatusCapability" },
+  { id: 0x1701, name: "software.config", domain: "software", type: "object", schema: "SoftwareConfigCapability" },
+  { id: 0x1702, name: "software.updatePolicy", domain: "software", type: "object", schema: "SoftwareUpdatePolicyCapability" },
 ] as const satisfies readonly CapabilityDescriptor[];
 
 export class RegistryLookup {
