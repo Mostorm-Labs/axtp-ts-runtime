@@ -44,12 +44,15 @@ export interface RpcResponseData {
   encoding: RpcEncoding;
   body: Bytes;
   overrideEncoding: boolean;
+  statusCode?: ErrorCode;
+  overrideStatus?: boolean;
 }
 
 export type RawRpcHandler = (context: RpcContext, request: RpcRequestView) => RpcResponseData | Promise<RpcResponseData>;
 export type LegacyRawMethodHandler = (request: RpcPayload) => Bytes | Promise<Bytes>;
 export type JsonRpcHandler = (context: RpcContext, paramsJson: string) => string | Promise<string>;
 export type TlvRpcHandler = (context: RpcContext, body: Bytes) => Bytes | Promise<Bytes>;
+export type StreamHandler = (context: RpcContext, stream: StreamPayload) => BrokerResult | undefined | void | Promise<BrokerResult | undefined | void>;
 
 export interface BrokerTask {
   type: BrokerTaskType;
@@ -175,6 +178,9 @@ export class BusinessRouter {
         response.encoding = data.encoding;
         response.bodyEncoding = bodyEncodingForRpcEncoding(data.encoding);
       }
+      if (data.overrideStatus && data.statusCode !== undefined) {
+        response.statusCode = data.statusCode;
+      }
       response.body = data.body;
     } catch {
       response.statusCode = ErrorCode.RpcExecutionFailed;
@@ -187,6 +193,7 @@ export class BasicBroker {
   private readonly tasks: BrokerTask[] = [];
   private readonly results: BrokerResult[] = [];
   private readonly router = new BusinessRouter();
+  private streamHandler: StreamHandler | undefined;
 
   registry(): MethodRegistry {
     return this.router.registry();
@@ -216,7 +223,12 @@ export class BasicBroker {
         continue;
       }
       if (task.type === BrokerTaskType.StreamData && task.stream !== undefined) {
-        this.results.push(BrokerResult.streamData(task.stream));
+        if (this.streamHandler !== undefined) {
+          const result = await this.streamHandler(this.contextFor(task), task.stream);
+          if (result !== undefined) this.results.push(result);
+        } else {
+          this.results.push(BrokerResult.streamData(task.stream));
+        }
         continue;
       }
       if (task.type === BrokerTaskType.StreamClose && task.stream !== undefined) {
@@ -249,11 +261,26 @@ export class BasicBroker {
     this.router.registerTlvMethod(method as never, handler);
   }
 
+  registerStreamHandler(handler: StreamHandler): void {
+    this.streamHandler = handler;
+  }
+
   queuedTaskCount(): number {
     return this.tasks.length;
   }
 
   queuedResultCount(): number {
     return this.results.length;
+  }
+
+  private contextFor(task: BrokerTask): RpcContext {
+    return {
+      sessionId: task.stream?.meta.sessionId ?? task.rpc.meta.sessionId,
+      requestId: task.rpc.requestId,
+      methodId: task.rpc.methodOrEventId,
+      methodName: this.router.registry().findMethodName(task.rpc.methodOrEventId) ?? "",
+      encoding: task.rpc.encoding,
+      sourceProtocol: task.rpc.meta.sourceProtocol
+    };
   }
 }

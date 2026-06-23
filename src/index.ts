@@ -7,6 +7,8 @@ export * from "./core/runtime/transport/transport.js";
 export * from "./core/runtime/broker/broker.js";
 export * from "./core/runtime/core/core.js";
 export * from "./core/runtime/endpoint/endpoint.js";
+export * from "./stream/stream.js";
+export * from "./profiles/media/mediaProfile.js";
 export * from "./json_rpc/jsonRpcAdapter.js";
 export * from "./sdk/sdk.js";
 export * from "./core/protocol/generated/axtp_ids_generated.js";
