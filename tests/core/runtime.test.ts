@@ -17,7 +17,6 @@ import {
   MethodId,
   MockTransport,
   OutboundProcessor,
-  PayloadType,
   RpcBodyEncoding,
   RpcEncoding,
   RpcOp,
@@ -37,7 +36,7 @@ import {
   type RpcPayload,
   type StreamPayload
 } from "../../src/index.js";
-import { NodeTcpClientTransport, NodeTcpServerTransport } from "../../src/node.js";
+import { NodeTcpClientTransport, NodeTcpServerTransport, NodeWsClientTransport, NodeWsServerTransport } from "../../src/node.js";
 
 class CapturePayloadSink implements PayloadSink {
   readonly controls: ControlPayload[] = [];
@@ -602,6 +601,55 @@ describe("node tcp transport", () => {
         body: toBytes("{}")
       }));
       expect(response.statusCode).toBe(ErrorCode.ControlOpenRequired);
+    } finally {
+      await client.close();
+      await stopServer();
+    }
+  });
+});
+
+describe("node ws transport", () => {
+  async function startWsServer(
+    endpoint: AxtpEndpoint,
+    serverTransport: NodeWsServerTransport,
+    adapter: WebSocketJsonRpcAdapter
+  ): Promise<() => Promise<void>> {
+    let active = true;
+    const loop = (async () => {
+      while (active) {
+        await adapter.poll(serverTransport);
+        await endpoint.poll();
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    })();
+    return async () => {
+      active = false;
+      await loop;
+      await serverTransport.close();
+    };
+  }
+
+  it("performs WebSocket JSON-RPC app-ready and RPC over loopback WS", async () => {
+    const broker = new BasicBroker();
+    const endpoint = new AxtpEndpoint(broker);
+    const serverTransport = new NodeWsServerTransport({ host: "127.0.0.1", port: 0 });
+    endpoint.attachTransport(serverTransport);
+    const adapter = new WebSocketJsonRpcAdapter(endpoint, serverTransport);
+    serverTransport.bind(adapter);
+    await serverTransport.open();
+    broker.registerJsonMethod("audio.getAlgorithmConfig", () => '{"ok":true}');
+    const stopServer = await startWsServer(endpoint, serverTransport, adapter);
+
+    const client = new AxtpClient({ timeoutMs: 500, wireMode: AxtpWireMode.WebSocketJsonRpc });
+    try {
+      await client.attachTransport(new NodeWsClientTransport({
+        url: `ws://127.0.0.1:${serverTransport.localPort()}/`
+      }));
+      const ready = await client.ensureAppReady({ timeoutMs: 500, randomSeed: 0x12345678 });
+      expect(ready.ok).toBe(true);
+      expect(client.isAppReady()).toBe(true);
+      expect(client.sessionSid()).not.toBe("");
+      await expect(client.callJson("audio.getAlgorithmConfig", "{}")).resolves.toBe('{"ok":true}');
     } finally {
       await client.close();
       await stopServer();
