@@ -13,4 +13,8 @@ export * from "./json_rpc/jsonRpcAdapter.js";
 export * from "./sdk/sdk.js";
 export * from "./core/protocol/generated/axtp_ids_generated.js";
 export * from "./core/protocol/generated/registry_generated.js";
+export * from "./core/protocol/generated/schemas_generated.js";
+export * from "./core/protocol/generated/method_map_generated.js";
+export * from "./core/protocol/generated/event_map_generated.js";
+export * from "./core/protocol/generated/capability_map_generated.js";
 export * from "./core/protocol/generated/axtpGeneratedVersion.js";

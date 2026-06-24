@@ -1,12 +1,14 @@
-import { BasicBroker, BrokerResult, type LegacyRawMethodHandler, type RawRpcHandler, type JsonRpcHandler, type TlvRpcHandler } from "../core/runtime/broker/broker.js";
-import { type Bytes, bytesToText, toBytes } from "../core/support/io/bytes.js";
-import { JsonRpcEncoder } from "../core/protocol/wire/codec.js";
-import { AxtpEndpoint } from "../core/runtime/endpoint/endpoint.js";
 import { ControlOpcode, ErrorCode, RpcBodyEncoding, RpcEncoding, RpcOp } from "../core/protocol/generated/axtp_ids_generated.js";
-import { MethodRegistry } from "../core/protocol/generated/registry_generated.js";
-import { SourceProtocol, rpcPayload, type RpcPayload } from "../core/protocol/model/model.js";
+import type { AxtpEventName, AxtpEventPayload } from "../core/protocol/generated/event_map_generated.js";
+import type { AxtpMethodName, AxtpRequest, AxtpResponse } from "../core/protocol/generated/method_map_generated.js";
+import { MethodRegistry, RegistryLookup } from "../core/protocol/generated/registry_generated.js";
+import { SourceProtocol, defaultPayloadMeta, rpcPayload, type RpcPayload } from "../core/protocol/model/model.js";
 import { bodyEncodingForRpcEncoding, isJsonBinaryRpcEncoding, rpcEncodingJsonBinary } from "../core/protocol/rpcEncoding.js";
+import { JsonRpcEncoder } from "../core/protocol/wire/codec.js";
+import { BasicBroker, BrokerResult, type JsonRpcHandler, type LegacyRawMethodHandler, type RawRpcHandler, type RpcContext, type TlvRpcHandler } from "../core/runtime/broker/broker.js";
+import { AxtpEndpoint } from "../core/runtime/endpoint/endpoint.js";
 import { AxtpWireMode, type ITransport } from "../core/runtime/transport/transport.js";
+import { bytesToText, toBytes, type Bytes } from "../core/support/io/bytes.js";
 
 export interface ClientOptions {
   autoOpen?: boolean;
@@ -267,6 +269,20 @@ export class AxtpClient {
     this.eventHandlers.set(eventId, handler);
   }
 
+  /**
+   * Typed event subscription: `handler` receives the JSON-decoded event
+   * payload. The raw `registerEventHandler` remains available for non-JSON
+   * or raw-byte event handling.
+   */
+  onEvent<K extends AxtpEventName>(event: K, handler: (payload: AxtpEventPayload<K>) => void): void {
+    const eventId = RegistryLookup.eventIdByName(event);
+    if (eventId === undefined) return;
+    this.registerEventHandler(eventId, (payload) => {
+      const text = bytesToText(payload.body);
+      handler((text.length === 0 ? {} : JSON.parse(text)) as AxtpEventPayload<K>);
+    });
+  }
+
   async callRaw(request: RpcPayload, options?: CallOptions): Promise<RpcPayload>;
   async callRaw(methodId: number, encoding: RpcEncoding, body: Bytes, options?: CallOptions): Promise<Bytes>;
   async callRaw(
@@ -287,16 +303,21 @@ export class AxtpClient {
     return this.callRawPayload(requestOrMethodId, encodingOrOptions as CallOptions);
   }
 
-  async callJson(methodName: string, paramsJson: string, options?: CallOptions): Promise<string>;
-  async callJson(methodId: number, paramsJson: string, options?: CallOptions): Promise<string>;
-  async callJson(method: number | string, paramsJson: string, options: CallOptions = {}): Promise<string> {
+  async callJson<K extends AxtpMethodName>(method: K, params: AxtpRequest<K>, options?: CallOptions): Promise<AxtpResponse<K>>;
+  async callJson(methodId: number, params: unknown, options?: CallOptions): Promise<unknown>;
+  async callJson(method: number | string, params: unknown, options: CallOptions = {}): Promise<unknown> {
     const methodId = typeof method === "number" ? method : this.registryValue.findMethodId(method);
     if (methodId === undefined) {
       this.lastErrorValue = { ok: false, code: ErrorCode.RpcMethodNotFound, message: "method not found" };
-      return "";
+      throw new Error(`AXTP method not found: ${String(method)}`);
     }
-    const bytes = await this.callRaw(methodId, RpcEncoding.Json, toBytes(paramsJson), { ...options, encoding: RpcEncoding.Json });
-    return bytesToText(bytes);
+    const body = params === undefined ? "" : JSON.stringify(params);
+    const bytes = await this.callRaw(methodId, RpcEncoding.Json, toBytes(body), { ...options, encoding: RpcEncoding.Json });
+    if (this.lastErrorValue.code !== ErrorCode.Success) {
+      throw new Error(`AXTP call '${String(method)}' failed: code ${this.lastErrorValue.code}`);
+    }
+    const text = bytesToText(bytes);
+    return text.length === 0 ? {} : JSON.parse(text);
   }
 
   async callTlv(methodName: string, tlvBody: Bytes, options?: CallOptions): Promise<Bytes>;
@@ -451,8 +472,20 @@ export class AxtpServer {
     this.brokerValue.registerRawMethod(methodId, handler);
   }
 
-  onJson(method: number | string, handler: JsonRpcHandler): void {
-    this.brokerValue.registerJsonMethod(method as never, handler);
+  onJson<K extends AxtpMethodName>(method: K, handler: (context: RpcContext, params: AxtpRequest<K>) => AxtpResponse<K> | Promise<AxtpResponse<K>>): void;
+  onJson(methodId: number, handler: JsonRpcHandler): void;
+  onJson(method: number | string, handler: ((context: RpcContext, params: unknown) => unknown) | JsonRpcHandler): void {
+    if (typeof method === "number") {
+      this.brokerValue.registerJsonMethod(method, handler as JsonRpcHandler);
+      return;
+    }
+    const typedHandler = handler as (context: RpcContext, params: unknown) => unknown;
+    const wrapped: JsonRpcHandler = async (context, paramsJson) => {
+      const params = paramsJson.length > 0 ? JSON.parse(paramsJson) : {};
+      const result = await typedHandler(context, params);
+      return result === undefined ? "" : JSON.stringify(result);
+    };
+    this.brokerValue.registerJsonMethod(method as never, wrapped);
   }
 
   onTlv(method: number | string, handler: TlvRpcHandler): void {
@@ -462,6 +495,23 @@ export class AxtpServer {
   async emitRaw(payload: RpcPayload): Promise<void> {
     this.endpointValue.core().handleBrokerResult(BrokerResult.event(payload));
     await this.endpointValue.flushOutbound();
+  }
+
+  /**
+   * Typed event emission: `payload` is JSON-encoded into the event body.
+   * The raw `emitRaw` remains available for non-JSON or raw-byte events.
+   */
+  async emit<K extends AxtpEventName>(event: K, payload: AxtpEventPayload<K>): Promise<void> {
+    const eventId = RegistryLookup.eventIdByName(event);
+    if (eventId === undefined) return;
+    const rpc = rpcPayload({
+      encoding: RpcEncoding.Json,
+      op: RpcOp.Event,
+      methodOrEventId: eventId,
+      body: toBytes(JSON.stringify(payload)),
+      meta: { ...defaultPayloadMeta(), sourceProtocol: SourceProtocol.JsonRpc, jsonMethodOrEventName: event }
+    });
+    await this.emitRaw(rpc);
   }
 
   endpoint(): AxtpEndpoint {

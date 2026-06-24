@@ -7,5 +7,5 @@ export const AXTP_GENERATED_VERSION = {
   specCommit: "52cdcd6dc186a1638a7942d72cf5450334b476af",
   generatorName: "@axtp/ts-runtime-generator",
   generatorVersion: "1.0.0",
-  generatedAt: "2026-06-23T13:56:05Z"
+  generatedAt: "2026-06-24T06:21:52Z"
 } as const;

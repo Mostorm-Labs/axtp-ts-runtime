@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   AxtpClient,
   AxtpCore,
@@ -29,11 +29,18 @@ import {
   rpcEncodingJsonBinary,
   rpcPayload,
   toBytes,
+  type AxtpRequest,
+  type AxtpResponse,
   type Bytes,
   type ControlPayload,
+  type DeviceCapabilitySummary,
+  type DeviceIdentity,
+  type DeviceInfo,
+  type DeviceSoftware,
   type Frame,
   type PayloadSink,
   type RpcPayload,
+  type SoftwareComponent,
   type StreamPayload
 } from "../../src/index.js";
 import { NodeTcpClientTransport, NodeTcpServerTransport, NodeWsClientTransport, NodeWsServerTransport } from "../../src/node.js";
@@ -439,7 +446,7 @@ describe("sdk dynamic calls", () => {
     });
     client.registerMethod(0x90010001, (request) => request.body);
 
-    await expect(client.callJson("audio.getAlgorithmConfig", "{}")).resolves.toBe('{"ok":true}');
+    await expect(client.callJson("audio.getAlgorithmConfig", {})).resolves.toEqual({ ok: true });
     await expect(client.callTlv("audio.setAlgorithmConfig", Uint8Array.of(1, 2))).resolves.toEqual(new Uint8Array());
     await expect(client.callRawBytes(0x90010001, Uint8Array.of(0xca, 0xfe))).resolves.toEqual(Uint8Array.of(0xca, 0xfe));
 
@@ -480,7 +487,7 @@ describe("sdk dynamic calls", () => {
       await stopPump();
     }
 
-    const call = client.callJson("audio.getAlgorithmConfig", "{}");
+    const call = client.callJson("audio.getAlgorithmConfig", {});
     await settle();
     const requestBytes = clientTransport.tryPopOutgoing();
     expect(requestBytes).toBeDefined();
@@ -492,7 +499,7 @@ describe("sdk dynamic calls", () => {
     await settle();
     bridge(serverTransport, clientTransport);
     await client.poll();
-    await expect(call).resolves.toBe('{"ok":true}');
+    await expect(call).resolves.toEqual({ ok: true });
   });
 
   it("auto-identifies before WebSocket JSON-RPC SDK requests and reports app-ready timeout", async () => {
@@ -514,7 +521,7 @@ describe("sdk dynamic calls", () => {
 
     const stopPump = startJsonRpcPump(client, clientTransport, endpoint, serverTransport, adapter);
     try {
-      await expect(client.callJson("audio.getAlgorithmConfig", "{}")).resolves.toBe('{"ok":true}');
+      await expect(client.callJson("audio.getAlgorithmConfig", {})).resolves.toEqual({ ok: true });
       expect(client.isAppReady()).toBe(true);
       expect(client.sessionSid()).not.toBe("");
     } finally {
@@ -552,7 +559,7 @@ describe("node tcp transport", () => {
   it("performs framed app-ready and RPC over loopback TCP", async () => {
     const server = new AxtpServer();
     const serverTransport = new NodeTcpServerTransport({ host: "127.0.0.1", port: 0 });
-    server.onJson("audio.getAlgorithmConfig", () => '{"ok":true}');
+    server.onJson("audio.getAlgorithmConfig", () => JSON.parse('{"ok":true}'));
     await server.attachTransport(serverTransport);
     const stopServer = await startServer(server);
 
@@ -566,7 +573,7 @@ describe("node tcp transport", () => {
       expect(ready.ok).toBe(true);
       expect(client.isAppReady()).toBe(true);
       expect(client.sessionSid()).not.toBe("");
-      await expect(client.callJson("audio.getAlgorithmConfig", "{}")).resolves.toBe('{"ok":true}');
+      await expect(client.callJson("audio.getAlgorithmConfig", {})).resolves.toEqual({ ok: true });
     } finally {
       await client.close();
       await stopServer();
@@ -576,7 +583,7 @@ describe("node tcp transport", () => {
   it("rejects framed RPC before CONTROL OPEN", async () => {
     const server = new AxtpServer();
     const serverTransport = new NodeTcpServerTransport({ host: "127.0.0.1", port: 0 });
-    server.onJson("audio.getAlgorithmConfig", () => '{"ok":true}');
+    server.onJson("audio.getAlgorithmConfig", () => JSON.parse('{"ok":true}'));
     await server.attachTransport(serverTransport);
     const stopServer = await startServer(server);
 
@@ -649,10 +656,26 @@ describe("node ws transport", () => {
       expect(ready.ok).toBe(true);
       expect(client.isAppReady()).toBe(true);
       expect(client.sessionSid()).not.toBe("");
-      await expect(client.callJson("audio.getAlgorithmConfig", "{}")).resolves.toBe('{"ok":true}');
+      await expect(client.callJson("audio.getAlgorithmConfig", {})).resolves.toEqual({ ok: true });
     } finally {
       await client.close();
       await stopServer();
     }
+  });
+});
+
+describe("typed SDK generics (type-level only)", () => {
+  it("infers response, nested objects, and array (object + scalar) fields from spec", () => {
+    // callJson resolves to the method's response schema
+    expectTypeOf<AxtpResponse<"device.getInfo">>().toEqualTypeOf<DeviceInfo>();
+    // Nested object reference
+    expectTypeOf<DeviceInfo["identity"]>().toEqualTypeOf<DeviceIdentity>();
+    // Object array: components is SoftwareComponent[]
+    expectTypeOf<DeviceSoftware["components"]>().toEqualTypeOf<SoftwareComponent[] | undefined>();
+    // Scalar arrays: string[]
+    expectTypeOf<DeviceCapabilitySummary["domains"]>().toEqualTypeOf<string[] | undefined>();
+    expectTypeOf<AxtpRequest<"audio.getAlgorithmConfig">["items"]>().toEqualTypeOf<string[] | undefined>();
+    // Optional fields stay optional
+    expectTypeOf<DeviceInfo["capability"]>().toEqualTypeOf<DeviceCapabilitySummary | undefined>();
   });
 });
