@@ -137,7 +137,6 @@ export const kEventRegistry = [
   { id: 0x160A, name: "cast.windowChanged", domain: "cast", eventSchema: "CastWindowChangedEvent" },
   { id: 0x160B, name: "cast.backendChanged", domain: "cast", eventSchema: "CastBackendChangedEvent" },
   { id: 0x160C, name: "cast.flowControlChanged", domain: "cast", eventSchema: "CastFlowControlChangedEvent" },
-  { id: 0x160D, name: "cast.statusChanged", domain: "cast", eventSchema: "CastStatusChangedEvent" },
   { id: 0x1701, name: "software.configChanged", domain: "software", eventSchema: "SoftwareConfigChangedEvent" },
   { id: 0x1702, name: "software.updatePolicyChanged", domain: "software", eventSchema: "SoftwareUpdatePolicyChangedEvent" },
 ] as const satisfies readonly EventDescriptor[];
