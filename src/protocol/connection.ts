@@ -11,7 +11,12 @@
 
 import type { Bytes } from "../io/bytes.js";
 import { PayloadType, RpcEncoding } from "../protocol/generated/axtp_ids_generated.js";
-import type { CloseReason, ITransport, PhysicalRole, TransportCapabilities } from "../transport/transport.js";
+import type {
+  CloseReason,
+  ITransport,
+  PhysicalRole,
+  TransportCapabilities
+} from "../transport/transport.js";
 import { CloseCode } from "../transport/transport.js";
 import { hasNativePing } from "../transport/ws/nodeWsTransport.js";
 import type { AxtpError } from "../types/error.js";
@@ -137,8 +142,10 @@ export class Connection {
       const cs = this.controlSession;
       if (this.physicalRole === "client" && cs !== undefined) cs.sendOpen();
     } else {
-      // unframed-json：无 CONTROL 链路层，连接建立即 link ready。
+      // unframed-json：无 CONTROL 链路层，连接建立即 link ready，并启动心跳
+      // （WS 无 CONTROL 协商 heartbeatIntervalMs，用 options 默认值）。
       this.fireLinkReady();
+      this.startHeartbeat(this.options.heartbeatIntervalMs ?? 30000);
     }
   }
 
