@@ -210,7 +210,9 @@ export class AxtpClient {
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown>;
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
     this.requireUsable();
-    return this.session!.call(method as never, params as never, options);
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
+    return session.call(method as never, params as never, options);
   }
 
   handle<K extends MethodName>(
@@ -234,21 +236,20 @@ export class AxtpClient {
   emit(event: string, payload: unknown): Promise<void>;
   emit(event: string, payload: unknown): Promise<void> {
     this.requireUsable();
-    return this.session!.emit(event as never, payload as never);
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
+    return session.emit(event as never, payload as never);
   }
 
   on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void;
   on(event: string, handler: UntypedEventHandler): () => void;
   on(event: string, handler: UntypedEventHandler): () => void {
-    let set = this.eventSnapshot.get(event);
-    if (set === undefined) {
-      set = new Set();
-      this.eventSnapshot.set(event, set);
-    }
-    set.add(handler);
+    const handlerSet = this.eventSnapshot.get(event) ?? new Set<UntypedEventHandler>();
+    if (!this.eventSnapshot.has(event)) this.eventSnapshot.set(event, handlerSet);
+    handlerSet.add(handler);
     const unsub = this.session?.on(event, handler);
     return () => {
-      set!.delete(handler);
+      handlerSet.delete(handler);
       unsub?.();
     };
   }

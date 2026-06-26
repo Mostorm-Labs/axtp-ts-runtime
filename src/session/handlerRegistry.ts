@@ -21,13 +21,10 @@ export class HandlerRegistry {
   }
 
   addEventListener(name: string, handler: UntypedEventHandler): () => void {
-    let set = this.eventHandlers.get(name);
-    if (set === undefined) {
-      set = new Set();
-      this.eventHandlers.set(name, set);
-    }
+    const set = this.eventHandlers.get(name) ?? new Set<UntypedEventHandler>();
+    if (!this.eventHandlers.has(name)) this.eventHandlers.set(name, set);
     set.add(handler);
-    return () => set!.delete(handler);
+    return () => set.delete(handler);
   }
 
   getEventListeners(name: string): Set<UntypedEventHandler> | undefined {

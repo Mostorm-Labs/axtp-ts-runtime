@@ -23,9 +23,9 @@ export function encodeStream(payload: StreamPayload): Bytes {
 export function decodeStream(body: Bytes): StreamPayload | undefined {
   if (body.length < kStreamHeaderSize) return undefined;
   const reader = new ByteReader(body);
-  const streamId = reader.readU32()!;
-  const seqId = reader.readU32()!;
-  const cursor = reader.readU64()!;
-  const data = reader.readBytes(reader.remaining())!;
+  const streamId = reader.readU32Strict();
+  const seqId = reader.readU32Strict();
+  const cursor = reader.readU64Strict();
+  const data = reader.readBytesStrict(reader.remaining());
   return { streamId, seqId, cursor, data };
 }

@@ -67,14 +67,14 @@ export class FrameDecoder {
       const reader = new ByteReader(headerBytes);
       reader.readU8(); // magic0
       reader.readU8(); // magic1
-      const version = reader.readU8()!;
-      const payloadType = reader.readU8()!;
-      const payloadLength = reader.readU16()!;
-      const sourceId = reader.readU8()!;
-      const destinationId = reader.readU8()!;
-      const messageId = reader.readU16()!;
-      const frameIndex = reader.readU8()!;
-      const frameCount = reader.readU8()!;
+      const version = reader.readU8Strict();
+      const payloadType = reader.readU8Strict();
+      const payloadLength = reader.readU16Strict();
+      const sourceId = reader.readU8Strict();
+      const destinationId = reader.readU8Strict();
+      const messageId = reader.readU16Strict();
+      const frameIndex = reader.readU8Strict();
+      const frameCount = reader.readU8Strict();;
 
       // 校验 ②version ③payloadType ⑤FrameCount ⑥FrameIndex ④PayloadLength+14<=maxFrameSize
       if (
@@ -99,7 +99,7 @@ export class FrameDecoder {
 
       const frameBytes = this.buffer.slice(0, totalSize);
       const footerReader = new ByteReader(frameBytes.slice(totalSize - kStandardFrameCrcSize));
-      const expectedCrc = footerReader.readU16()!;
+      const expectedCrc = footerReader.readU16Strict();
       // ⑦CRC16-CCITT-FALSE 覆盖 header+payload，不含 CRC 自身
       const actualCrc = crc16CcittFalse(frameBytes.slice(0, totalSize - kStandardFrameCrcSize));
       if (expectedCrc !== actualCrc) {

@@ -94,7 +94,9 @@ describe("STREAM codec 16B header", () => {
 
   it("解码回放 streamId/seqId/cursor/data", () => {
     const data = new Uint8Array([1, 2]);
-    const sp = decodeStream(encodeStream({ streamId: 42, seqId: 7, cursor: 9999n, data }))!;
+    const sp = decodeStream(encodeStream({ streamId: 42, seqId: 7, cursor: 9999n, data }));
+    expect(sp).toBeDefined();
+    if (sp === undefined) return;
     expect(sp.streamId).toBe(42);
     expect(sp.seqId).toBe(7);
     expect(sp.cursor).toBe(9999n);
@@ -165,14 +167,18 @@ describe("Frame codec", () => {
 describe("JSON-RPC codec", () => {
   it("Hello envelope", () => {
     const bytes = buildHelloJson();
-    const p = decodeJsonRpc(bytes)!;
+    const p = decodeJsonRpc(bytes);
+    expect(p).toBeDefined();
+    if (p === undefined) return;
     expect(p.op).toBe(RpcOp.Hello);
     expect(JSON.parse(new TextDecoder().decode(p.body)).axtpVersion).toBe("1.0.0");
   });
 
   it("Identify 含 randomSeed + eventMasks", () => {
     const bytes = buildIdentifyJson(0x12345678, "090101");
-    const p = decodeJsonRpc(bytes)!;
+    const p = decodeJsonRpc(bytes);
+    expect(p).toBeDefined();
+    if (p === undefined) return;
     expect(p.op).toBe(RpcOp.Identify);
     expect(p.meta.randomSeed).toBe(0x12345678);
     expect(p.meta.jsonEventMasks).toBe("090101");
@@ -188,13 +194,17 @@ describe("JSON-RPC codec", () => {
 
   it("Request/Response round trip（method 为字符串名）", () => {
     const req = buildRequestJson(1, "audio.getAlgorithmConfig", {}, "");
-    const p = decodeJsonRpc(req)!;
+    const p = decodeJsonRpc(req);
+    expect(p).toBeDefined();
+    if (p === undefined) return;
     expect(p.op).toBe(RpcOp.Request);
     expect(p.requestId).toBe(1);
     expect(p.meta.jsonMethodOrEventName).toBe("audio.getAlgorithmConfig");
 
     const resp = buildResponseJson(1, { ok: true }, "12345678");
-    const rp = decodeJsonRpc(resp)!;
+    const rp = decodeJsonRpc(resp);
+    expect(rp).toBeDefined();
+    if (rp === undefined) return;
     expect(rp.requestId).toBe(1);
     expect(rp.statusCode).toBe(ErrorCode.Success);
     expect(JSON.parse(new TextDecoder().decode(rp.body)).ok).toBe(true);
@@ -256,11 +266,13 @@ describe("Handshake 状态机", () => {
     const result = server.handle(identify);
     expect(result.becameReady).toBe(true);
     expect(result.outbound).toBeDefined();
-    expect(result.outbound!.op).toBe(RpcOp.Identified);
-    expect(result.outbound!.jsonSid).toMatch(/^[0-9a-f]{8}$/);
+    const outbound = result.outbound;
+    if (outbound === undefined) return;
+    expect(outbound.op).toBe(RpcOp.Identified);
+    expect(outbound.jsonSid).toMatch(/^[0-9a-f]{8}$/);
     expect(server.sid).toMatch(/^[0-9a-f]{8}$/);
     // d = {}
-    expect(JSON.parse(new TextDecoder().decode(result.outbound!.body))).toEqual({});
+    expect(JSON.parse(new TextDecoder().decode(outbound.body))).toEqual({});
   });
 
   it("sid 不等于 randomSeed（混合本地状态）", () => {
@@ -279,11 +291,17 @@ describe("Handshake 状态机", () => {
   it("client: Hello -> Identify -> Identified", () => {
     const client = new Handshake("client");
     // Hello
-    const r1 = client.handle(decodeJsonRpc(buildHelloJson())!);
+    const hello = decodeJsonRpc(buildHelloJson());
+    expect(hello).toBeDefined();
+    if (hello === undefined) return;
+    const r1 = client.handle(hello);
     expect(r1.outbound?.op).toBe(RpcOp.Identify);
     expect(client.state).toBe("FRAMING_READY");
     // Identified
-    const r2 = client.handle(decodeJsonRpc(buildIdentifiedJson("abcdef01"))!);
+    const identified = decodeJsonRpc(buildIdentifiedJson("abcdef01"));
+    expect(identified).toBeDefined();
+    if (identified === undefined) return;
+    const r2 = client.handle(identified);
     expect(r2.becameReady).toBe(true);
     expect(client.sid).toBe("abcdef01");
     expect(client.isReady).toBe(true);
@@ -291,7 +309,10 @@ describe("Handshake 状态机", () => {
 
   it("非法 sid 被拒（client）", () => {
     const client = new Handshake("client");
-    client.handle(decodeJsonRpc(buildHelloJson())!);
+    const hello = decodeJsonRpc(buildHelloJson());
+    expect(hello).toBeDefined();
+    if (hello === undefined) return;
+    client.handle(hello);
     const r = client.handle(rpcPayload({ op: RpcOp.Identified, jsonSid: "xyz" }));
     expect(r.error).toBeDefined();
     expect(client.isReady).toBe(false);

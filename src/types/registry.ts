@@ -140,7 +140,8 @@ export function computeEventMasks(eventNames: readonly EventName[]): string {
   const sortedDomains = [...byDomain.keys()].sort((a, b) => a - b);
   let hex = "";
   for (const domainId of sortedDomains) {
-    const bits = byDomain.get(domainId)!;
+    const bits = byDomain.get(domainId);
+    if (bits === undefined) continue;
     const maxBit = Math.max(...bits);
     const maskLen = Math.max(1, Math.ceil((maxBit + 1) / 8));
     const mask = new Uint8Array(maskLen);

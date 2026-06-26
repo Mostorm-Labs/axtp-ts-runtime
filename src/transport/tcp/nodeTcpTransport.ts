@@ -113,8 +113,9 @@ export class NodeTcpServerTransport implements IServerTransport {
   async close(): Promise<void> {
     this.listening = false;
     if (this.server === undefined) return;
+    const server = this.server;
     await new Promise<void>((resolve) => {
-      this.server!.close(() => resolve());
+      server.close(() => resolve());
     });
     this.onClose.emit(undefined);
     this.onConnection.close();

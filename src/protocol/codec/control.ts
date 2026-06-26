@@ -117,9 +117,9 @@ export function encodeControl(
 /** 解码 CONTROL payload header + TLV。 */
 export function decodeControl(body: Bytes): ControlPayload & { tlv: Partial<NegotiationParams> } {
   const reader = new ByteReader(body);
-  const opcode = reader.readU8()!;
-  const controlId = reader.readU16()!;
-  const statusCode = reader.readU16()!;
+  const opcode = reader.readU8Strict();
+  const controlId = reader.readU16Strict();
+  const statusCode = reader.readU16Strict();
   const tlvBody = reader.readBytes(reader.remaining()) ?? new Uint8Array();
   const tlv: Partial<NegotiationParams> = {};
   const tlvReader = new ByteReader(tlvBody);

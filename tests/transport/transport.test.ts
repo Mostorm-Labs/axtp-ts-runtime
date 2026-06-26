@@ -35,12 +35,12 @@ describe("EventStream", () => {
   it("emit 期间 unsubscribe 安全（延迟到结束）", () => {
     const stream = new EventStream<number>();
     const seen: number[] = [];
-    let second: (() => void) | undefined;
+    const second: { current: (() => void) | undefined } = { current: undefined };
     stream.subscribe((v) => {
       seen.push(v);
-      second?.();
+      second.current?.();
     });
-    second = stream.subscribe((v) => seen.push(v * 10));
+    second.current = stream.subscribe((v) => seen.push(v * 10));
     stream.emit(1);
     expect(seen).toEqual([1, 10]);
   });

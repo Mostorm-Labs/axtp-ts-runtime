@@ -105,11 +105,12 @@ describe("STREAM P0 端到端（framed-binary）", () => {
     await settle(10);
     const serverStreamCtx = server.streams.get(99);
     expect(serverStreamCtx).toBeDefined();
+    if (serverStreamCtx === undefined) return;
 
     // client send（client 端 stream 用 streamId=99）
     stream.send(new Uint8Array([1, 2, 3]));
     await settle(20);
     // server 端应收到（通过 streams.onData 路由）
-    expect(serverStreamCtx!.chunks).toBeGreaterThanOrEqual(1);
+    expect(serverStreamCtx.chunks).toBeGreaterThanOrEqual(1);
   });
 });

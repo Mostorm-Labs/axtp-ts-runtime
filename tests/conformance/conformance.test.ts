@@ -84,7 +84,7 @@ describe("conformance: session.request_before_identified", () => {
     // client 应收到 server 回的 RequestResponse 带 CONTROL_OPEN_REQUIRED
     const resp = responses.find((r) => r.id === 700);
     expect(resp).toBeDefined();
-    expect(resp!.status).toBe(ErrorCode.ControlOpenRequired); // 0x0024
+    expect(resp?.status).toBe(ErrorCode.ControlOpenRequired); // 0x0024
     server.close();
     client.close();
   });

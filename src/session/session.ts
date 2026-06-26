@@ -272,13 +272,10 @@ export class AxtpSession {
   on<K extends EventName>(event: K, handler: EventHandler<K>): () => void;
   on(event: string, handler: UntypedEventHandler): () => void;
   on(event: string, handler: UntypedEventHandler): () => void {
-    let set = this.eventHandlers.get(event);
-    if (set === undefined) {
-      set = new Set();
-      this.eventHandlers.set(event, set);
-    }
+    const set = this.eventHandlers.get(event) ?? new Set<UntypedEventHandler>();
+    if (!this.eventHandlers.has(event)) this.eventHandlers.set(event, set);
     set.add(handler);
-    return () => set!.delete(handler);
+    return () => set.delete(handler);
   }
 
   // ===== call 实现 =====

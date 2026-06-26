@@ -177,8 +177,9 @@ export class NodeWsServerTransport implements IServerTransport {
   async close(): Promise<void> {
     this.listening = false;
     if (this.wss === undefined) return;
+    const wss = this.wss;
     await new Promise<void>((resolve) => {
-      this.wss!.close(() => resolve());
+      wss.close(() => resolve());
     });
     this.onClose.emit(undefined);
     this.onConnection.close();

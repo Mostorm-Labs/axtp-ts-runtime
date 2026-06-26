@@ -107,6 +107,39 @@ export class ByteReader {
   empty(): boolean {
     return this.remaining() === 0;
   }
+
+  // ===== strict 变体：缓冲不足时抛错，返回非可选类型 =====
+  // 用于已知缓冲足够的场景（如已校验长度的 header 解析），消除调用方的非空断言。
+
+  readU8Strict(): number {
+    const v = this.readU8();
+    if (v === undefined) throw new Error("ByteReader: unexpected EOF reading u8");
+    return v;
+  }
+
+  readU16Strict(): number {
+    const v = this.readU16();
+    if (v === undefined) throw new Error("ByteReader: unexpected EOF reading u16");
+    return v;
+  }
+
+  readU32Strict(): number {
+    const v = this.readU32();
+    if (v === undefined) throw new Error("ByteReader: unexpected EOF reading u32");
+    return v;
+  }
+
+  readU64Strict(): bigint {
+    const v = this.readU64();
+    if (v === undefined) throw new Error("ByteReader: unexpected EOF reading u64");
+    return v;
+  }
+
+  readBytesStrict(size: number): Bytes {
+    const v = this.readBytes(size);
+    if (v === undefined) throw new Error("ByteReader: unexpected EOF reading bytes");
+    return v;
+  }
 }
 
 export function crc16CcittFalse(bytes: Bytes): number {

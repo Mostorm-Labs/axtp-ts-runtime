@@ -93,7 +93,10 @@ export class Connection {
       );
 
       const payloadDecoder = new PayloadDecoder({
-        onControl: (body) => this.controlSession!.handleControlBody(body),
+        onControl: (body) => {
+          const cs = this.controlSession;
+          if (cs !== undefined) cs.handleControlBody(body);
+        },
         onRpc: (p) => this.onPayload.emit(p),
         onStream: (s) => this.onStream.emit(s)
       });
@@ -131,7 +134,8 @@ export class Connection {
 
     if (this.capabilities.wireMode === "framed-binary") {
       // Physical Client 发 OPEN；Physical Server 等待对端 OPEN
-      if (this.physicalRole === "client") this.controlSession!.sendOpen();
+      const cs = this.controlSession;
+      if (this.physicalRole === "client" && cs !== undefined) cs.sendOpen();
     } else {
       // unframed-json：无 CONTROL 链路层，连接建立即 link ready。
       this.fireLinkReady();
