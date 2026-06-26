@@ -6,6 +6,7 @@
 
 import type { Bytes } from "../io/bytes.js";
 import type { StreamContext } from "../session/streamRegistry.js";
+import { AxtpError, ErrorCode } from "../types/error.js";
 
 export interface StreamStats {
   readonly chunks: number;
@@ -67,7 +68,7 @@ export class Stream {
 
   /** 发送数据（出站，双向）。 */
   send(data: Bytes): void {
-    if (this.closed) throw new Error("stream closed");
+    if (this.closed) throw new AxtpError(ErrorCode.StreamClosed, "stream closed");
     const seqId = this.ctx.nextLocalSeq;
     this.ctx.nextLocalSeq = (this.ctx.nextLocalSeq + 1) >>> 0;
     this.sendFn(this.ctx.streamId, data, seqId);

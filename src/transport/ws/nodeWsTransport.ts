@@ -8,6 +8,7 @@
 
 import { WebSocket, WebSocketServer } from "ws";
 import type { Bytes } from "../../io/bytes.js";
+import { AxtpError, ErrorCode } from "../../types/error.js";
 import { EventStream } from "../../types/events.js";
 import {
   CloseCode,
@@ -43,7 +44,7 @@ interface WsClientOptions {
 class WsTransport implements ITransport, NativePingCapable {
   readonly onMessage = new EventStream<Bytes>();
   readonly onClose = new EventStream<CloseReason>();
-  readonly onError = new EventStream<Error>();
+  readonly onError = new EventStream<AxtpError>();
   readonly capabilities = unframedJsonCapabilities();
   private connected = true;
   /** attach 前的消息缓冲（防止 ws message 在 Connection 订阅前到达丢失）。 */
@@ -74,7 +75,7 @@ class WsTransport implements ITransport, NativePingCapable {
       this.onMessage.emit(bytes);
     });
     ws.on("error", (err: Error) => {
-      this.onError.emit(err);
+      this.onError.emit(new AxtpError(ErrorCode.TransportDisconnected, err.message, err));
     });
     ws.on("close", (code: number, reason: Buffer) => {
       if (!this.connected) return;
@@ -188,7 +189,7 @@ export class NodeWsClientTransport implements IClientTransport {
   constructor(private readonly options: WsClientOptions) {}
 
   connect(): Promise<ITransport> {
-    if (!this.available) return Promise.reject(new Error("transport unavailable"));
+    if (!this.available) return Promise.reject(new AxtpError(ErrorCode.Unavailable, "transport unavailable"));
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(this.options.url, this.options.protocols, {
         headers: this.options.headers

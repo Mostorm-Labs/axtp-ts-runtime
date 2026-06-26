@@ -53,7 +53,7 @@ export class AxtpClient {
   private readonly onConnectStream = new EventStream<void>();
   private readonly onDisconnectStream = new EventStream<{ reason: string; remote: boolean }>();
   private readonly onReconnectStream = new EventStream<ReconnectInfo>();
-  private readonly onReconnectFailedStream = new EventStream<Error>();
+  private readonly onReconnectFailedStream = new EventStream<AxtpError>();
 
   constructor(transport: IClientTransport, options: ClientOptions = {}) {
     this.transport = transport;
@@ -72,7 +72,7 @@ export class AxtpClient {
   get onReconnect(): EventStream<ReconnectInfo> {
     return this.onReconnectStream;
   }
-  get onReconnectFailed(): EventStream<Error> {
+  get onReconnectFailed(): EventStream<AxtpError> {
     return this.onReconnectFailedStream;
   }
 
@@ -153,7 +153,9 @@ export class AxtpClient {
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.policy.maxAttempts) {
       this.state = "closed";
-      this.onReconnectFailedStream.emit(new Error("max reconnect attempts reached"));
+      this.onReconnectFailedStream.emit(
+        new AxtpError(ErrorCode.TransportDisconnected, "max reconnect attempts reached")
+      );
       return;
     }
     const delay = nextDelay(this.policy, this.reconnectAttempts);

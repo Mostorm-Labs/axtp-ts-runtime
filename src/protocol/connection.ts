@@ -14,6 +14,7 @@ import { PayloadType, RpcEncoding } from "../protocol/generated/axtp_ids_generat
 import type { CloseReason, ITransport, TransportCapabilities } from "../transport/transport.js";
 import { CloseCode } from "../transport/transport.js";
 import { hasNativePing } from "../transport/ws/nodeWsTransport.js";
+import type { AxtpError } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import {
   defaultOpenParams,
@@ -43,7 +44,7 @@ export interface ConnectionOptions {
 
 export class Connection {
   readonly onClose = new EventStream<CloseReason>();
-  readonly onError = new EventStream<Error>();
+  readonly onError = new EventStream<AxtpError>();
   readonly onPayload = new EventStream<RpcPayload>();
   readonly onStream = new EventStream<StreamPayload>();
   readonly onLinkReady = new EventStream<void>();

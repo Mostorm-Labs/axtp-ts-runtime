@@ -4,6 +4,7 @@
 
 import net from "node:net";
 import type { Bytes } from "../../io/bytes.js";
+import { AxtpError, ErrorCode } from "../../types/error.js";
 import { EventStream } from "../../types/events.js";
 import {
   CloseCode,
@@ -23,7 +24,7 @@ interface TcpOptions {
 class TcpTransport implements ITransport {
   readonly onMessage = new EventStream<Bytes>();
   readonly onClose = new EventStream<CloseReason>();
-  readonly onError = new EventStream<Error>();
+  readonly onError = new EventStream<AxtpError>();
   readonly capabilities = framedBinaryCapabilities();
   private connected = true;
   /** attach 前的消息缓冲（防止 socket data 在 Connection 订阅前到达丢失）。 */
@@ -40,7 +41,7 @@ class TcpTransport implements ITransport {
       this.onMessage.emit(bytes);
     });
     socket.on("error", (err: Error) => {
-      this.onError.emit(err);
+      this.onError.emit(new AxtpError(ErrorCode.TransportDisconnected, err.message, err));
     });
     socket.on("close", (hadError: boolean) => {
       if (!this.connected) return;
@@ -129,7 +130,7 @@ export class NodeTcpClientTransport implements IClientTransport {
   constructor(private readonly options: TcpOptions) {}
 
   connect(): Promise<ITransport> {
-    if (!this.available) return Promise.reject(new Error("transport unavailable"));
+    if (!this.available) return Promise.reject(new AxtpError(ErrorCode.Unavailable, "transport unavailable"));
     return new Promise((resolve, reject) => {
       const socket = net.createConnection(
         { host: this.options.host ?? "127.0.0.1", port: this.options.port },

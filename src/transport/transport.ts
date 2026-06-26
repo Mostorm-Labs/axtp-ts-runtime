@@ -4,6 +4,7 @@
 // 接口刻意不含心跳/WS 特有字段（WS 的 ping/pong 在构造 Connection 时闭包注入，不污染 ITransport）。
 
 import type { Bytes } from "../io/bytes.js";
+import type { AxtpError } from "../types/error.js";
 import type { EventStream } from "../types/events.js";
 
 /** wire 模式：Standard Framed Binary（TCP）或 WebSocket Unframed JSON。 */
@@ -43,7 +44,7 @@ export interface ITransport {
   /** 入站字节流（事件驱动，无需 poll）。 */
   readonly onMessage: EventStream<Bytes>;
   readonly onClose: EventStream<CloseReason>;
-  readonly onError: EventStream<Error>;
+  readonly onError: EventStream<AxtpError>;
   /** 关闭连接。 */
   close(): void;
   /** 是否仍处于连接态。 */

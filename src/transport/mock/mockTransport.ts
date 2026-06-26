@@ -2,6 +2,7 @@
 // 提供一对：左端发 -> 右端 onMessage 收，反之亦然。用于 Connection/Session 端到端测试。
 
 import type { Bytes } from "../../io/bytes.js";
+import { AxtpError, ErrorCode } from "../../types/error.js";
 import { EventStream } from "../../types/events.js";
 import {
   CloseCode,
@@ -36,7 +37,7 @@ export function bridgeMockServer(server: MockServerTransport): MockTransport {
 export class MockTransport implements ITransport {
   readonly onMessage = new EventStream<Bytes>();
   readonly onClose = new EventStream<CloseReason>();
-  readonly onError = new EventStream<Error>();
+  readonly onError = new EventStream<AxtpError>();
   peer: MockTransport | undefined;
   private connected = true;
   /** 暂停投递（测试可控时序），缓冲待投递字节。 */
@@ -142,7 +143,7 @@ export class MockClientTransport implements IClientTransport {
   ) {}
 
   connect(): Promise<ITransport> {
-    if (!this.available) return Promise.reject(new Error("transport unavailable"));
+    if (!this.available) return Promise.reject(new AxtpError(ErrorCode.Unavailable, "transport unavailable"));
     const client = new MockTransport(this.capabilities);
     // 异步 accept：让调用方（establishSession）先建好 client Connection 再触发 server 发 Hello，
     // 避免 Hello 在 client Connection 订阅前到达而丢失。

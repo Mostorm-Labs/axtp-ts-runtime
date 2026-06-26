@@ -30,12 +30,12 @@ import { Heartbeat } from "../../src/protocol/engine/heartbeat.js";
 import { RpcDispatcher } from "../../src/protocol/engine/rpcDispatcher.js";
 import {
   ControlOpcode,
-  ErrorCode,
   PayloadType,
   RpcOp
 } from "../../src/protocol/generated/axtp_ids_generated.js";
 import type { Frame, Message } from "../../src/protocol/model.js";
 import { rpcPayload } from "../../src/protocol/model.js";
+import { AxtpError, ErrorCode } from "../../src/types/error.js";
 
 describe("CONTROL codec 6 TLV", () => {
   it("OPEN 编码含全部必需 TLV 且可解码", () => {
@@ -238,7 +238,7 @@ describe("RpcDispatcher", () => {
     const dispatcher = new RpcDispatcher();
     const r1 = dispatcher.request(() => {}, 5000).promise;
     const r2 = dispatcher.request(() => {}, 5000).promise;
-    dispatcher.rejectAll(new Error("closed") as never);
+    dispatcher.rejectAll(new AxtpError(ErrorCode.TransportDisconnected, "closed"));
     await expect(r1).rejects.toBeTruthy();
     await expect(r2).rejects.toBeTruthy();
     expect(dispatcher.size()).toBe(0);
