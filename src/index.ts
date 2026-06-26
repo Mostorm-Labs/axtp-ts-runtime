@@ -48,6 +48,9 @@ export type { AxtpErrorOptions } from "./types/error.js";
 // 事件流
 export { EventStream } from "./types/events.js";
 
+// 角色（Physical 驱动 CONTROL OPEN/ACCEPT，Logical 驱动 RPC Hello；二者正交，用于 Cloud Reverse 拓扑）
+export type { LogicalRole, PhysicalRole } from "./transport/transport.js";
+
 // 协议常量（供高级用户）
 export { ControlOpcode, PayloadType, RpcOp } from "./protocol/generated/axtp_ids_generated.js";
 

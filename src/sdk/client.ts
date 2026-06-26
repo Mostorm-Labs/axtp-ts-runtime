@@ -20,7 +20,7 @@ import {
   type UntypedEventHandler,
   type UntypedMethodHandler
 } from "../session/session.js";
-import type { IClientTransport, ITransport } from "../transport/transport.js";
+import type { IClientTransport, ITransport, LogicalRole, PhysicalRole } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import { computeEventMasks } from "../types/registry.js";
@@ -30,6 +30,9 @@ export interface ClientOptions extends ConnectionOptions {
   reconnect?: ReconnectPolicy;
   /** call 默认超时。 */
   defaultTimeoutMs?: number;
+  /** Logical 角色：默认 "server"（发 Hello、分配 sid，Cloud Reverse 主场景：发起连接方=能力提供方）。
+   *  经典场景（客户端消费对端能力）设为 "client"。 */
+  logicalRole?: LogicalRole;
 }
 
 type ClientState = "idle" | "connecting" | "connected" | "reconnecting" | "closed";
@@ -99,12 +102,14 @@ export class AxtpClient {
 
   /** 建立 Session（首连/重连共用）。 */
   private async establishSession(transport: ITransport): Promise<void> {
-    const conn = new Connection("client", transport, this.options);
+    const physicalRole: PhysicalRole = "client"; // client 固定发起传输连接
+    const logicalRole: LogicalRole = this.options.logicalRole ?? "server"; // 默认 Logical Server（Cloud Reverse）
+    const conn = new Connection(physicalRole, transport, this.options);
     // 计算当前订阅的 eventMasks（从 eventSnapshot 推导）
     const eventNames = [...this.eventSnapshot.keys()] as EventName[];
     this.lastEventMasks = eventNames.length > 0 ? computeEventMasks(eventNames) : undefined;
 
-    const session = new AxtpSession("client", conn, {
+    const session = new AxtpSession(logicalRole, conn, {
       defaultTimeoutMs: this.options.defaultTimeoutMs ?? 10000,
       eventMasks: this.lastEventMasks
     });

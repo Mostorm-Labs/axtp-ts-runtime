@@ -67,8 +67,11 @@ export interface SessionOptions {
   handshakeSeed?: number;
   /** call 默认超时。 */
   defaultTimeoutMs?: number;
-  /** server 端：全局 handler registry 委托（dispatchRequest miss 时查此）。 */
-  globalHandlers?: { getMethod: (name: string) => UntypedMethodHandler | undefined };
+  /** server 端：全局 handler registry 委托（dispatchRequest/dispatchEvent miss 时查此）。 */
+  globalHandlers?: {
+    getMethod: (name: string) => UntypedMethodHandler | undefined;
+    getEventListeners: (name: string) => Set<UntypedEventHandler> | undefined;
+  };
 }
 
 export class AxtpSession {
@@ -84,6 +87,7 @@ export class AxtpSession {
   /** server 端全局 handler 委托（dispatchRequest 本地 miss 时查此）。 */
   private readonly globalHandlers?: {
     getMethod: (name: string) => UntypedMethodHandler | undefined;
+    getEventListeners: (name: string) => Set<UntypedEventHandler> | undefined;
   };
 
   private readonly onReadyStream = new EventStream<void>();
@@ -444,15 +448,20 @@ export class AxtpSession {
 
   private dispatchEvent(payload: RpcPayload): void {
     const eventName = payload.meta.jsonMethodOrEventName ?? "";
-    const set = this.eventHandlers.get(eventName);
-    if (set === undefined) return;
+    // 先查本地 event handler，再委托全局 registry（server 模式，server.on 注册到此）
+    const localSet = this.eventHandlers.get(eventName);
+    const globalSet = this.globalHandlers?.getEventListeners(eventName);
+    const handlers = new Set<UntypedEventHandler>();
+    if (localSet !== undefined) for (const h of localSet) handlers.add(h);
+    if (globalSet !== undefined) for (const h of globalSet) handlers.add(h);
+    if (handlers.size === 0) return;
     let data: unknown;
     try {
       data = payload.body.length === 0 ? {} : JSON.parse(new TextDecoder().decode(payload.body));
     } catch {
       return;
     }
-    for (const handler of set) {
+    for (const handler of handlers) {
       try {
         handler(data);
       } catch {

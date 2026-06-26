@@ -21,7 +21,7 @@ import type {
   UntypedMethodHandler
 } from "../session/session.js";
 import { AxtpSession, type CallOptions } from "../session/session.js";
-import type { IServerTransport, ITransport } from "../transport/transport.js";
+import type { IServerTransport, ITransport, LogicalRole, PhysicalRole } from "../transport/transport.js";
 import { EventStream } from "../types/events.js";
 
 let nextSessionId = 1;
@@ -31,6 +31,9 @@ export interface ServerOptions extends ConnectionOptions {
   defaultTimeoutMs?: number;
   /** 连接握手默认超时。 */
   handshakeTimeoutMs?: number;
+  /** Logical 角色：默认 "client"（收 Hello、发 Identify，Cloud Reverse 主场景：接受连接方=能力消费方）。
+   *  经典场景（接受连接方=能力提供方）设为 "server"。 */
+  logicalRole?: LogicalRole;
 }
 
 export class AxtpServer {
@@ -53,8 +56,10 @@ export class AxtpServer {
 
   /** 新连接到达：建 Connection + Session，委托全局 HandlerRegistry。 */
   private adoptConnection(t: ITransport): void {
-    const conn = new Connection("server", t, this.options);
-    const session = new AxtpSession("server", conn, {
+    const physicalRole: PhysicalRole = "server"; // server 固定接受传输连接
+    const logicalRole: LogicalRole = this.options.logicalRole ?? "client"; // 默认 Logical Client（Cloud Reverse）
+    const conn = new Connection(physicalRole, t, this.options);
+    const session = new AxtpSession(logicalRole, conn, {
       defaultTimeoutMs: this.options.defaultTimeoutMs ?? 10000,
       globalHandlers: this.handlers // 委托全局 handler
     });

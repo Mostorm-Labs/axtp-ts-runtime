@@ -20,8 +20,8 @@ export function createMockTransportPair(
 ): { left: MockTransport; right: MockTransport } {
   const left = new MockTransport(capabilities);
   const right = new MockTransport(capabilities);
-  left.peer = right;
-  right.peer = left;
+  left.linkPeer(right);
+  right.linkPeer(left);
   return { left, right };
 }
 
@@ -43,12 +43,27 @@ export class MockTransport implements ITransport {
   /** 暂停投递（测试可控时序），缓冲待投递字节。 */
   private paused = false;
   private pending: Bytes[] = [];
+  /** peer 尚未建立时，send 的出站缓冲（accept 设 peer 后 flush）。
+   *  使 mock 对"谁先发"无关——双向握手（经典/Cloud Reverse）都能走通。 */
+  private outboundPending: Bytes[] = [];
 
   constructor(readonly capabilities: TransportCapabilities) {}
 
   send(bytes: Bytes): void {
-    if (!this.connected || this.peer === undefined) return;
+    if (!this.connected) return;
+    if (this.peer === undefined) {
+      // peer 尚未建立（如 client 先于 server accept 发送）：缓冲，等 linkPeer flush。
+      this.outboundPending.push(bytes);
+      return;
+    }
     this.peer.deliver(bytes);
+  }
+
+  /** 建立与 peer 的双向连接，并 flush 双方在连接前缓冲的出站字节。 */
+  linkPeer(peer: MockTransport): void {
+    this.peer = peer;
+    const buffered = this.outboundPending.splice(0);
+    for (const bytes of buffered) peer.deliver(bytes);
   }
 
   /** 内部投递：异步（模拟网络延迟，避免同步 emit 竞态）。受 paused 控制。 */
@@ -113,8 +128,9 @@ export class MockServerTransport implements IServerTransport {
   accept(client: MockTransport): void {
     if (!this.listening) return;
     const serverSide = new MockTransport(this.capabilities);
-    serverSide.peer = client;
-    client.peer = serverSide;
+    // 双向 linkPeer：flush 双方在连接前缓冲的出站字节（支持 client 先发 Hello 的 Cloud Reverse）。
+    serverSide.linkPeer(client);
+    client.linkPeer(serverSide);
     this.accepted.push(serverSide);
     this.onConnection.emit(serverSide);
   }
