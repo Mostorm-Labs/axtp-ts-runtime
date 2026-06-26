@@ -1,0 +1,84 @@
+// Layer 2 transport：纯净的连接抽象。
+// ITransport = 一条已建立连接（client 侧 / server 接受的每条）。
+// IServerTransport.onConnection 每接受一个 client 产出一个新 ITransport——多 client 根基。
+// 接口刻意不含心跳/WS 特有字段（WS 的 ping/pong 在构造 Connection 时闭包注入，不污染 ITransport）。
+
+import type { Bytes } from "../io/bytes.js";
+import type { EventStream } from "../types/events.js";
+
+/** wire 模式：Standard Framed Binary（TCP）或 WebSocket Unframed JSON。 */
+export type WireMode = "framed-binary" | "unframed-json";
+
+/** 传输能力声明。 */
+export interface TransportCapabilities {
+  readonly wireMode: WireMode;
+  /** WS=true（message 边界天然），TCP=false（字节流需 frame resync）。 */
+  readonly messageOriented: boolean;
+  /** framed=true（存在 CONTROL OPEN/ACCEPT/HEARTBEAT），WS=false。 */
+  readonly supportsControl: boolean;
+}
+
+/** 连接关闭原因。 */
+export interface CloseReason {
+  readonly code: CloseCode;
+  readonly reason: string;
+  /** 对端是否主动发起关闭（false=本端或传输错误）。 */
+  readonly remote: boolean;
+}
+
+export enum CloseCode {
+  Normal = 0,
+  TransportError = 1,
+  HeartbeatTimeout = 2,
+  HandshakeFailed = 3,
+  ProtocolError = 4,
+  Reconnect = 5
+}
+
+/** 单条已建立连接的传输接口。 */
+export interface ITransport {
+  readonly capabilities: TransportCapabilities;
+  /** 发送原始字节。framed-binary 为帧字节，unframed-json 为 JSON 文本字节。 */
+  send(bytes: Bytes): void;
+  /** 入站字节流（事件驱动，无需 poll）。 */
+  readonly onMessage: EventStream<Bytes>;
+  readonly onClose: EventStream<CloseReason>;
+  readonly onError: EventStream<Error>;
+  /** 关闭连接。 */
+  close(): void;
+  /** 是否仍处于连接态。 */
+  isConnected(): boolean;
+  /** Connection 接管：停止内部缓冲，flush 已缓冲消息（真实 transport 实现，mock 可选）。 */
+  attach?(): void;
+}
+
+/** server 侧：接受多连接。 */
+export interface IServerTransport {
+  readonly capabilities: TransportCapabilities;
+  /** 开始监听；onConnection 每接受一个 client 产出一个新 ITransport。 */
+  listen(): Promise<void>;
+  readonly onConnection: EventStream<ITransport>;
+  readonly onClose: EventStream<void>;
+  close(): Promise<void>;
+  /** 是否正在监听。 */
+  isListening(): boolean;
+}
+
+/** client 侧：发起单连接。 */
+export interface IClientTransport {
+  readonly capabilities: TransportCapabilities;
+  /** 发起连接，成功后返回一条已建立的 ITransport。 */
+  connect(): Promise<ITransport>;
+  readonly onClose: EventStream<void>;
+  /** 是否仍可重连（transport 未被销毁）。 */
+  isAvailable(): boolean;
+}
+
+/** 默认能力工厂，供具体 transport 复用。 */
+export function framedBinaryCapabilities(): TransportCapabilities {
+  return { wireMode: "framed-binary", messageOriented: false, supportsControl: true };
+}
+
+export function unframedJsonCapabilities(): TransportCapabilities {
+  return { wireMode: "unframed-json", messageOriented: true, supportsControl: false };
+}

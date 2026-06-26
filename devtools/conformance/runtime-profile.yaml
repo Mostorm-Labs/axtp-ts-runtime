@@ -9,4 +9,3 @@ optional_levels:
   - event
   - stream
 unsupported_levels: []
-

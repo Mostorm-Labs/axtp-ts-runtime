@@ -5,9 +5,10 @@ export function normalizeId(value: unknown, context: string): number {
   if (typeof value === "number" && Number.isInteger(value)) return value;
   if (typeof value === "string") {
     const trimmed = value.trim();
-    const parsed = trimmed.startsWith("0x") || trimmed.startsWith("0X")
-      ? Number.parseInt(trimmed.slice(2), 16)
-      : Number.parseInt(trimmed, 10);
+    const parsed =
+      trimmed.startsWith("0x") || trimmed.startsWith("0X")
+        ? Number.parseInt(trimmed.slice(2), 16)
+        : Number.parseInt(trimmed, 10);
     if (Number.isInteger(parsed) && !Number.isNaN(parsed)) return parsed;
   }
   throw new Error(`invalid numeric id for ${context}: ${String(value)}`);
@@ -37,7 +38,9 @@ export function cppConstName(name: string): string {
 }
 
 export function sortById<T extends { id: number }>(items: T[]): T[] {
-  return [...items].sort((a, b) => a.id - b.id || String((a as any).name).localeCompare(String((b as any).name)));
+  return [...items].sort(
+    (a, b) => a.id - b.id || String((a as any).name).localeCompare(String((b as any).name))
+  );
 }
 
 export async function writeTextFile(filePath: string, content: string): Promise<void> {

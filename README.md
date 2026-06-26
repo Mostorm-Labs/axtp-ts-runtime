@@ -31,25 +31,25 @@ src/core/runtime -> src/json_rpc
 
 ## Repository Layout
 
-| Path | Purpose |
-|---|---|
-| `src/index.ts` | Stable package entry that re-exports the public runtime, protocol, SDK, and generated types. |
-| `src/node.ts` | Node-specific package entry for optional Node transports. |
-| `src/core/support/io/` | Byte helpers, readers/writers, sinks, and CRC utilities. |
-| `src/core/protocol/model/` | Protocol value types, payload helpers, frame/message models, and constants. |
-| `src/core/protocol/generated/` | Generated AXTP IDs, registries, and generated version constants. Do not edit by hand. |
-| `src/core/protocol/wire/` | Framed binary and WebSocket JSON-RPC payload codecs plus inbound/outbound processors. |
-| `src/core/runtime/core/` | `AxtpCore`, core events, session state, and request/response coordination. |
-| `src/core/runtime/broker/` | `BasicBroker`, business routing, task/result queues, and handler contracts. |
-| `src/core/runtime/endpoint/` | Endpoint glue between core, broker, and transports. |
-| `src/core/runtime/transport/` | Transport profile and `ITransport` contracts plus mock transport. |
-| `src/sdk/` | Higher-level client/server SDK APIs. |
-| `src/json_rpc/` | Optional WebSocket JSON-RPC adapter layer above the runtime. |
-| `src/transports/` | Optional concrete transports, currently Node TCP. |
-| `tests/` | Unit and integration tests for the runtime layers. |
-| `devtools/generators/` | TypeScript generator that consumes the AXTP spec and emits runtime artifacts. |
-| `devtools/scripts/` | Spec lock, generation, versioning, conformance, and release helper scripts. |
-| `devtools/conformance/` | Runtime conformance profile and Vitest conformance runner. |
+| Path                           | Purpose                                                                                      |
+| ------------------------------ | -------------------------------------------------------------------------------------------- |
+| `src/index.ts`                 | Stable package entry that re-exports the public runtime, protocol, SDK, and generated types. |
+| `src/node.ts`                  | Node-specific package entry for optional Node transports.                                    |
+| `src/core/support/io/`         | Byte helpers, readers/writers, sinks, and CRC utilities.                                     |
+| `src/core/protocol/model/`     | Protocol value types, payload helpers, frame/message models, and constants.                  |
+| `src/core/protocol/generated/` | Generated AXTP IDs, registries, and generated version constants. Do not edit by hand.        |
+| `src/core/protocol/wire/`      | Framed binary and WebSocket JSON-RPC payload codecs plus inbound/outbound processors.        |
+| `src/core/runtime/core/`       | `AxtpCore`, core events, session state, and request/response coordination.                   |
+| `src/core/runtime/broker/`     | `BasicBroker`, business routing, task/result queues, and handler contracts.                  |
+| `src/core/runtime/endpoint/`   | Endpoint glue between core, broker, and transports.                                          |
+| `src/core/runtime/transport/`  | Transport profile and `ITransport` contracts plus mock transport.                            |
+| `src/sdk/`                     | Higher-level client/server SDK APIs.                                                         |
+| `src/json_rpc/`                | Optional WebSocket JSON-RPC adapter layer above the runtime.                                 |
+| `src/transports/`              | Optional concrete transports, currently Node TCP.                                            |
+| `tests/`                       | Unit and integration tests for the runtime layers.                                           |
+| `devtools/generators/`         | TypeScript generator that consumes the AXTP spec and emits runtime artifacts.                |
+| `devtools/scripts/`            | Spec lock, generation, versioning, conformance, and release helper scripts.                  |
+| `devtools/conformance/`        | Runtime conformance profile and Vitest conformance runner.                                   |
 
 ## AXTP Spec Compatibility
 

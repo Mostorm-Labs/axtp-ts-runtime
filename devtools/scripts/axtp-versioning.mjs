@@ -39,7 +39,10 @@ async function readJson(file) {
 
 function stripYamlValue(value) {
   const trimmed = value.trim();
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
     return trimmed.slice(1, -1);
   }
   return trimmed;
@@ -67,7 +70,13 @@ async function readSpecLock() {
 
 function gitValue(args, fallback = "unknown") {
   try {
-    return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || fallback;
+    return (
+      execFileSync("git", args, {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"]
+      }).trim() || fallback
+    );
   } catch {
     return fallback;
   }
@@ -76,7 +85,9 @@ function gitValue(args, fallback = "unknown") {
 function parseRuntimeReleaseVersion(version) {
   const match = version.match(/^([0-9]+)\.([0-9]+)\.([0-9]+)(?:\.([0-9]+))?$/);
   if (!match) {
-    throw new Error("Runtime release version must match MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH.REVISION");
+    throw new Error(
+      "Runtime release version must match MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH.REVISION"
+    );
   }
   return {
     runtimeVersion: version,
@@ -91,7 +102,10 @@ async function readRuntimeVersion(runtimeName) {
   if (runtimeName === "axtp-c-runtime") {
     const text = await readText(path.join(root, "CMakeLists.txt"));
     const match = text.match(/project\s*\([^)]*?\bVERSION\s+([0-9]+\.[0-9]+\.[0-9][^\s)]*)/is);
-    if (!match) throw new Error("Could not read runtime version from CMakeLists.txt project(... VERSION ...)");
+    if (!match)
+      throw new Error(
+        "Could not read runtime version from CMakeLists.txt project(... VERSION ...)"
+      );
     return match[1];
   }
   if (runtimeName === "axtp-cpp-runtime" || runtimeName === "axtp-mock-server") {
@@ -111,7 +125,8 @@ async function readRuntimeVersion(runtimeName) {
   if (runtimeName === "axtp-python-runtime") {
     const text = await readText(path.join(root, "pyproject.toml"));
     const match = text.match(/^\[project\][\s\S]*?^version\s*=\s*"([^"]+)"/m);
-    if (!match) throw new Error("Could not read runtime version from pyproject.toml [project].version");
+    if (!match)
+      throw new Error("Could not read runtime version from pyproject.toml [project].version");
     return match[1];
   }
   throw new Error(`Unsupported runtime: ${runtimeName}`);
@@ -133,7 +148,7 @@ async function listFiles(dir, base = dir) {
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      files.push(...await listFiles(full, base));
+      files.push(...(await listFiles(full, base)));
     } else if (entry.isFile()) {
       files.push(path.relative(base, full).split(path.sep).join("/"));
     }
@@ -177,21 +192,38 @@ function constantTargets(runtimeName) {
     return [{ kind: "c", file: path.join(root, "include/generated/axtp_generated_version.h") }];
   }
   if (runtimeName === "axtp-cpp-runtime") {
-    return [{ kind: "cpp", file: path.join(root, "core/include/generated/axtp_generated_version.hpp") }];
+    return [
+      { kind: "cpp", file: path.join(root, "core/include/generated/axtp_generated_version.hpp") }
+    ];
   }
   if (runtimeName === "axtp-flutter-runtime") {
-    return [{ kind: "dart", file: path.join(root, "lib/src/generated/axtp_generated_version.dart") }];
+    return [
+      { kind: "dart", file: path.join(root, "lib/src/generated/axtp_generated_version.dart") }
+    ];
   }
   if (runtimeName === "axtp-ts-runtime") {
-    return [{ kind: "ts", file: path.join(root, "src/core/protocol/generated/axtpGeneratedVersion.ts") }];
+    return [
+      { kind: "ts", file: path.join(root, "src/core/protocol/generated/axtpGeneratedVersion.ts") }
+    ];
   }
   if (runtimeName === "axtp-python-runtime") {
-    return [{ kind: "python", file: path.join(root, "src/axtp_runtime/generated/axtp_generated_version.py") }];
+    return [
+      {
+        kind: "python",
+        file: path.join(root, "src/axtp_runtime/generated/axtp_generated_version.py")
+      }
+    ];
   }
   if (runtimeName === "axtp-mock-server") {
     return [
-      { kind: "ts", file: path.join(root, "generated/node-mock-server/src/generated/axtpGeneratedVersion.ts") },
-      { kind: "cpp", file: path.join(root, "generated/cpp-mock-server/include/axtp_generated_version.hpp") }
+      {
+        kind: "ts",
+        file: path.join(root, "generated/node-mock-server/src/generated/axtpGeneratedVersion.ts")
+      },
+      {
+        kind: "cpp",
+        file: path.join(root, "generated/cpp-mock-server/include/axtp_generated_version.hpp")
+      }
     ];
   }
   throw new Error(`Unsupported runtime: ${runtimeName}`);
@@ -312,15 +344,15 @@ async function writeVersionMetadata(runtimeName) {
       commit: gitValue(["rev-parse", "HEAD"])
     },
     inputs: {
-      registryHash: await hashDirectory(firstExistingDirectory(
-        path.join(specRoot, "registry"),
-        path.join(contractRoot, "registry")
-      )),
-      schemasHash: await hashDirectory(firstExistingDirectory(
-        path.join(specRoot, "schemas"),
-        path.join(contractRoot, "schemas")
-      )),
-      conformanceHash: (await hashDirectory(path.join(specRoot, "docs", "conformance"))) ?? await hashDirectory(path.join(specRoot, "conformance"))
+      registryHash: await hashDirectory(
+        firstExistingDirectory(path.join(specRoot, "registry"), path.join(contractRoot, "registry"))
+      ),
+      schemasHash: await hashDirectory(
+        firstExistingDirectory(path.join(specRoot, "schemas"), path.join(contractRoot, "schemas"))
+      ),
+      conformanceHash:
+        (await hashDirectory(path.join(specRoot, "docs", "conformance"))) ??
+        (await hashDirectory(path.join(specRoot, "conformance")))
     }
   };
   const manifestPath = path.join(root, "generated/axtp_generated_manifest.json");
@@ -371,7 +403,8 @@ async function checkVersionMetadata(runtimeName, { release = false, tagVersion =
 
   const fields = versionFields(manifest);
   for (const target of constantTargets(runtimeName)) {
-    if (!existsSync(target.file)) throw new Error(`Missing generated version constant: ${path.relative(root, target.file)}`);
+    if (!existsSync(target.file))
+      throw new Error(`Missing generated version constant: ${path.relative(root, target.file)}`);
     const text = await readText(target.file);
     for (const [key, value] of Object.entries(fields)) {
       if (!text.includes(value)) {
@@ -454,7 +487,9 @@ try {
     if (!outFile) throw new Error("release-notes requires --out <file>");
     await writeReleaseNotes(runtimeName, outFile);
   } else {
-    throw new Error("Usage: axtp-versioning.mjs <generate|check|release-check|release-notes> [--runtime-name NAME]");
+    throw new Error(
+      "Usage: axtp-versioning.mjs <generate|check|release-check|release-notes> [--runtime-name NAME]"
+    );
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

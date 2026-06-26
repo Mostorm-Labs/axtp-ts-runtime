@@ -50,28 +50,184 @@ interface CaseResult {
 }
 
 const cases: CaseResult[] = [
-  { id: "handshake.open_accept", level: "framed-binary", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "handshake.open_reject", level: "framed-binary", requirement: "optional", status: "skipped", durationMs: 0, message: "control open rejection policy is not configurable in the TypeScript runtime" },
-  { id: "handshake.close", level: "framed-binary", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "handshake.ping_pong", level: "framed-binary", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "session.hello_identify_identified", level: "websocket-jsonrpc", requirement: "required", status: "pending", durationMs: 0, message: "" },
-  { id: "session.request_before_identified", level: "websocket-jsonrpc", requirement: "required", status: "pending", durationMs: 0, message: "" },
-  { id: "rpc.request_response_json", level: "core", requirement: "required", status: "pending", durationMs: 0, message: "" },
-  { id: "rpc.method_not_found", level: "core", requirement: "required", status: "pending", durationMs: 0, message: "" },
-  { id: "rpc.invalid_params", level: "core", requirement: "not-selected", status: "skipped", durationMs: 0, message: "schema-aware parameter validation is outside the required TypeScript core profile" },
-  { id: "rpc.request_id_match", level: "core", requirement: "required", status: "pending", durationMs: 0, message: "" },
-  { id: "event.subscribe_event", level: "event", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "event.unsubscribe_event", level: "event", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "event.emit_event", level: "event", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "capability.get_all", level: "capability", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "capability.method_binding", level: "capability", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "capability.unsupported_method", level: "capability", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "error.standard_error_shape", level: "core", requirement: "required", status: "pending", durationMs: 0, message: "" },
-  { id: "error.unauthorized", level: "core", requirement: "not-selected", status: "skipped", durationMs: 0, message: "auth policy hooks are outside the required TypeScript core profile" },
-  { id: "error.server_busy", level: "core", requirement: "not-selected", status: "skipped", durationMs: 0, message: "busy-state policy hooks are outside the required TypeScript core profile" },
-  { id: "stream.stream_open", level: "stream", requirement: "optional", status: "skipped", durationMs: 0, message: "stream.open RPC control-plane method is not part of the generated spec/v0.0.2 registry" },
-  { id: "stream.stream_data", level: "stream", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "stream.stream_close", level: "stream", requirement: "optional", status: "skipped", durationMs: 0, message: "stream.close RPC control-plane method is not part of the generated spec/v0.0.2 registry" }
+  {
+    id: "handshake.open_accept",
+    level: "framed-binary",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "handshake.open_reject",
+    level: "framed-binary",
+    requirement: "optional",
+    status: "skipped",
+    durationMs: 0,
+    message: "control open rejection policy is not configurable in the TypeScript runtime"
+  },
+  {
+    id: "handshake.close",
+    level: "framed-binary",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "handshake.ping_pong",
+    level: "framed-binary",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "session.hello_identify_identified",
+    level: "websocket-jsonrpc",
+    requirement: "required",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "session.request_before_identified",
+    level: "websocket-jsonrpc",
+    requirement: "required",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "rpc.request_response_json",
+    level: "core",
+    requirement: "required",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "rpc.method_not_found",
+    level: "core",
+    requirement: "required",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "rpc.invalid_params",
+    level: "core",
+    requirement: "not-selected",
+    status: "skipped",
+    durationMs: 0,
+    message: "schema-aware parameter validation is outside the required TypeScript core profile"
+  },
+  {
+    id: "rpc.request_id_match",
+    level: "core",
+    requirement: "required",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "event.subscribe_event",
+    level: "event",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "event.unsubscribe_event",
+    level: "event",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "event.emit_event",
+    level: "event",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "capability.get_all",
+    level: "capability",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "capability.method_binding",
+    level: "capability",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "capability.unsupported_method",
+    level: "capability",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "error.standard_error_shape",
+    level: "core",
+    requirement: "required",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "error.unauthorized",
+    level: "core",
+    requirement: "not-selected",
+    status: "skipped",
+    durationMs: 0,
+    message: "auth policy hooks are outside the required TypeScript core profile"
+  },
+  {
+    id: "error.server_busy",
+    level: "core",
+    requirement: "not-selected",
+    status: "skipped",
+    durationMs: 0,
+    message: "busy-state policy hooks are outside the required TypeScript core profile"
+  },
+  {
+    id: "stream.stream_open",
+    level: "stream",
+    requirement: "optional",
+    status: "skipped",
+    durationMs: 0,
+    message:
+      "stream.open RPC control-plane method is not part of the generated spec/v0.0.2 registry"
+  },
+  {
+    id: "stream.stream_data",
+    level: "stream",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "stream.stream_close",
+    level: "stream",
+    requirement: "optional",
+    status: "skipped",
+    durationMs: 0,
+    message:
+      "stream.close RPC control-plane method is not part of the generated spec/v0.0.2 registry"
+  }
 ];
 
 class CapturePayloadSink implements PayloadSink {
@@ -179,11 +335,13 @@ async function popJson(transport: MockTransport): Promise<Record<string, unknown
 }
 
 function responseStatus(response: Record<string, unknown>): Record<string, unknown> {
-  return ((response.d as Record<string, unknown>).status as Record<string, unknown>);
+  return (response.d as Record<string, unknown>).status as Record<string, unknown>;
 }
 
 async function identify(transport: MockTransport, eventMasks = "0901"): Promise<string> {
-  transport.injectIncoming(toBytes(`{"sid":"","op":2,"d":{"rpcVersion":1,"eventMasks":"${eventMasks}"}}`));
+  transport.injectIncoming(
+    toBytes(`{"sid":"","op":2,"d":{"rpcVersion":1,"eventMasks":"${eventMasks}"}}`)
+  );
   const response = await popJson(transport);
   if (response.op !== RpcOp.Identified) throw new Error("IDENTIFY did not produce IDENTIFIED");
   const sid = response.sid;
@@ -198,10 +356,16 @@ async function methodNotFoundWithId(requestId: number): Promise<boolean> {
   await adapter.poll();
   await popJson(transport);
   const sid = await identify(transport);
-  transport.injectIncoming(toBytes(`{"sid":"${sid}","op":7,"d":{"id":${requestId},"method":"vendor.missing","params":{}}}`));
+  transport.injectIncoming(
+    toBytes(`{"sid":"${sid}","op":7,"d":{"id":${requestId},"method":"vendor.missing","params":{}}}`)
+  );
   const response = await popJson(transport);
   const d = response.d as Record<string, unknown>;
-  return d.id === requestId && responseStatus(response).ok === false && responseStatus(response).code === ErrorCode.RpcMethodNotFound;
+  return (
+    d.id === requestId &&
+    responseStatus(response).ok === false &&
+    responseStatus(response).code === ErrorCode.RpcMethodNotFound
+  );
 }
 
 function testOpenAccept(): boolean {
@@ -210,7 +374,12 @@ function testOpenAccept(): boolean {
   const responseBytes = core.tryPopOutboundBytes();
   if (responseBytes === undefined) return false;
   const response = decodeOneControl(responseBytes);
-  return response.opcode === ControlOpcode.Accept && response.controlId === 1 && response.statusCode === ErrorCode.Success && core.controlSessionOpen();
+  return (
+    response.opcode === ControlOpcode.Accept &&
+    response.controlId === 1 &&
+    response.statusCode === ErrorCode.Success &&
+    core.controlSessionOpen()
+  );
 }
 
 function testClose(): boolean {
@@ -222,7 +391,11 @@ function testClose(): boolean {
   const responseBytes = core.tryPopOutboundBytes();
   if (responseBytes === undefined) return false;
   const response = decodeOneControl(responseBytes);
-  return response.opcode === ControlOpcode.CloseAck && response.controlId === 2 && !core.controlSessionOpen();
+  return (
+    response.opcode === ControlOpcode.CloseAck &&
+    response.controlId === 2 &&
+    !core.controlSessionOpen()
+  );
 }
 
 function testPingPong(): boolean {
@@ -247,26 +420,42 @@ async function testRequestBeforeIdentified(): Promise<boolean> {
   const { transport, adapter } = makeJsonRuntime();
   await adapter.poll();
   await popJson(transport);
-  transport.injectIncoming(toBytes('{"sid":"","op":7,"d":{"id":700,"method":"audio.getAlgorithmConfig","params":{}}}'));
+  transport.injectIncoming(
+    toBytes('{"sid":"","op":7,"d":{"id":700,"method":"audio.getAlgorithmConfig","params":{}}}')
+  );
   const response = await popJson(transport);
   const d = response.d as Record<string, unknown>;
-  return response.op === RpcOp.RequestResponse && d.id === 700 && responseStatus(response).code === ErrorCode.ControlOpenRequired;
+  return (
+    response.op === RpcOp.RequestResponse &&
+    d.id === 700 &&
+    responseStatus(response).code === ErrorCode.ControlOpenRequired
+  );
 }
 
 async function testRequestResponseJson(): Promise<boolean> {
   const { transport, adapter } = makeJsonRuntime((broker) => {
     broker.registerJsonMethod("audio.getAlgorithmConfig", (context, params) => {
-      if (context.methodName !== "audio.getAlgorithmConfig" || params !== "{}") throw new Error("unexpected handler context");
+      if (context.methodName !== "audio.getAlgorithmConfig" || params !== "{}")
+        throw new Error("unexpected handler context");
       return '{"noiseSuppression":{"enabled":true,"level":3}}';
     });
   });
   await adapter.poll();
   await popJson(transport);
   const sid = await identify(transport);
-  transport.injectIncoming(toBytes(`{"sid":"${sid}","op":7,"d":{"id":701,"method":"audio.getAlgorithmConfig","params":{}}}`));
+  transport.injectIncoming(
+    toBytes(
+      `{"sid":"${sid}","op":7,"d":{"id":701,"method":"audio.getAlgorithmConfig","params":{}}}`
+    )
+  );
   const response = await popJson(transport);
   const d = response.d as Record<string, unknown>;
-  return response.op === RpcOp.RequestResponse && d.id === 701 && responseStatus(response).ok === true && typeof d.result === "object";
+  return (
+    response.op === RpcOp.RequestResponse &&
+    d.id === 701 &&
+    responseStatus(response).ok === true &&
+    typeof d.result === "object"
+  );
 }
 
 async function testSubscribeEvent(): Promise<boolean> {
@@ -292,34 +481,48 @@ async function testEmitEvent(): Promise<boolean> {
   await adapter.poll();
   await popJson(transport);
   const sid = await identify(transport);
-  await adapter.sendEvent(rpcPayload({
-    op: RpcOp.Event,
-    methodOrEventId: EventId.AudioAlgorithmConfigChanged,
-    meta: {
-      sourceProtocol: SourceProtocol.JsonRpc,
-      sessionId: 0,
-      requestId: 0,
-      jsonSid: sid,
-      jsonMethodOrEventName: ""
-    },
-    body: toBytes('{"reason":"user_request","applyState":"applied"}')
-  }));
+  await adapter.sendEvent(
+    rpcPayload({
+      op: RpcOp.Event,
+      methodOrEventId: EventId.AudioAlgorithmConfigChanged,
+      meta: {
+        sourceProtocol: SourceProtocol.JsonRpc,
+        sessionId: 0,
+        requestId: 0,
+        jsonSid: sid,
+        jsonMethodOrEventName: ""
+      },
+      body: toBytes('{"reason":"user_request","applyState":"applied"}')
+    })
+  );
   const event = await popJson(transport);
   const d = event.d as Record<string, unknown>;
   const data = d.data as Record<string, unknown>;
-  return event.op === RpcOp.Event && d.event === "audio.algorithmConfigChanged" && data.reason === "user_request";
+  return (
+    event.op === RpcOp.Event &&
+    d.event === "audio.algorithmConfigChanged" &&
+    data.reason === "user_request"
+  );
 }
 
 function testCapabilityGetAll(): boolean {
-  return kMethodRegistry.length >= 4 &&
-    RegistryLookup.methodIdByName("audio.getAlgorithmConfig") === MethodId.AudioGetAlgorithmConfig &&
-    RegistryLookup.methodIdByName("audio.getAlgorithmCapabilities") === MethodId.AudioGetAlgorithmCapabilities &&
-    RegistryLookup.methodIdByName("audio.setAlgorithmConfig") === MethodId.AudioSetAlgorithmConfig &&
-    RegistryLookup.methodIdByName("audio.resetAlgorithmConfig") === MethodId.AudioResetAlgorithmConfig;
+  return (
+    kMethodRegistry.length >= 4 &&
+    RegistryLookup.methodIdByName("audio.getAlgorithmConfig") ===
+      MethodId.AudioGetAlgorithmConfig &&
+    RegistryLookup.methodIdByName("audio.getAlgorithmCapabilities") ===
+      MethodId.AudioGetAlgorithmCapabilities &&
+    RegistryLookup.methodIdByName("audio.setAlgorithmConfig") ===
+      MethodId.AudioSetAlgorithmConfig &&
+    RegistryLookup.methodIdByName("audio.resetAlgorithmConfig") ===
+      MethodId.AudioResetAlgorithmConfig
+  );
 }
 
 function testCapabilityMethodBinding(): boolean {
-  const capability = kCapabilityRegistry.find((item) => item.id === CapabilityId.AudioAlgorithm && item.name === "audio.algorithm");
+  const capability = kCapabilityRegistry.find(
+    (item) => item.id === CapabilityId.AudioAlgorithm && item.name === "audio.algorithm"
+  );
   const method = RegistryLookup.methodById(MethodId.AudioGetAlgorithmConfig);
   const event = RegistryLookup.eventById(EventId.AudioAlgorithmConfigChanged);
   return capability !== undefined && method?.domain === "audio" && event?.domain === "audio";
@@ -327,20 +530,24 @@ function testCapabilityMethodBinding(): boolean {
 
 function testStreamData(): boolean {
   const chunks: Bytes[] = [];
-  new OutboundProcessor({ writeBytes: (bytes) => chunks.push(bytes) }).sendStream(streamPayload({
-    streamId: 9,
-    seqId: 1,
-    cursor: 0n,
-    data: Uint8Array.of(0xaa, 0xbb, 0xcc)
-  }));
+  new OutboundProcessor({ writeBytes: (bytes) => chunks.push(bytes) }).sendStream(
+    streamPayload({
+      streamId: 9,
+      seqId: 1,
+      cursor: 0n,
+      data: Uint8Array.of(0xaa, 0xbb, 0xcc)
+    })
+  );
   const sink = new CapturePayloadSink();
   const inbound = new InboundProcessor(sink);
   for (const chunk of chunks) inbound.onBytes(chunk);
-  return sink.streams.length === 1 &&
+  return (
+    sink.streams.length === 1 &&
     sink.streams[0].streamId === 9 &&
     sink.streams[0].seqId === 1 &&
     sink.streams[0].cursor === 0n &&
-    bytesEqual(sink.streams[0].data, Uint8Array.of(0xaa, 0xbb, 0xcc));
+    bytesEqual(sink.streams[0].data, Uint8Array.of(0xaa, 0xbb, 0xcc))
+  );
 }
 
 function writeResult(resultPath: string, profilePath: string): void {
@@ -375,11 +582,7 @@ function envIsTrue(name: string): boolean {
 }
 
 function resolveSpecPath(): string | undefined {
-  for (const candidate of [
-    process.env.AXTP_SPEC_PATH,
-    "third_party/axtp-spec",
-    ".axtp-spec"
-  ]) {
+  for (const candidate of [process.env.AXTP_SPEC_PATH, "third_party/axtp-spec", ".axtp-spec"]) {
     if (
       candidate !== undefined &&
       (fs.existsSync(path.join(candidate, "docs/conformance/manifest.yaml")) ||
@@ -394,7 +597,8 @@ function resolveSpecPath(): string | undefined {
 describe("AXTP conformance", () => {
   it("executes native runtime conformance cases", async () => {
     const specPath = resolveSpecPath();
-    const profilePath = process.env.CONFORMANCE_PROFILE_PATH ?? "devtools/conformance/runtime-profile.yaml";
+    const profilePath =
+      process.env.CONFORMANCE_PROFILE_PATH ?? "devtools/conformance/runtime-profile.yaml";
     const resultPath = process.env.CONFORMANCE_RESULT_PATH ?? "conformance-results/result.json";
     if (specPath === undefined) {
       throw new Error("AXTP conformance manifest not found");
@@ -422,8 +626,12 @@ describe("AXTP conformance", () => {
 
     writeResult(resultPath, profilePath);
 
-    const requiredIssue = cases.some((item) => item.requirement === "required" && item.status !== "passed");
-    const optionalIssue = cases.some((item) => item.requirement === "optional" && item.status !== "passed");
+    const requiredIssue = cases.some(
+      (item) => item.requirement === "required" && item.status !== "passed"
+    );
+    const optionalIssue = cases.some(
+      (item) => item.requirement === "optional" && item.status !== "passed"
+    );
     if (requiredIssue && !envIsTrue("CONFORMANCE_ALLOW_INCOMPLETE")) {
       throw new Error("required AXTP conformance cases failed");
     }

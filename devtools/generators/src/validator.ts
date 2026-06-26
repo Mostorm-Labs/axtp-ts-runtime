@@ -3,7 +3,11 @@ import { buildSourceDomainByHighByte, type DomainByHighByte } from "./domainRegi
 import type { Capability, ErrorCode, Event, Method, Schema, SpecModel } from "./models.js";
 import { hex } from "./util.js";
 
-function assertUniqueIds<T extends { id: number; name: string }>(items: T[], label: string, file: string): void {
+function assertUniqueIds<T extends { id: number; name: string }>(
+  items: T[],
+  label: string,
+  file: string
+): void {
   const seen = new Map<number, string>();
   for (const item of items) {
     const existing = seen.get(item.id);
@@ -20,7 +24,11 @@ function assertUniqueIds<T extends { id: number; name: string }>(items: T[], lab
   }
 }
 
-function assertUniqueNames<T extends { name: string }>(items: T[], label: string, file: string): void {
+function assertUniqueNames<T extends { name: string }>(
+  items: T[],
+  label: string,
+  file: string
+): void {
   const seen = new Set<string>();
   for (const item of items) {
     if (seen.has(item.name)) {
@@ -64,7 +72,11 @@ function assertSchemaFields(schema: Schema): void {
   }
 }
 
-function assertDomainBitOffsets<T extends { name: string; domain: string; bitOffset: number }>(items: T[], label: string, file: string): void {
+function assertDomainBitOffsets<T extends { name: string; domain: string; bitOffset: number }>(
+  items: T[],
+  label: string,
+  file: string
+): void {
   const byDomain = new Map<string, T[]>();
   for (const item of items) {
     if (!Number.isInteger(item.bitOffset) || item.bitOffset < 0) {
@@ -146,7 +158,12 @@ function assertRegistryDomainRanges<T extends { id: number; name: string; domain
   }
 }
 
-function assertKnownSchema(schemaName: string | undefined, schemas: Set<string>, entry: string, field: string): void {
+function assertKnownSchema(
+  schemaName: string | undefined,
+  schemas: Set<string>,
+  entry: string,
+  field: string
+): void {
   if (!schemaName) return;
   if (!schemas.has(schemaName)) {
     throw new GeneratorError({
@@ -159,9 +176,30 @@ function assertKnownSchema(schemaName: string | undefined, schemas: Set<string>,
   }
 }
 
-function assertKnownFieldItemType(itemType: string | undefined, schemas: Set<string>, entry: string, field: string): void {
+function assertKnownFieldItemType(
+  itemType: string | undefined,
+  schemas: Set<string>,
+  entry: string,
+  field: string
+): void {
   if (!itemType) return;
-  const builtins = new Set(["bool", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64", "number", "string", "bytes", "enum", "bitmap", "array"]);
+  const builtins = new Set([
+    "bool",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "number",
+    "string",
+    "bytes",
+    "enum",
+    "bitmap",
+    "array"
+  ]);
   if (builtins.has(itemType) || schemas.has(itemType)) return;
   throw new GeneratorError({
     code: "AXTP-GEN-1004",
@@ -217,7 +255,11 @@ function assertReservedReferences(spec: SpecModel): void {
   }
 }
 
-function assertMvpItems<T extends { name: string }>(actual: T[], required: string[], label: string): void {
+function assertMvpItems<T extends { name: string }>(
+  actual: T[],
+  required: string[],
+  label: string
+): void {
   const names = new Set(actual.map((item) => item.name));
   for (const item of required) {
     if (!names.has(item)) {
@@ -281,7 +323,13 @@ export function validateSpec(spec: SpecModel): string[] {
   assertUniqueNames(spec.methods, "method", "method_registry.yaml");
   assertUniqueIds(spec.events, "eventId", "event_registry.yaml");
   assertUniqueNames(spec.events, "event", "event_registry.yaml");
-  assertRegistryDomainRanges(spec.methods, "methodId", "method_registry.yaml", [], domainByHighByte);
+  assertRegistryDomainRanges(
+    spec.methods,
+    "methodId",
+    "method_registry.yaml",
+    [],
+    domainByHighByte
+  );
   assertRegistryDomainRanges(spec.events, "eventId", "event_registry.yaml", [], domainByHighByte);
   assertDomainBitOffsets(spec.methods, "method", "method_registry.yaml");
   assertDomainBitOffsets(spec.events, "event", "event_registry.yaml");
@@ -289,8 +337,20 @@ export function validateSpec(spec: SpecModel): string[] {
   assertUniqueNames(spec.errors, "error", "error_code.yaml");
   assertUniqueIds(spec.capabilities, "capabilityId", "capability_registry.yaml");
   assertUniqueNames(spec.capabilities, "capability", "capability_registry.yaml");
-  assertRegistryDomainRanges(spec.errors, "errorCode", "error_code.yaml", ["common", "frame", "control", "rpc"], domainByHighByte);
-  assertRegistryDomainRanges(spec.capabilities, "capabilityId", "capability_registry.yaml", ["protocol", "common", "reserved"], domainByHighByte);
+  assertRegistryDomainRanges(
+    spec.errors,
+    "errorCode",
+    "error_code.yaml",
+    ["common", "frame", "control", "rpc"],
+    domainByHighByte
+  );
+  assertRegistryDomainRanges(
+    spec.capabilities,
+    "capabilityId",
+    "capability_registry.yaml",
+    ["protocol", "common", "reserved"],
+    domainByHighByte
+  );
   assertUniqueNames(spec.schemas, "schema", "schema/*.yaml");
 
   for (const schema of spec.schemas) assertSchemaFields(schema);
@@ -309,9 +369,26 @@ export function validateSpec(spec: SpecModel): string[] {
   for (const schema of spec.schemas) {
     for (const field of schema.fields) {
       if (field.schema) assertKnownSchema(field.schema, schemaNames, schema.name, field.name);
-      if (field.array?.itemSchema) assertKnownSchema(field.array.itemSchema, schemaNames, schema.name, `${field.name}.array.itemSchema`);
-      if (field.array?.itemType) assertKnownFieldItemType(field.array.itemType, schemaNames, schema.name, `${field.name}.array.itemType`);
-      if (field.type === "array" && !field.schema && !field.array?.itemType && !field.array?.itemSchema) {
+      if (field.array?.itemSchema)
+        assertKnownSchema(
+          field.array.itemSchema,
+          schemaNames,
+          schema.name,
+          `${field.name}.array.itemSchema`
+        );
+      if (field.array?.itemType)
+        assertKnownFieldItemType(
+          field.array.itemType,
+          schemaNames,
+          schema.name,
+          `${field.name}.array.itemType`
+        );
+      if (
+        field.type === "array" &&
+        !field.schema &&
+        !field.array?.itemType &&
+        !field.array?.itemSchema
+      ) {
         throw new GeneratorError({
           code: "AXTP-GEN-1004",
           file: "registry/*.yaml",

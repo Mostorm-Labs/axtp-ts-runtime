@@ -1,20 +1,56 @@
-export * from "./core/support/io/bytes.js";
-export * from "./core/support/io/io.js";
-export * from "./core/protocol/model/model.js";
-export * from "./core/protocol/rpcEncoding.js";
-export * from "./core/protocol/wire/codec.js";
-export * from "./core/runtime/transport/transport.js";
-export * from "./core/runtime/broker/broker.js";
-export * from "./core/runtime/core/core.js";
-export * from "./core/runtime/endpoint/endpoint.js";
-export * from "./stream/stream.js";
-export * from "./profiles/media/mediaProfile.js";
-export * from "./json_rpc/jsonRpcAdapter.js";
-export * from "./sdk/sdk.js";
-export * from "./core/protocol/generated/axtp_ids_generated.js";
-export * from "./core/protocol/generated/registry_generated.js";
-export * from "./core/protocol/generated/schemas_generated.js";
-export * from "./core/protocol/generated/method_map_generated.js";
-export * from "./core/protocol/generated/event_map_generated.js";
-export * from "./core/protocol/generated/capability_map_generated.js";
-export * from "./core/protocol/generated/axtpGeneratedVersion.js";
+// @axtp/runtime 主入口（重构后）。
+// 用户主入口：AxtpClient / AxtpServer / Session / Stream / 类型 / 错误。
+// Node 传输在 ./node 子入口。
+
+// SDK
+export { AxtpClient } from "./sdk/client.js";
+export type { ClientOptions } from "./sdk/client.js";
+export { AxtpServer } from "./sdk/server.js";
+export type { ServerOptions } from "./sdk/server.js";
+export { AxtpSession } from "./session/session.js";
+export type {
+  CallContext,
+  CallOptions,
+  EventHandler,
+  MethodHandler,
+  SessionOptions,
+  UntypedEventHandler,
+  UntypedMethodHandler
+} from "./session/session.js";
+
+// Stream
+export { Stream } from "./sdk/stream.js";
+export type { StreamStats } from "./sdk/stream.js";
+
+// 重连
+export type { ReconnectInfo, ReconnectPolicy } from "./sdk/reconnect.js";
+
+// 类型（单一事实源）
+export {
+  EVENT_REGISTRY,
+  METHOD_REGISTRY,
+  computeEventMasks,
+  isEventSubscribed,
+  registry,
+  type EventId,
+  type EventName,
+  type EventPayload,
+  type MethodId,
+  type MethodName,
+  type MethodRequest,
+  type MethodResponse
+} from "./types/registry.js";
+
+// 错误
+export { AxtpError, ErrorCode, connectionClosedError, notReadyError } from "./types/error.js";
+export type { AxtpErrorOptions } from "./types/error.js";
+
+// 事件流
+export { EventStream } from "./types/events.js";
+
+// 协议常量（供高级用户）
+export { ControlOpcode, PayloadType, RpcOp } from "./protocol/generated/axtp_ids_generated.js";
+
+// IO（Bytes 类型）
+export type { Bytes } from "./io/bytes.js";
+export { bytesToHex, bytesToText, concatBytes, hexToBytes, toBytes } from "./io/bytes.js";

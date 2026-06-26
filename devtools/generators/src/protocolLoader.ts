@@ -38,7 +38,8 @@ function asStringArray(value: unknown): string[] {
 }
 
 function asObject(value: unknown, context: string): Record<string, any> {
-  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, any>;
+  if (value && typeof value === "object" && !Array.isArray(value))
+    return value as Record<string, any>;
   throw new GeneratorError({
     code: "AXTP-GEN-1001",
     file: "protocol/axtp.protocol.yaml",
@@ -71,10 +72,13 @@ function mapSchemaField(field: any, schemaName: string): SchemaField {
     schema: optionalString(field.schema),
     enumValues: enumValues === undefined ? undefined : asStringArray(enumValues),
     repeated: field.repeated === undefined ? undefined : Boolean(field.repeated),
-    array: field.array === undefined ? undefined : {
-      itemType: optionalString(field.array?.itemType),
-      itemSchema: optionalString(field.array?.itemSchema)
-    },
+    array:
+      field.array === undefined
+        ? undefined
+        : {
+            itemType: optionalString(field.array?.itemType),
+            itemSchema: optionalString(field.array?.itemSchema)
+          },
     description: field.description === undefined ? undefined : String(field.description)
   };
 }
@@ -274,13 +278,15 @@ function mapWireExamples(value: unknown): WireExample[] {
     transport: String(item.transport),
     frameProfile: String(item.frameProfile),
     description: String(item.description ?? ""),
-    steps: asArray(item.steps).map((step: any): WireExampleStep => ({
-      direction: String(step.direction),
-      label: String(step.label),
-      asciiLayout: String(step.asciiLayout ?? ""),
-      hexBytes: String(step.hexBytes ?? ""),
-      fieldAnnotations: asStringArray(step.fieldAnnotations)
-    }))
+    steps: asArray(item.steps).map(
+      (step: any): WireExampleStep => ({
+        direction: String(step.direction),
+        label: String(step.label),
+        asciiLayout: String(step.asciiLayout ?? ""),
+        hexBytes: String(step.hexBytes ?? ""),
+        fieldAnnotations: asStringArray(step.fieldAnnotations)
+      })
+    )
   }));
 }
 
@@ -291,12 +297,15 @@ function mapPayloadTypes(value: unknown): PayloadType[] {
     headerBytes: normalizeId(item.headerBytes, `payloadTypes.${item.name}.headerBytes`),
     description: String(item.description),
     selectionRule: item.selectionRule === undefined ? undefined : String(item.selectionRule),
-    headerFields: item.headerFields === undefined ? undefined : asArray(item.headerFields).map((f: any) => ({
-      name: String(f.name),
-      type: String(f.type),
-      bytes: typeof f.bytes === "number" ? f.bytes : String(f.bytes),
-      description: String(f.description)
-    }))
+    headerFields:
+      item.headerFields === undefined
+        ? undefined
+        : asArray(item.headerFields).map((f: any) => ({
+            name: String(f.name),
+            type: String(f.type),
+            bytes: typeof f.bytes === "number" ? f.bytes : String(f.bytes),
+            description: String(f.description)
+          }))
   }));
 }
 
@@ -355,7 +364,11 @@ export async function loadProtocolDefinition(specRoot: string): Promise<Protocol
   return loadProtocolDefinitionFromRaw(specRoot, sourcePath, raw);
 }
 
-export function loadProtocolDefinitionFromRaw(specRoot: string, sourcePath: string, raw: any): ProtocolModel {
+export function loadProtocolDefinitionFromRaw(
+  specRoot: string,
+  sourcePath: string,
+  raw: any
+): ProtocolModel {
   return {
     specRoot,
     sourcePath,

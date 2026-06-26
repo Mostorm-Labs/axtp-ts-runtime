@@ -59,23 +59,27 @@ ${enumBlock("CapabilityId", spec.capabilities, 4)}
 
 function emitRegistries(spec: SpecModel): string {
   const methodRows = sortById(spec.methods)
-    .map((item) =>
-      `  MethodDescriptor(${hex(item.id)}, ${quote(item.name)}, ${quote(item.domain)}, ${quote(item.requestSchema)}, ${quote(item.responseSchema)})`
+    .map(
+      (item) =>
+        `  MethodDescriptor(${hex(item.id)}, ${quote(item.name)}, ${quote(item.domain)}, ${quote(item.requestSchema)}, ${quote(item.responseSchema)})`
     )
     .join(",\n");
   const eventRows = sortById(spec.events)
-    .map((item) =>
-      `  EventDescriptor(${hex(item.id)}, ${quote(item.name)}, ${quote(item.domain)}, ${quote(item.eventSchema)})`
+    .map(
+      (item) =>
+        `  EventDescriptor(${hex(item.id)}, ${quote(item.name)}, ${quote(item.domain)}, ${quote(item.eventSchema)})`
     )
     .join(",\n");
   const errorRows = sortById(spec.errors)
-    .map((item) =>
-      `  ErrorDescriptor(${hex(item.id)}, ${quote(item.name)}, ${quote(item.domain)}, ${item.retryable})`
+    .map(
+      (item) =>
+        `  ErrorDescriptor(${hex(item.id)}, ${quote(item.name)}, ${quote(item.domain)}, ${item.retryable})`
     )
     .join(",\n");
   const capabilityRows = sortById(spec.capabilities)
-    .map((item) =>
-      `  CapabilityDescriptor(${hex(item.id)}, ${quote(item.name)}, ${quote(item.domain)}, ${quote(item.type)}, ${quote(item.schema)})`
+    .map(
+      (item) =>
+        `  CapabilityDescriptor(${hex(item.id)}, ${quote(item.name)}, ${quote(item.domain)}, ${quote(item.type)}, ${quote(item.schema)})`
     )
     .join(",\n");
 

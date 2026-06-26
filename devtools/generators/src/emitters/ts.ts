@@ -42,151 +42,6 @@ ${enumBlock("CapabilityId", spec.capabilities, 4)}
 `;
 }
 
-function emitRegistries(spec: SpecModel): string {
-  const methodRows = sortById(spec.methods)
-    .map((item) =>
-      `  { id: ${hex(item.id)}, name: ${quote(item.name)}, domain: ${quote(item.domain)}, requestSchema: ${quote(item.requestSchema)}, responseSchema: ${quote(item.responseSchema)} },`
-    )
-    .join("\n");
-  const eventRows = sortById(spec.events)
-    .map((item) =>
-      `  { id: ${hex(item.id)}, name: ${quote(item.name)}, domain: ${quote(item.domain)}, eventSchema: ${quote(item.eventSchema)} },`
-    )
-    .join("\n");
-  const errorRows = sortById(spec.errors)
-    .map((item) =>
-      `  { id: ${hex(item.id)}, name: ${quote(item.name)}, domain: ${quote(item.domain)}, retryable: ${item.retryable} },`
-    )
-    .join("\n");
-  const capabilityRows = sortById(spec.capabilities)
-    .map((item) =>
-      `  { id: ${hex(item.id)}, name: ${quote(item.name)}, domain: ${quote(item.domain)}, type: ${quote(item.type)}, schema: ${quote(item.schema)} },`
-    )
-    .join("\n");
-
-  return `${banner}
-import { ErrorCode } from "./axtp_ids_generated.js";
-
-export interface MethodDescriptor {
-  id: number;
-  name: string;
-  domain: string;
-  requestSchema: string;
-  responseSchema: string;
-}
-
-export interface EventDescriptor {
-  id: number;
-  name: string;
-  domain: string;
-  eventSchema: string;
-}
-
-export interface ErrorDescriptor {
-  id: number;
-  name: string;
-  domain: string;
-  retryable: boolean;
-}
-
-export interface CapabilityDescriptor {
-  id: number;
-  name: string;
-  domain: string;
-  type: string;
-  schema: string;
-}
-
-export const kMethodRegistry = [
-${methodRows}
-] as const satisfies readonly MethodDescriptor[];
-
-export const kEventRegistry = [
-${eventRows}
-] as const satisfies readonly EventDescriptor[];
-
-export const kErrorRegistry = [
-${errorRows}
-] as const satisfies readonly ErrorDescriptor[];
-
-export const kCapabilityRegistry = [
-${capabilityRows}
-] as const satisfies readonly CapabilityDescriptor[];
-
-export class RegistryLookup {
-  static methodIdByName(name: string): number | undefined {
-    return kMethodRegistry.find((descriptor) => descriptor.name === name)?.id;
-  }
-
-  static methodById(id: number): MethodDescriptor | undefined {
-    return kMethodRegistry.find((descriptor) => descriptor.id === id);
-  }
-
-  static eventIdByName(name: string): number | undefined {
-    return kEventRegistry.find((descriptor) => descriptor.name === name)?.id;
-  }
-
-  static eventById(id: number): EventDescriptor | undefined {
-    return kEventRegistry.find((descriptor) => descriptor.id === id);
-  }
-
-  static errorByCode(code: ErrorCode | number): ErrorDescriptor | undefined {
-    const value = Number(code);
-    return kErrorRegistry.find((descriptor) => descriptor.id === value);
-  }
-}
-
-export interface MethodRegistryEntry {
-  id: number;
-  name: string;
-}
-
-export class MethodRegistry {
-  private readonly nameToId = new Map<string, number>();
-  private readonly idToName = new Map<number, string>();
-
-  static fromGeneratedDefaults(): MethodRegistry {
-    const registry = new MethodRegistry();
-    for (const method of kMethodRegistry) {
-      registry.addMethod(method.id, method.name);
-    }
-    return registry;
-  }
-
-  addMethod(methodId: number, methodName: string): void {
-    const existingName = this.idToName.get(methodId);
-    if (existingName !== undefined) {
-      this.nameToId.delete(existingName);
-    }
-    const existingId = this.nameToId.get(methodName);
-    if (existingId !== undefined) {
-      this.idToName.delete(existingId);
-    }
-    this.nameToId.set(methodName, methodId);
-    this.idToName.set(methodId, methodName);
-  }
-
-  findMethodId(methodName: string): number | undefined {
-    return this.nameToId.get(methodName);
-  }
-
-  findMethodName(methodId: number): string | undefined {
-    return this.idToName.get(methodId);
-  }
-
-  containsMethod(method: number | string): boolean {
-    return typeof method === "number" ? this.idToName.has(method) : this.nameToId.has(method);
-  }
-
-  entries(): MethodRegistryEntry[] {
-    return [...this.idToName.entries()]
-      .sort(([lhs], [rhs]) => lhs - rhs)
-      .map(([id, name]) => ({ id, name }));
-  }
-}
-`;
-}
-
 const kScalarTypes: Record<string, string> = {
   bool: "boolean",
   string: "string",
@@ -249,63 +104,54 @@ function emitSchemas(spec: SpecModel): string {
   return `${banner}\n${blocks.join("\n\n")}\n`;
 }
 
-function emitMethodMap(spec: SpecModel): string {
-  const rows = sortById(spec.methods)
+// emitRegistryMap: 产出单一事实源 registry.ts。
+// 运行时 const 对象承载 id/status/bitOffset，类型用 keyof typeof 推导——
+// 类型层方法/事件名集合与运行时注册集合是同一个对象，物理上不可能漂移
+// （根除旧实现中 method_map interface 与 registry 数组双轨生成导致的不一致 BUG）。
+function emitRegistryMap(spec: SpecModel): string {
+  const methodRows = sortById(spec.methods)
     .map((method) => {
       const request = tsName(method.requestSchema || "Empty");
       const response = tsName(method.responseSchema || "Empty");
-      return `  ${quote(method.name)}: { request: AxtpSchemas.${request}; response: AxtpSchemas.${response}; };`;
+      const status = quote(method.status);
+      const bit = method.bitOffset ?? 0;
+      return `  ${quote(method.name)}: { id: ${hex(method.id, 4)}, status: ${status}, bitOffset: ${bit}, request: null as unknown as AxtpSchemas.${request}, response: null as unknown as AxtpSchemas.${response} },`;
     })
     .join("\n");
-  return `${banner}
-import type * as AxtpSchemas from "./schemas_generated.js";
-
-export interface AxtpMethodMap {
-${rows}
-}
-
-export type AxtpMethodName = keyof AxtpMethodMap;
-export type AxtpRequest<K extends AxtpMethodName> = AxtpMethodMap[K]["request"];
-export type AxtpResponse<K extends AxtpMethodName> = AxtpMethodMap[K]["response"];
-`;
-}
-
-function emitEventMap(spec: SpecModel): string {
-  const rows = sortById(spec.events)
+  const eventRows = sortById(spec.events)
     .map((event) => {
       const payload = tsName(event.eventSchema || "Empty");
-      return `  ${quote(event.name)}: { payload: AxtpSchemas.${payload}; };`;
+      const status = quote(event.status);
+      const bit = event.bitOffset ?? 0;
+      return `  ${quote(event.name)}: { id: ${hex(event.id, 4)}, status: ${status}, bitOffset: ${bit}, payload: null as unknown as AxtpSchemas.${payload} },`;
     })
     .join("\n");
   return `${banner}
+// 单一事实源：METHOD_REGISTRY / EVENT_REGISTRY。
+// 类型（MethodName/EventName 等）直接 keyof typeof 推导自下方 const，
+// 与运行时注册集合同源，不可漂移。
 import type * as AxtpSchemas from "./schemas_generated.js";
 
-export interface AxtpEventMap {
-${rows}
-}
+export type MethodStatus = "stable" | "draft" | "mvp" | "deprecated" | "reserved";
+export type EventStatus = "stable" | "draft" | "mvp" | "deprecated" | "reserved";
 
-export type AxtpEventName = keyof AxtpEventMap;
-export type AxtpEventPayload<K extends AxtpEventName> = AxtpEventMap[K]["payload"];
-`;
-}
+export const METHOD_REGISTRY = {
+${methodRows}
+} satisfies Record<string, { id: number; status: MethodStatus; bitOffset: number; request: unknown; response: unknown }>;
 
-function emitCapabilityMap(spec: SpecModel): string {
-  const rows = sortById(spec.capabilities)
-    .filter((capability) => (capability.schema ?? "").length > 0)
-    .map((capability) => {
-      const schema = tsName(capability.schema || "Empty");
-      return `  ${quote(capability.name)}: { schema: AxtpSchemas.${schema}; };`;
-    })
-    .join("\n");
-  return `${banner}
-import type * as AxtpSchemas from "./schemas_generated.js";
+export const EVENT_REGISTRY = {
+${eventRows}
+} satisfies Record<string, { id: number; status: EventStatus; bitOffset: number; payload: unknown }>;
 
-export interface AxtpCapabilityMap {
-${rows}
-}
+export type MethodName = keyof typeof METHOD_REGISTRY;
+export type EventName = keyof typeof EVENT_REGISTRY;
 
-export type AxtpCapabilityName = keyof AxtpCapabilityMap;
-export type AxtpCapabilitySchema<K extends AxtpCapabilityName> = AxtpCapabilityMap[K]["schema"];
+export type MethodRequest<K extends MethodName> = (typeof METHOD_REGISTRY)[K]["request"];
+export type MethodResponse<K extends MethodName> = (typeof METHOD_REGISTRY)[K]["response"];
+export type EventPayload<K extends EventName> = (typeof EVENT_REGISTRY)[K]["payload"];
+
+export type MethodId = (typeof METHOD_REGISTRY)[MethodName]["id"];
+export type EventId = (typeof EVENT_REGISTRY)[EventName]["id"];
 `;
 }
 
@@ -314,12 +160,11 @@ export async function emitTs(spec: SpecModel, outDir: string): Promise<void> {
 }
 
 export async function emitTsFiles(spec: SpecModel, tsDir: string): Promise<void> {
+  // 只产出单一事实源 3 文件：axtp_ids（枚举）/ schemas（结构）/ registry（id+status+bitOffset，类型 keyof typeof 推导）。
+  // 旧的双轨产物（registry_generated/method_map/event_map/capability_map）已停止产出——它们与 registry.ts 重复且运行时零引用。
   await Promise.all([
     writeTextFile(path.join(tsDir, "axtp_ids_generated.ts"), emitIds(spec)),
-    writeTextFile(path.join(tsDir, "registry_generated.ts"), emitRegistries(spec)),
     writeTextFile(path.join(tsDir, "schemas_generated.ts"), emitSchemas(spec)),
-    writeTextFile(path.join(tsDir, "method_map_generated.ts"), emitMethodMap(spec)),
-    writeTextFile(path.join(tsDir, "event_map_generated.ts"), emitEventMap(spec)),
-    writeTextFile(path.join(tsDir, "capability_map_generated.ts"), emitCapabilityMap(spec))
+    writeTextFile(path.join(tsDir, "registry.ts"), emitRegistryMap(spec))
   ]);
 }

@@ -167,9 +167,15 @@ function mapLegacy(item: any, file: string): LegacyMapping {
   }
   return {
     legacyProtocol: item.legacy_protocol ?? item.legacyProtocol,
-    legacyCmdValue: normalizeId(item.legacy_cmd_value ?? item.legacyCmdValue, `${file}:${item.legacy_name}`),
+    legacyCmdValue: normalizeId(
+      item.legacy_cmd_value ?? item.legacyCmdValue,
+      `${file}:${item.legacy_name}`
+    ),
     legacyName: item.legacy_name ?? item.legacyName,
-    axtpMethodId: normalizeId(item.axtp_method_id ?? item.axtpMethodId, `${file}:${item.legacy_name}`),
+    axtpMethodId: normalizeId(
+      item.axtp_method_id ?? item.axtpMethodId,
+      `${file}:${item.legacy_name}`
+    ),
     axtpMethodName: item.axtp_method_name ?? item.axtpMethodName,
     direction: item.direction,
     statusMapping
@@ -268,15 +274,22 @@ export async function loadSpec(specRoot: string): Promise<SpecModel> {
     payloadTypes: mapCommon(asArray(payloadTypeDoc.payload_types), "payload_type.yaml"),
     controlOpcodes: mapCommon(asArray(controlOpcodeDoc.control_opcodes), "control_opcode.yaml"),
     rpcEncodings: mapCommon(asArray(rpcEncodingDoc.rpc_encodings), "rpc_encoding.yaml"),
-    rpcBodyEncodings: mapCommon(asArray(rpcBodyEncodingDoc.rpc_body_encodings), "rpc_body_encoding.yaml"),
+    rpcBodyEncodings: mapCommon(
+      asArray(rpcBodyEncodingDoc.rpc_body_encodings),
+      "rpc_body_encoding.yaml"
+    ),
     rpcOps: mapCommon(asArray(rpcOpDoc.rpc_ops), "rpc_op.yaml"),
     streamProfiles: mapCommon(asArray(streamProfileDoc.stream_profiles), "stream_profile.yaml"),
     domainRegistry: mapDomainRanges(asArray(domainRegistryDoc.domains), "domain_registry.yaml"),
     methods: asArray(methodDoc.methods).map((item) => mapMethod(item, "method_registry.yaml")),
     events: asArray(eventDoc.events).map((item) => mapEvent(item, "event_registry.yaml")),
     errors: asArray(errorDoc.errors).map((item) => mapErrorCode(item, "error_code.yaml")),
-    capabilities: asArray(capabilityDoc.capabilities).map((item) => mapCapability(item, "capability_registry.yaml")),
-    legacyMappings: asArray(legacyDoc.legacy_mappings).map((item) => mapLegacy(item, "legacy_mapping.yaml")),
+    capabilities: asArray(capabilityDoc.capabilities).map((item) =>
+      mapCapability(item, "capability_registry.yaml")
+    ),
+    legacyMappings: asArray(legacyDoc.legacy_mappings).map((item) =>
+      mapLegacy(item, "legacy_mapping.yaml")
+    ),
     schemas: [
       ...mapSchemas(commonSchemaDoc, "common_fields.yaml"),
       ...mapSchemas(controlSchemaDoc, "control_schema.yaml"),

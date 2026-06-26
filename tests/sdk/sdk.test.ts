@@ -1,0 +1,187 @@
+import { describe, expect, it } from "vitest";
+import { AxtpClient } from "../../src/sdk/client.js";
+import { AxtpServer } from "../../src/sdk/server.js";
+import {
+  MockClientTransport,
+  MockServerTransport
+} from "../../src/transport/mock/mockTransport.js";
+import { unframedJsonCapabilities } from "../../src/transport/transport.js";
+
+function settle(ms = 20): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function makeServerClient(): Promise<{
+  server: AxtpServer;
+  client: AxtpClient;
+  serverTransport: MockServerTransport;
+}> {
+  const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+  const server = new AxtpServer(serverTransport);
+  await server.listen();
+
+  const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+  const client = new AxtpClient(clientTransport);
+  await client.connect();
+  await settle(10);
+  return { server, client, serverTransport };
+}
+
+describe("AxtpServer 多 client + 全局 handle", () => {
+  it("server 接受多个 client，各自独立 session", async () => {
+    const { server, serverTransport } = await makeServerClient();
+    const client2Transport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const client2 = new AxtpClient(client2Transport);
+    await client2.connect();
+    await settle(10);
+    expect(server.getSessions().length).toBe(2);
+    client2.close();
+    await settle(10);
+  });
+
+  it("全局 handle 所有 session 共享（委托 HandlerRegistry）", async () => {
+    const { server, client } = await makeServerClient();
+    server.handle("audio.getAlgorithmConfig", () => ({ shared: true }));
+    const result = await client.call("audio.getAlgorithmConfig", {});
+    expect(result).toEqual({ shared: true });
+  });
+
+  it("新连接自动应用已有全局 handler", async () => {
+    const { server, serverTransport } = await makeServerClient();
+    server.handle("audio.getAlgorithmConfig", () => ({ late: true }));
+    const client2Transport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const client2 = new AxtpClient(client2Transport);
+    await client2.connect();
+    await settle(10);
+    const result = await client2.call("audio.getAlgorithmConfig", {});
+    expect(result).toEqual({ late: true });
+  });
+
+  it("单播：server.call(sessionId, ...)", async () => {
+    const { server, client } = await makeServerClient();
+    let called = false;
+    // client 注册 handler，server 主动调 client
+    client.handle("audio.getAlgorithmConfig", () => {
+      called = true;
+      return { from: "client" };
+    });
+    await settle(10);
+    const sessionId = (server.getSessions()[0] as unknown as { __id: number }).__id;
+    const result = await server.call(sessionId, "audio.getAlgorithmConfig", {});
+    expect(called).toBe(true);
+    expect(result).toEqual({ from: "client" });
+  });
+
+  it("广播 emit 给所有 APP_READY session", async () => {
+    const { server, client, serverTransport } = await makeServerClient();
+    const client2Transport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const client2 = new AxtpClient(client2Transport);
+    await client2.connect();
+    await settle(10);
+
+    const received1: unknown[] = [];
+    const received2: unknown[] = [];
+    client.on("audio.algorithmConfigChanged", (p) => received1.push(p));
+    client2.on("audio.algorithmConfigChanged", (p) => received2.push(p));
+    await settle(10);
+
+    await server.emit("audio.algorithmConfigChanged", { broadcast: true });
+    await settle(10);
+    expect(received1.length).toBe(1);
+    expect(received2.length).toBe(1);
+  });
+
+  it("广播 filter 定向", async () => {
+    const { server, client, serverTransport } = await makeServerClient();
+    const client2Transport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const client2 = new AxtpClient(client2Transport);
+    await client2.connect();
+    await settle(10);
+
+    const received1: unknown[] = [];
+    const received2: unknown[] = [];
+    client.on("audio.algorithmConfigChanged", (p) => received1.push(p));
+    client2.on("audio.algorithmConfigChanged", (p) => received2.push(p));
+    await settle(10);
+
+    // 只发给第一个 session（用 sid 区分）
+    const targetSid = client.sid;
+    await server.emit("audio.algorithmConfigChanged", { x: 1 }, (s) => s.sid === targetSid);
+    await settle(10);
+    expect(received1.length).toBe(1);
+    expect(received2.length).toBe(0);
+  });
+});
+
+describe("AxtpClient 重连机制", () => {
+  it("断连后自动重连，handler 迁移", async () => {
+    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const server = new AxtpServer(serverTransport);
+    await server.listen();
+    server.handle("audio.getAlgorithmConfig", () => ({ reconnected: true }));
+
+    const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const client = new AxtpClient(clientTransport, {
+      reconnect: { enabled: true, initialDelayMs: 10, maxDelayMs: 50 }
+    });
+    await client.connect();
+
+    let reconnected = false;
+    client.onReconnect.subscribe(() => (reconnected = true));
+
+    // 模拟断连：client 端 transport 触发 onClose
+    // 通过 client.call 失败或直接触发——这里用 server 关闭该 session
+    const serverSession = server.getSessions()[0];
+    serverSession?.close();
+    await settle(100); // 等重连（退避 10ms）
+
+    expect(reconnected).toBe(true);
+    expect(client.isReady).toBe(true);
+
+    // handler 仍可用（迁移成功）
+    const result = await client.call("audio.getAlgorithmConfig", {});
+    expect(result).toEqual({ reconnected: true });
+  });
+
+  it("重连中 call 抛 InvalidState", async () => {
+    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const server = new AxtpServer(serverTransport);
+    await server.listen();
+    const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const client = new AxtpClient(clientTransport, {
+      reconnect: { enabled: true, initialDelayMs: 1000, maxDelayMs: 1000 }
+    });
+    await client.connect();
+
+    server.getSessions()[0]?.close();
+    await settle(10);
+    expect(() => client.call("audio.getAlgorithmConfig", {})).toThrow();
+  });
+
+  it("主动 close 不触发重连", async () => {
+    const { server: _server, client } = await makeServerClient();
+    let reconnected = false;
+    client.onReconnect.subscribe(() => (reconnected = true));
+    await client.close();
+    await settle(50);
+    expect(reconnected).toBe(false);
+  });
+});
+
+describe("AxtpClient handle unsubscribe（重连安全）", () => {
+  it("unsubscribe 操作 snapshot，重连后不再迁移", async () => {
+    const { server, client, serverTransport: _serverTransport } = await makeServerClient();
+    let callCount = 0;
+    const unsub = client.handle("audio.getAlgorithmConfig", () => {
+      callCount++;
+      return {};
+    });
+    unsub();
+    await settle(10);
+
+    // 重新用全局 handler 测试
+    server.handle("audio.getAlgorithmConfig", () => ({ ok: 1 }));
+    await client.call("audio.getAlgorithmConfig", {});
+    expect(callCount).toBe(0); // 已 unsubscribe，不应被调用
+  });
+});

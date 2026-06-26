@@ -1,0 +1,26 @@
+# 构建产物
+dist/
+devtools/generators/dist/
+
+# 依赖
+node_modules/
+devtools/generators/node_modules/
+
+# 第三方（git submodule：AXTP spec 仓库，非本仓库代码）
+third_party/
+
+# 代码生成产物（生成器产出，勿手动格式化）
+src/protocol/generated/
+
+# 生成器快照/产物
+devtools/generators/src/__snapshots__/
+
+# 锁文件与 manifest（机器生成）
+pnpm-lock.yaml
+devtools/generators/pnpm-lock.yaml
+AXTP_SPEC.lock.yaml
+pnpm-workspace.yaml
+devtools/generators/pnpm-workspace.yaml
+
+# 仓库根生成产物（生成器 manifest 等）
+generated/

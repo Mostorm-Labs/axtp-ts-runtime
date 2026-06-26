@@ -100,10 +100,14 @@ function renderFieldConstraint(field: SchemaField): string {
     field.maxLength === undefined ? undefined : `maxLength=${field.maxLength}`,
     field.derivedFrom === undefined ? undefined : `derivedFrom=${field.derivedFrom}`,
     field.schema === undefined ? undefined : `schema=${field.schema}`,
-    field.enumValues === undefined || field.enumValues.length === 0 ? undefined : `enum=${field.enumValues.join("/")}`,
+    field.enumValues === undefined || field.enumValues.length === 0
+      ? undefined
+      : `enum=${field.enumValues.join("/")}`,
     field.repeated ? "repeated" : undefined,
     field.array?.itemType === undefined ? undefined : `array.itemType=${field.array.itemType}`,
-    field.array?.itemSchema === undefined ? undefined : `array.itemSchema=${field.array.itemSchema}`,
+    field.array?.itemSchema === undefined
+      ? undefined
+      : `array.itemSchema=${field.array.itemSchema}`,
     field.deprecated ? "deprecated" : undefined
   ].filter(Boolean);
   return constraints.length > 0 ? constraints.join(", ") : "None";
@@ -159,15 +163,13 @@ function renderFields(schema: SchemaDefinition | undefined): string[] {
   );
 }
 
-function renderInlineType(title: string, typeName: string, schemas: Map<string, SchemaDefinition>): string[] {
+function renderInlineType(
+  title: string,
+  typeName: string,
+  schemas: Map<string, SchemaDefinition>
+): string[] {
   const schema = schemas.get(typeName);
-  return [
-    `#### ${title}`,
-    "",
-    `Type: \`${typeName}\``,
-    "",
-    ...renderFields(schema)
-  ];
+  return [`#### ${title}`, "", `Type: \`${typeName}\``, "", ...renderFields(schema)];
 }
 
 function renderMethod(method: MethodDefinition, schemas: Map<string, SchemaDefinition>): string[] {
@@ -239,16 +241,19 @@ function referencedTypeNames(model: ProtocolModel): Set<string> {
   return new Set([
     ...model.methods.flatMap((method) => [method.request.type, method.response.type]),
     ...model.events.map((event) => event.payload.type),
-    ...model.capabilities.flatMap((capability) => capability.schema ? [capability.schema] : []),
-    ...model.schemas.flatMap((schema) => schema.fields.flatMap((field) => [
-      field.schema,
-      field.array?.itemSchema
-    ].filter((value): value is string => Boolean(value))))
+    ...model.capabilities.flatMap((capability) => (capability.schema ? [capability.schema] : [])),
+    ...model.schemas.flatMap((schema) =>
+      schema.fields.flatMap((field) =>
+        [field.schema, field.array?.itemSchema].filter((value): value is string => Boolean(value))
+      )
+    )
   ]);
 }
 
 function sortedCapabilities(capabilities: CapabilityDefinition[]): CapabilityDefinition[] {
-  return [...capabilities].sort((a, b) => a.capabilityId - b.capabilityId || a.name.localeCompare(b.name));
+  return [...capabilities].sort(
+    (a, b) => a.capabilityId - b.capabilityId || a.name.localeCompare(b.name)
+  );
 }
 
 function renderCapabilityDiscovery(model: ProtocolModel): string[] {
@@ -345,7 +350,9 @@ function streamSupportLabel(t: ProtocolModel["transports"][number]): string {
 function renderProtocolFramework(model: ProtocolModel): string[] {
   const framed = model.transports.filter((transport) => transport.frameProfile !== "none");
   const unframed = model.transports.filter((transport) => transport.frameProfile === "none");
-  const framedRpcEncodings = [...new Set(framed.flatMap((transport) => transport.rpcEncodings ?? []))];
+  const framedRpcEncodings = [
+    ...new Set(framed.flatMap((transport) => transport.rpcEncodings ?? []))
+  ];
   return [
     "## Protocol Framework",
     "",
@@ -404,7 +411,14 @@ function renderConnectionProfiles(model: ProtocolModel): string[] {
     "### Role Matrix",
     "",
     ...table(
-      ["Profile", "Physical Client", "Physical Server", "Logical Client", "Logical Server", "Hello Sender"],
+      [
+        "Profile",
+        "Physical Client",
+        "Physical Server",
+        "Logical Client",
+        "Logical Server",
+        "Hello Sender"
+      ],
       model.transports.map((t) => [
         t.name,
         optional(t.physicalClient),
@@ -437,7 +451,9 @@ function renderConnectionProfiles(model: ProtocolModel): string[] {
     );
   }
 
-  const jsonEntry = model.guide.quickStart.find((g) => g.title === "WebSocket Unframed JSON Startup");
+  const jsonEntry = model.guide.quickStart.find(
+    (g) => g.title === "WebSocket Unframed JSON Startup"
+  );
   if (jsonEntry) {
     lines.push(
       "",
@@ -566,7 +582,12 @@ export function renderProtocolMarkdown(model: ProtocolModel): string {
         ["Spec Version", String(model.protocol.specVersion)],
         ["Registry Version", model.protocol.registryVersion],
         ["Status", optional(model.protocol.status)],
-        ["Wire Byte Order", model.wire.byteOrderAlias ? `${model.wire.byteOrder} / ${model.wire.byteOrderAlias}` : model.wire.byteOrder],
+        [
+          "Wire Byte Order",
+          model.wire.byteOrderAlias
+            ? `${model.wire.byteOrder} / ${model.wire.byteOrderAlias}`
+            : model.wire.byteOrder
+        ],
         ["Wire Integer Encoding", model.wire.integerEncoding],
         ["CRC Byte Order", model.wire.crcByteOrder]
       ]
@@ -637,7 +658,12 @@ export function renderProtocolMarkdown(model: ProtocolModel): string {
       "",
       ...renderMethodDomainToc(model, domain),
       "",
-      ...methodsInDomain(model, domain).flatMap((method) => ["---", "", ...renderMethod(method, schemas), ""]),
+      ...methodsInDomain(model, domain).flatMap((method) => [
+        "---",
+        "",
+        ...renderMethod(method, schemas),
+        ""
+      ]),
       "---",
       ""
     ]),
@@ -648,15 +674,22 @@ export function renderProtocolMarkdown(model: ProtocolModel): string {
       "",
       ...renderEventDomainToc(model, domain),
       "",
-      ...eventsInDomain(model, domain).flatMap((event) => ["---", "", ...renderEvent(event, schemas), ""]),
+      ...eventsInDomain(model, domain).flatMap((event) => [
+        "---",
+        "",
+        ...renderEvent(event, schemas),
+        ""
+      ]),
       "---",
       ""
     ]),
-    ...(additionalTypes.length > 0 ? [
-      "# Additional Types",
-      "",
-      ...additionalTypes.flatMap((type) => [...renderAdditionalType(type), "", "---", ""])
-    ] : []),
+    ...(additionalTypes.length > 0
+      ? [
+          "# Additional Types",
+          "",
+          ...additionalTypes.flatMap((type) => [...renderAdditionalType(type), "", "---", ""])
+        ]
+      : []),
     "# Errors Reference",
     "",
     ...table(
@@ -674,10 +707,18 @@ export function renderProtocolMarkdown(model: ProtocolModel): string {
     "",
     "# Profiles Reference",
     "",
-    ...sortedProfiles(model.profiles).flatMap((profile) => [...renderProfile(profile), "", "---", ""])
+    ...sortedProfiles(model.profiles).flatMap((profile) => [
+      ...renderProfile(profile),
+      "",
+      "---",
+      ""
+    ])
   ];
 
-  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
+  return `${lines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd()}\n`;
 }
 
 export async function emitProtocolMarkdown(model: ProtocolModel, outDir: string): Promise<void> {

@@ -20,43 +20,56 @@ function baseSpec(): SpecModel {
     rpcOps: [{ id: 7, value: 7, name: "REQUEST", domain: "rpc", status: "mvp" }],
     streamProfiles: [],
     domainRegistry: [],
-    methods: [{
-      id: 0x0902,
-      name: "audio.setAlgorithmConfig",
-      domain: "audio",
-      status: "stable",
-      bitOffset: 0,
-      rpcOp: "request_response",
-      requestSchema: "AudioSetAlgorithmConfigRequest",
-      responseSchema: "AudioSetAlgorithmConfigResponse",
-      recommendedEncoding: ["binary_tlv"],
-      capabilities: ["audio.algorithm"],
-      events: ["audio.algorithmConfigChanged"],
-      errors: ["SUCCESS"]
-    }],
-    events: [{
-      id: 0x0901,
-      name: "audio.algorithmConfigChanged",
-      domain: "audio",
-      status: "stable",
-      bitOffset: 0,
-      eventSchema: "AudioAlgorithmConfigChangedEvent",
-      trigger: ["audio.setAlgorithmConfig"],
-      capabilities: ["audio.algorithm"]
-    }],
+    methods: [
+      {
+        id: 0x0902,
+        name: "audio.setAlgorithmConfig",
+        domain: "audio",
+        status: "stable",
+        bitOffset: 0,
+        rpcOp: "request_response",
+        requestSchema: "AudioSetAlgorithmConfigRequest",
+        responseSchema: "AudioSetAlgorithmConfigResponse",
+        recommendedEncoding: ["binary_tlv"],
+        capabilities: ["audio.algorithm"],
+        events: ["audio.algorithmConfigChanged"],
+        errors: ["SUCCESS"]
+      }
+    ],
+    events: [
+      {
+        id: 0x0901,
+        name: "audio.algorithmConfigChanged",
+        domain: "audio",
+        status: "stable",
+        bitOffset: 0,
+        eventSchema: "AudioAlgorithmConfigChangedEvent",
+        trigger: ["audio.setAlgorithmConfig"],
+        capabilities: ["audio.algorithm"]
+      }
+    ],
     errors: [{ id: 0, name: "SUCCESS", domain: "common", status: "stable", retryable: false }],
     capabilities: [
-      { id: 0x0901, name: "audio.algorithm", domain: "audio", status: "stable", type: "object", schema: "AudioAlgorithmCapability" }
+      {
+        id: 0x0901,
+        name: "audio.algorithm",
+        domain: "audio",
+        status: "stable",
+        type: "object",
+        schema: "AudioAlgorithmCapability"
+      }
     ],
-    legacyMappings: [{
-      legacyProtocol: "axdp_hid",
-      legacyCmdValue: 0x42,
-      legacyName: "CommonSetNoiseSuppressionLevel",
-      axtpMethodId: 0x0902,
-      axtpMethodName: "audio.setAlgorithmConfig",
-      direction: "request_response",
-      statusMapping: { "0x00": "SUCCESS" }
-    }],
+    legacyMappings: [
+      {
+        legacyProtocol: "axdp_hid",
+        legacyCmdValue: 0x42,
+        legacyName: "CommonSetNoiseSuppressionLevel",
+        axtpMethodId: 0x0902,
+        axtpMethodName: "audio.setAlgorithmConfig",
+        direction: "request_response",
+        statusMapping: { "0x00": "SUCCESS" }
+      }
+    ],
     schemas: [
       { name: "AudioAlgorithmCapability", type: "object", fields: [] },
       {
@@ -180,14 +193,30 @@ describe("emitters", () => {
     try {
       await mkdir(dir, { recursive: true });
       await emitAll(baseSpec(), dir);
-      await expect(await readFile(path.join(dir, "cpp", "axtp_ids_generated.h"), "utf8")).toMatchFileSnapshot("./__snapshots__/axtp_ids_generated.h");
-      await expect(await readFile(path.join(dir, "docs", "method_registry.generated.md"), "utf8")).toMatchFileSnapshot("./__snapshots__/method_registry.generated.md");
-      await expect(await readFile(path.join(dir, "json", "method_registry.generated.json"), "utf8")).toMatchFileSnapshot("./__snapshots__/method_registry.generated.json");
-      await expect(await readFile(path.join(dir, "test_vectors", "manifest.json"), "utf8")).toMatchFileSnapshot("./__snapshots__/manifest.json");
-      expect(await readFile(path.join(dir, "test_vectors", "control_open.hex"), "utf8")).toContain("415801010005");
-      expect(await readFile(path.join(dir, "test_vectors", "rpc_audio_set_algorithm_config.hex"), "utf8")).toContain("0902");
-      expect(await readFile(path.join(dir, "test_vectors", "stream_object_chunk.hex"), "utf8")).toContain("00000009000000010000000000000001");
-      await expect(await readFile(path.join(dir, "ts", "axtp_ids_generated.ts"), "utf8")).toMatchFileSnapshot("./__snapshots__/axtp_ids_generated.ts");
+      await expect(
+        await readFile(path.join(dir, "cpp", "axtp_ids_generated.h"), "utf8")
+      ).toMatchFileSnapshot("./__snapshots__/axtp_ids_generated.h");
+      await expect(
+        await readFile(path.join(dir, "docs", "method_registry.generated.md"), "utf8")
+      ).toMatchFileSnapshot("./__snapshots__/method_registry.generated.md");
+      await expect(
+        await readFile(path.join(dir, "json", "method_registry.generated.json"), "utf8")
+      ).toMatchFileSnapshot("./__snapshots__/method_registry.generated.json");
+      await expect(
+        await readFile(path.join(dir, "test_vectors", "manifest.json"), "utf8")
+      ).toMatchFileSnapshot("./__snapshots__/manifest.json");
+      expect(await readFile(path.join(dir, "test_vectors", "control_open.hex"), "utf8")).toContain(
+        "415801010005"
+      );
+      expect(
+        await readFile(path.join(dir, "test_vectors", "rpc_audio_set_algorithm_config.hex"), "utf8")
+      ).toContain("0902");
+      expect(
+        await readFile(path.join(dir, "test_vectors", "stream_object_chunk.hex"), "utf8")
+      ).toContain("00000009000000010000000000000001");
+      await expect(
+        await readFile(path.join(dir, "ts", "axtp_ids_generated.ts"), "utf8")
+      ).toMatchFileSnapshot("./__snapshots__/axtp_ids_generated.ts");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

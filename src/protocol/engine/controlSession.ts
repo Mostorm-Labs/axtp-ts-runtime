@@ -1,0 +1,210 @@
+// ControlSession：链路层状态机（OPEN/ACCEPT/CLOSE/CLOSE_ACK，framed only）。
+// 连接语义，归 Connection。与 Handshake（会话语义）正交。
+// spec:121 拒绝 OPEN = 带非零 statusCode 的 ACCEPT（无 REJECT opcode）。
+// spec:123 对 OPEN/HEARTBEAT/CLOSE 的 response MUST 回显 controlId。
+// spec:142 Phase1 不要求 ACK/NACK/RESUME。
+// 协商（maxFrameSize/heartbeatIntervalMs/supportedRpcEncodings）结果供 Connection 配置 codec + 心跳。
+
+import { ControlOpcode, ErrorCode } from "../../protocol/generated/axtp_ids_generated.js";
+import type { CloseCode, CloseReason } from "../../transport/transport.js";
+import {
+  decodeControl,
+  defaultOpenParams,
+  encodeAccept,
+  encodeClose,
+  encodeCloseAck,
+  encodeOpen,
+  encodeReject,
+  type NegotiationParams
+} from "../codec/control.js";
+
+export interface NegotiatedLink {
+  readonly maxFrameSize: number;
+  readonly heartbeatIntervalMs: number;
+  readonly selectedRpcEncoding: number;
+  readonly accepted: boolean;
+}
+
+export interface ControlSessionCallbacks {
+  /** 链路 OPEN/ACCEPT 成功（framed）。 */
+  onLinkReady?: (negotiated: NegotiatedLink) => void;
+  /** 需要发送字节（CONTROL 帧）。 */
+  onSendBytes?: (bytes: Uint8Array) => void;
+  /** 收到对端 HEARTBEAT（需回 ack）—— 由 Connection 处理发送。 */
+  onHeartbeat?: (controlId: number) => void;
+  /** 收到对端 HEARTBEAT_ACK（心跳重置）。 */
+  onHeartbeatAck?: (controlId: number) => void;
+  /** 链路进入 CLOSING（收到 CLOSE）。 */
+  onClosing?: (controlId: number) => void;
+}
+
+/**
+ * framed-binary 链路层状态机。
+ * client 角色：主动发 OPEN，等 ACCEPT。
+ * server 角色：等 OPEN，回 ACCEPT（协商）。
+ */
+export class ControlSession {
+  private open = false;
+  private closing = false;
+  private nextControlId = 1;
+  private pendingOpenId: number | undefined;
+  private negotiated: NegotiatedLink | undefined;
+  private readonly localParams: NegotiationParams;
+
+  constructor(
+    private readonly role: "server" | "client",
+    private readonly callbacks: ControlSessionCallbacks,
+    localParams?: NegotiationParams
+  ) {
+    this.localParams = localParams ?? defaultOpenParams();
+  }
+
+  /** client: 发起 OPEN。 */
+  sendOpen(): void {
+    const controlId = this.takeControlId();
+    this.pendingOpenId = controlId;
+    const bytes = encodeOpen(controlId, this.localParams);
+    this.callbacks.onSendBytes?.(this.wrapFrame(bytes, ControlOpcode.Open));
+  }
+
+  get isOpen(): boolean {
+    return this.open && !this.closing;
+  }
+
+  get isClosing(): boolean {
+    return this.closing;
+  }
+
+  get negotiatedLink(): NegotiatedLink | undefined {
+    return this.negotiated;
+  }
+
+  /** 主动发起 CLOSE。 */
+  sendClose(): void {
+    const controlId = this.takeControlId();
+    this.closing = true;
+    const bytes = encodeClose(controlId);
+    this.callbacks.onSendBytes?.(this.wrapFrame(bytes, ControlOpcode.Close));
+  }
+
+  /**
+   * 处理入站 CONTROL 字节（已剥离 frame header 的 payload body）。
+   * 返回值指示链路状态变化。
+   */
+  handleControlBody(body: Uint8Array): void {
+    const decoded = decodeControl(body);
+    switch (decoded.opcode) {
+      case ControlOpcode.Open:
+        this.handleOpen(decoded.controlId, decoded.tlv);
+        break;
+      case ControlOpcode.Accept:
+        this.handleAccept(decoded.controlId, decoded.statusCode, decoded.tlv);
+        break;
+      case ControlOpcode.Heartbeat:
+        this.callbacks.onHeartbeat?.(decoded.controlId);
+        break;
+      case ControlOpcode.HeartbeatAck:
+        this.callbacks.onHeartbeatAck?.(decoded.controlId);
+        break;
+      case ControlOpcode.Close:
+        this.handleClose(decoded.controlId);
+        break;
+      case ControlOpcode.CloseAck:
+        this.closing = true;
+        this.open = false;
+        break;
+    }
+  }
+
+  private handleOpen(controlId: number, tlv: Partial<NegotiationParams>): void {
+    if (this.role !== "server") return;
+    // 协商：取双方较小 maxFrameSize，heartbeat 取对方值，selectedRpcEncoding = JSON。
+    const maxFrameSize = Math.min(
+      this.localParams.maxFrameSize,
+      tlv.maxFrameSize ?? this.localParams.maxFrameSize
+    );
+    const heartbeatIntervalMs = tlv.heartbeatIntervalMs ?? this.localParams.heartbeatIntervalMs;
+    const acceptParams: NegotiationParams = {
+      ...this.localParams,
+      maxFrameSize,
+      heartbeatIntervalMs,
+      selectedRpcEncoding: 0x01 // JSON only
+    };
+    // 校验对端是否支持 JSON（本期 JSON-only）
+    const peerSupportsJson = (tlv.supportedRpcEncodings ?? 0) & 0x01;
+    if (!peerSupportsJson) {
+      // 拒绝（带非零 statusCode 的 ACCEPT）
+      this.callbacks.onSendBytes?.(
+        this.wrapFrame(
+          encodeReject(controlId, ErrorCode.ControlNegotiationFailed),
+          ControlOpcode.Accept
+        )
+      );
+      return;
+    }
+    const bytes = encodeAccept(controlId, acceptParams);
+    this.open = true;
+    this.negotiated = {
+      maxFrameSize,
+      heartbeatIntervalMs,
+      selectedRpcEncoding: 0x01,
+      accepted: true
+    };
+    this.callbacks.onSendBytes?.(this.wrapFrame(bytes, ControlOpcode.Accept));
+    this.callbacks.onLinkReady?.(this.negotiated);
+  }
+
+  private handleAccept(
+    controlId: number,
+    statusCode: number,
+    tlv: Partial<NegotiationParams>
+  ): void {
+    if (this.role !== "client") return;
+    if (controlId !== this.pendingOpenId) return;
+    this.pendingOpenId = undefined;
+    if (statusCode !== ErrorCode.Success) {
+      // 被拒绝
+      this.negotiated = {
+        maxFrameSize: 0,
+        heartbeatIntervalMs: 0,
+        selectedRpcEncoding: 0,
+        accepted: false
+      };
+      return;
+    }
+    this.open = true;
+    this.negotiated = {
+      maxFrameSize: tlv.maxFrameSize ?? this.localParams.maxFrameSize,
+      heartbeatIntervalMs: tlv.heartbeatIntervalMs ?? this.localParams.heartbeatIntervalMs,
+      selectedRpcEncoding: tlv.selectedRpcEncoding ?? 0x01,
+      accepted: true
+    };
+    this.callbacks.onLinkReady?.(this.negotiated);
+  }
+
+  private handleClose(controlId: number): void {
+    this.closing = true;
+    this.open = false;
+    // 回 CLOSE_ACK（回显 controlId）
+    this.callbacks.onSendBytes?.(this.wrapFrame(encodeCloseAck(controlId), ControlOpcode.CloseAck));
+    this.callbacks.onClosing?.(controlId);
+  }
+
+  private takeControlId(): number {
+    const id = this.nextControlId;
+    this.nextControlId = (this.nextControlId + 1) & 0xffff;
+    return id;
+  }
+
+  /** 把 CONTROL payload body 包成 frame 字节（Connection 提供编码能力时由其完成；这里用占位回调）。
+   * 当前实现：直接把 body 作为"已成帧字节"传给 onSendBytes——实际成帧由 Connection 的 codec 完成。
+   * 为保持 ControlSession 不依赖 frame codec，这里发出的是 CONTROL payload body，由 Connection 包装成帧。 */
+  private wrapFrame(controlBody: Uint8Array, _opcode: ControlOpcode): Uint8Array {
+    return controlBody;
+  }
+}
+
+/** 便捷：构造 CloseReason。 */
+export function toCloseReason(code: CloseCode, reason: string, remote: boolean): CloseReason {
+  return { code, reason, remote };
+}

@@ -25,27 +25,46 @@ describe("protocol definition loader", () => {
   it("loads and validates the current protocol definition", async () => {
     const model = await loadCurrentProtocol();
     expect(model.protocol.name).toBe("AXTP");
-    expect(validateProtocolDefinition(model)).toContain(`[OK] protocol/axtp.protocol.yaml: ${model.methods.length} methods checked`);
+    expect(validateProtocolDefinition(model)).toContain(
+      `[OK] protocol/axtp.protocol.yaml: ${model.methods.length} methods checked`
+    );
   });
 });
 
 describe("protocol source pipeline", () => {
   it("loads registry/domain sources and builds a valid protocol definition", async () => {
     const sources = await loadProtocolSources(repoRoot);
-    expect(validateSpec(sources)).toContain(`[OK] method_registry.yaml: ${sources.methods.length} methods checked`);
-    expect(sources.methods.find((method) => method.name === "audio.setAlgorithmConfig")?.requestSchema).toBe("AudioSetAlgorithmConfigRequest");
-    expect(sources.methods.find((method) => method.name === "audio.getAlgorithmCapabilities")?.responseSchema).toBe("AudioGetAlgorithmCapabilitiesResponse");
+    expect(validateSpec(sources)).toContain(
+      `[OK] method_registry.yaml: ${sources.methods.length} methods checked`
+    );
+    expect(
+      sources.methods.find((method) => method.name === "audio.setAlgorithmConfig")?.requestSchema
+    ).toBe("AudioSetAlgorithmConfigRequest");
+    expect(
+      sources.methods.find((method) => method.name === "audio.getAlgorithmCapabilities")
+        ?.responseSchema
+    ).toBe("AudioGetAlgorithmCapabilitiesResponse");
     const model = buildProtocolDefinition(sources);
-    expect(model.methods.find((method) => method.name === "audio.getAlgorithmConfig")?.response.type).toBe("AudioAlgorithmConfig");
-    expect(model.methods.find((method) => method.name === "audio.resetAlgorithmConfig")?.response.type).toBe("AudioSetAlgorithmConfigResponse");
-    expect(validateProtocolDefinition(model)).toContain(`[OK] protocol/axtp.protocol.yaml: ${model.methods.length} methods checked`);
+    expect(
+      model.methods.find((method) => method.name === "audio.getAlgorithmConfig")?.response.type
+    ).toBe("AudioAlgorithmConfig");
+    expect(
+      model.methods.find((method) => method.name === "audio.resetAlgorithmConfig")?.response.type
+    ).toBe("AudioSetAlgorithmConfigResponse");
+    expect(validateProtocolDefinition(model)).toContain(
+      `[OK] protocol/axtp.protocol.yaml: ${model.methods.length} methods checked`
+    );
   });
 
   it("rejects deprecated top-level domain YAML sources", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "axtp-legacy-domains-"));
     try {
       await mkdir(path.join(dir, "domains", "stream"), { recursive: true });
-      await writeFile(path.join(dir, "domains", "stream", "domain.yaml"), "domain: stream\n", "utf8");
+      await writeFile(
+        path.join(dir, "domains", "stream", "domain.yaml"),
+        "domain: stream\n",
+        "utf8"
+      );
       await expect(loadProtocolSources(dir)).rejects.toThrow(/top-level domains\/ is deprecated/);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -68,15 +87,23 @@ describe("protocol definition validator", () => {
 
   it("rejects non-contiguous method bitOffset values in the same domain", async () => {
     const model = cloneModel(await loadCurrentProtocol());
-    const maxAudioBitOffset = Math.max(...model.methods.filter((method) => method.domain === "audio").map((method) => method.bitOffset));
-    model.methods.find((method) => method.name === "audio.resetAlgorithmConfig")!.bitOffset = maxAudioBitOffset + 2;
+    const maxAudioBitOffset = Math.max(
+      ...model.methods
+        .filter((method) => method.domain === "audio")
+        .map((method) => method.bitOffset)
+    );
+    model.methods.find((method) => method.name === "audio.resetAlgorithmConfig")!.bitOffset =
+      maxAudioBitOffset + 2;
     expect(() => validateProtocolDefinition(model)).toThrow(/bitOffset must be contiguous from 0/);
   });
 
   it("rejects non-contiguous event bitOffset values in the same domain", async () => {
     const model = cloneModel(await loadCurrentProtocol());
-    const maxAudioBitOffset = Math.max(...model.events.filter((event) => event.domain === "audio").map((event) => event.bitOffset));
-    model.events.find((event) => event.name === "audio.algorithmConfigChanged")!.bitOffset = maxAudioBitOffset + 2;
+    const maxAudioBitOffset = Math.max(
+      ...model.events.filter((event) => event.domain === "audio").map((event) => event.bitOffset)
+    );
+    model.events.find((event) => event.name === "audio.algorithmConfigChanged")!.bitOffset =
+      maxAudioBitOffset + 2;
     expect(() => validateProtocolDefinition(model)).toThrow(/bitOffset must be contiguous from 0/);
   });
 
@@ -89,13 +116,17 @@ describe("protocol definition validator", () => {
       { name: "chunkLength", type: "uint16" },
       { name: "flags", type: "uint16" }
     ];
-    expect(() => validateProtocolDefinition(model)).toThrow(/legacy field: seq|STREAM header must contain/);
+    expect(() => validateProtocolDefinition(model)).toThrow(
+      /legacy field: seq|STREAM header must contain/
+    );
   });
 
   it("rejects stream headers that do not match streamId, seqId and cursor", async () => {
     const model = cloneModel(await loadCurrentProtocol());
     model.stream.header.fields[2].type = "uint32";
-    expect(() => validateProtocolDefinition(model)).toThrow(/STREAM header must be streamId:uint32, seqId:uint32, cursor:uint64/);
+    expect(() => validateProtocolDefinition(model)).toThrow(
+      /STREAM header must be streamId:uint32, seqId:uint32, cursor:uint64/
+    );
   });
 
   it("rejects protocol IR that does not declare network byte order", async () => {
@@ -109,7 +140,15 @@ describe("protocol definition validator", () => {
     model.schemas.push({
       name: "CapabilitySupportedMethodsResponse",
       kind: "object",
-      fields: [{ fieldId: 0x01, name: "methodMasks", type: "bytes", required: true, derivedFrom: "methods.bitOffset" }]
+      fields: [
+        {
+          fieldId: 0x01,
+          name: "methodMasks",
+          type: "bytes",
+          required: true,
+          derivedFrom: "methods.bitOffset"
+        }
+      ]
     });
     expect(() => validateProtocolDefinition(model)).toThrow(/methods\[\]\.bitOffset/);
   });
@@ -117,13 +156,16 @@ describe("protocol definition validator", () => {
   it("rejects non-Empty empty request or response types", async () => {
     const model = cloneModel(await loadCurrentProtocol());
     model.schemas.push({ name: "AudioEmptyButNamedRequest", kind: "object", fields: [] });
-    model.methods.find((method) => method.name === "audio.getAlgorithmConfig")!.request.type = "AudioEmptyButNamedRequest";
+    model.methods.find((method) => method.name === "audio.getAlgorithmConfig")!.request.type =
+      "AudioEmptyButNamedRequest";
     expect(() => validateProtocolDefinition(model)).toThrow(/empty request must use Empty/);
   });
 
   it("rejects duplicate type field ids", async () => {
     const model = cloneModel(await loadCurrentProtocol());
-    const response = model.schemas.find((schema) => schema.name === "AudioSetAlgorithmConfigResponse")!;
+    const response = model.schemas.find(
+      (schema) => schema.name === "AudioSetAlgorithmConfigResponse"
+    )!;
     response.fields[1].fieldId = response.fields[0].fieldId;
     expect(() => validateProtocolDefinition(model)).toThrow(/duplicate fieldId/);
   });
@@ -142,7 +184,9 @@ describe("protocol definition validator", () => {
 
   it("rejects profile frame profiles not backed by transports", async () => {
     const model = cloneModel(await loadCurrentProtocol());
-    model.profiles.find((profile) => profile.name === "AXTP-MVP")!.frameProfiles.push("UNUSED_FRAME");
+    model.profiles
+      .find((profile) => profile.name === "AXTP-MVP")!
+      .frameProfiles.push("UNUSED_FRAME");
     model.frameProfiles.push({ name: "UNUSED_FRAME", l1: "STANDARD_L1", l2: "STANDARD_L2" });
     expect(() => validateProtocolDefinition(model)).toThrow(/not used by transportProfiles/);
   });
@@ -162,7 +206,9 @@ describe("protocol definition validator", () => {
 
   it("rejects hid-64 profile references", async () => {
     const model = cloneModel(await loadCurrentProtocol());
-    model.profiles.find((profile) => profile.name === "AXTP-MVP-HID")!.transportProfiles = ["AXTP-HID-64"];
+    model.profiles.find((profile) => profile.name === "AXTP-MVP-HID")!.transportProfiles = [
+      "AXTP-HID-64"
+    ];
     expect(() => validateProtocolDefinition(model)).toThrow(/AXTP-USB-HID/);
   });
 
@@ -175,13 +221,17 @@ describe("protocol definition validator", () => {
 
   it("rejects missing method error references", async () => {
     const model = cloneModel(await loadCurrentProtocol());
-    model.methods.find((item) => item.name === "audio.setAlgorithmConfig")!.errors.push("MISSING_ERROR");
+    model.methods
+      .find((item) => item.name === "audio.setAlgorithmConfig")!
+      .errors.push("MISSING_ERROR");
     expect(() => validateProtocolDefinition(model)).toThrow(/missing error: MISSING_ERROR/);
   });
 
   it("rejects missing method event references", async () => {
     const model = cloneModel(await loadCurrentProtocol());
-    model.methods.find((item) => item.name === "audio.setAlgorithmConfig")!.events.push("audio.missingEvent");
+    model.methods
+      .find((item) => item.name === "audio.setAlgorithmConfig")!
+      .events.push("audio.missingEvent");
     expect(() => validateProtocolDefinition(model)).toThrow(/missing event: audio.missingEvent/);
   });
 
@@ -212,15 +262,21 @@ describe("protocol definition validator", () => {
   it("rejects forbidden legacy protocol definition fields", async () => {
     const model = cloneModel(await loadCurrentProtocol());
     (model.raw as any).methods[0].bitmapId = 1;
-    expect(() => validateProtocolDefinition(model)).toThrow(/forbidden legacy Protocol Definition field: bitmapId/);
+    expect(() => validateProtocolDefinition(model)).toThrow(
+      /forbidden legacy Protocol Definition field: bitmapId/
+    );
 
     const requestsModel = cloneModel(await loadCurrentProtocol());
     (requestsModel.raw as any).profiles[0].requests = ["legacy.request"];
-    expect(() => validateProtocolDefinition(requestsModel)).toThrow(/forbidden legacy Protocol Definition field: requests/);
+    expect(() => validateProtocolDefinition(requestsModel)).toThrow(
+      /forbidden legacy Protocol Definition field: requests/
+    );
 
     const requiredRequestsModel = cloneModel(await loadCurrentProtocol());
     (requiredRequestsModel.raw as any).profiles[0].requiredRequests = ["legacy.request"];
-    expect(() => validateProtocolDefinition(requiredRequestsModel)).toThrow(/forbidden legacy Protocol Definition field: requiredRequests/);
+    expect(() => validateProtocolDefinition(requiredRequestsModel)).toThrow(
+      /forbidden legacy Protocol Definition field: requiredRequests/
+    );
   });
 });
 
@@ -228,7 +284,9 @@ describe("protocol docs consistency validator", () => {
   it("accepts the current protocol docs facts", async () => {
     const model = await loadCurrentProtocol();
     const docs = await loadProtocolDocs(repoRoot);
-    expect(validateProtocolDocsConsistency(model, docs)).toContain("[OK] specs: STREAM header facts checked");
+    expect(validateProtocolDocsConsistency(model, docs)).toContain(
+      "[OK] specs: STREAM header facts checked"
+    );
   });
 
   it("rejects missing stream header facts in docs", async () => {
@@ -249,7 +307,9 @@ describe("protocol docs consistency validator", () => {
     const model = cloneModel(await loadCurrentProtocol());
     const docs = await loadProtocolDocs(repoRoot);
     model.stream.header.fields[1].name = "seq";
-    expect(() => validateProtocolDocsConsistency(model, docs)).toThrow(/legacy field: seq|seqId:uint32/);
+    expect(() => validateProtocolDocsConsistency(model, docs)).toThrow(
+      /legacy field: seq|seqId:uint32/
+    );
   });
 });
 
@@ -261,10 +321,10 @@ describe("protocol definition emitters", () => {
       await emitProtocolDocs(model, dir);
       const json = await readFile(path.join(dir, "protocol.json"), "utf8");
       const markdown = await readFile(path.join(dir, "protocol.md"), "utf8");
-      expect(json).toContain("\"byteOrder\": \"big-endian\"");
-      expect(json).toContain("\"byteOrderAlias\": \"network\"");
-      expect(json).toContain("\"supportsStream\": false");
-      expect(json).toContain("\"supportsControl\": false");
+      expect(json).toContain('"byteOrder": "big-endian"');
+      expect(json).toContain('"byteOrderAlias": "network"');
+      expect(json).toContain('"supportsStream": false');
+      expect(json).toContain('"supportsControl": false');
       expect(markdown).toContain("## Main Table of Contents");
       expect(markdown).toContain("## Protocol Framework");
       expect(markdown).toContain("Wire Byte Order");
