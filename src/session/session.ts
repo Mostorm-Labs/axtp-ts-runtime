@@ -22,6 +22,7 @@ import type {
 import type { RpcPayload } from "../protocol/model.js";
 import { rpcPayload } from "../protocol/model.js";
 import { Stream } from "../sdk/stream.js";
+import type { LogicalRole } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import { registry } from "../types/registry.js";
@@ -93,13 +94,13 @@ export class AxtpSession {
   private readonly defaultTimeoutMs: number;
 
   constructor(
-    private readonly role: "server" | "client",
+    private readonly logicalRole: LogicalRole,
     conn: Connection,
     options: SessionOptions = {}
   ) {
     this.conn = conn;
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? 10000;
-    this.handshake = new Handshake(role, options.handshakeSeed);
+    this.handshake = new Handshake(logicalRole, options.handshakeSeed);
     this.globalHandlers = options.globalHandlers;
     if (options.eventMasks) this.handshake.setEventMasks(options.eventMasks);
 
@@ -365,14 +366,14 @@ export class AxtpSession {
     }
   }
 
-  /** server 角色：链路 ready 后发 Hello（spec: Logical Server 发 Hello）。 */
+  /** 链路 ready 后：Logical Server 发 Hello（spec: Hello 永远由 Logical Server 发，与 Physical 角色正交）。 */
   private onLinkReady(): void {
     this.handshake.onLinkReady();
-    if (this.role === "server") {
-      // server 发 Hello
+    if (this.logicalRole === "server") {
+      // Logical Server 发 Hello
       this.conn.sendRpc(this.handshake.startHello());
     }
-    // client 等待 Hello 到达，ingest 里处理
+    // Logical Client 等待 Hello 到达，ingest 里处理
   }
 
   private dispatchRequest(payload: RpcPayload): void {

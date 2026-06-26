@@ -11,7 +11,7 @@
 
 import type { Bytes } from "../io/bytes.js";
 import { PayloadType, RpcEncoding } from "../protocol/generated/axtp_ids_generated.js";
-import type { CloseReason, ITransport, TransportCapabilities } from "../transport/transport.js";
+import type { CloseReason, ITransport, PhysicalRole, TransportCapabilities } from "../transport/transport.js";
 import { CloseCode } from "../transport/transport.js";
 import { hasNativePing } from "../transport/ws/nodeWsTransport.js";
 import type { AxtpError } from "../types/error.js";
@@ -51,7 +51,7 @@ export class Connection {
 
   private readonly transport: ITransport;
   private readonly capabilities: TransportCapabilities;
-  private readonly role: "server" | "client";
+  private readonly physicalRole: PhysicalRole;
   private readonly options: ConnectionOptions;
 
   private readonly controlSession: ControlSession | undefined;
@@ -68,8 +68,8 @@ export class Connection {
   /** start 前的消息缓冲（防止 transport 在 Connection 构造到 start 间投递的消息丢失）。 */
   private readonly pendingBytes: Bytes[] = [];
 
-  constructor(role: "server" | "client", transport: ITransport, options: ConnectionOptions = {}) {
-    this.role = role;
+  constructor(physicalRole: PhysicalRole, transport: ITransport, options: ConnectionOptions = {}) {
+    this.physicalRole = physicalRole;
     this.transport = transport;
     this.capabilities = transport.capabilities;
     this.options = options;
@@ -79,7 +79,7 @@ export class Connection {
 
     if (this.capabilities.wireMode === "framed-binary") {
       this.controlSession = new ControlSession(
-        role,
+        physicalRole,
         {
           onSendBytes: (body) => this.sendFramedMessage(PayloadType.Control, body),
           onLinkReady: (neg) => this.onNegotiatedLinkReady(neg),
@@ -130,8 +130,8 @@ export class Connection {
     for (const bytes of buffered) this.onTransportBytes(bytes);
 
     if (this.capabilities.wireMode === "framed-binary") {
-      if (this.role === "client") this.controlSession!.sendOpen();
-      // server 等待对端 OPEN
+      // Physical Client 发 OPEN；Physical Server 等待对端 OPEN
+      if (this.physicalRole === "client") this.controlSession!.sendOpen();
     } else {
       // unframed-json：无 CONTROL 链路层，连接建立即 link ready。
       this.fireLinkReady();

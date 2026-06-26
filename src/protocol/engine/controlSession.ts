@@ -6,7 +6,7 @@
 // 协商（maxFrameSize/heartbeatIntervalMs/supportedRpcEncodings）结果供 Connection 配置 codec + 心跳。
 
 import { ControlOpcode, ErrorCode } from "../../protocol/generated/axtp_ids_generated.js";
-import type { CloseCode, CloseReason } from "../../transport/transport.js";
+import type { CloseCode, CloseReason, PhysicalRole } from "../../transport/transport.js";
 import {
   decodeControl,
   defaultOpenParams,
@@ -52,14 +52,14 @@ export class ControlSession {
   private readonly localParams: NegotiationParams;
 
   constructor(
-    private readonly role: "server" | "client",
+    private readonly physicalRole: PhysicalRole,
     private readonly callbacks: ControlSessionCallbacks,
     localParams?: NegotiationParams
   ) {
     this.localParams = localParams ?? defaultOpenParams();
   }
 
-  /** client: 发起 OPEN。 */
+  /** Physical Client: 发起 OPEN。 */
   sendOpen(): void {
     const controlId = this.takeControlId();
     this.pendingOpenId = controlId;
@@ -117,7 +117,8 @@ export class ControlSession {
   }
 
   private handleOpen(controlId: number, tlv: Partial<NegotiationParams>): void {
-    if (this.role !== "server") return;
+    // Physical Server 处理 OPEN 回 ACCEPT
+    if (this.physicalRole !== "server") return;
     // 协商：取双方较小 maxFrameSize，heartbeat 取对方值，selectedRpcEncoding = JSON。
     const maxFrameSize = Math.min(
       this.localParams.maxFrameSize,
@@ -159,7 +160,8 @@ export class ControlSession {
     statusCode: number,
     tlv: Partial<NegotiationParams>
   ): void {
-    if (this.role !== "client") return;
+    // Physical Client 处理 ACCEPT（自己发的 OPEN 的回应）
+    if (this.physicalRole !== "client") return;
     if (controlId !== this.pendingOpenId) return;
     this.pendingOpenId = undefined;
     if (statusCode !== ErrorCode.Success) {

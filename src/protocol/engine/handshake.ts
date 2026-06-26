@@ -3,12 +3,13 @@
 // 规范 Runtime gate 4 态：LINK_CONNECTED -> FRAMING_READY -> APP_READY -> CLOSING。
 // 会话语义，归 Session。
 //
-// 角色：server 发 Hello/Identified、生成 sid；client 发 Identify、校验 axtpVersion。
-// Hello 发送方 = Logical Server（方向与物理方向解耦）。
+// 角色：Logical Server 发 Hello/Identified、生成 sid；Logical Client 发 Identify、校验 axtpVersion。
+// Hello 发送方 = Logical Server（与 Physical 角色正交，方向与物理连接方向解耦）。
 // sid = 8 位 hex，混合 randomSeed（禁直接当 sid，spec:207）。
 // Identified.d = {}（对齐 conformance；sid 在 envelope 外层）。
 
 import { ErrorCode, RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
+import type { LogicalRole } from "../../transport/transport.js";
 import { AxtpError } from "../../types/error.js";
 import type { RpcPayload } from "../model.js";
 import { rpcPayload } from "../model.js";
@@ -30,7 +31,7 @@ export class Handshake {
   private readonly localState: number;
 
   constructor(
-    private readonly role: "server" | "client",
+    private readonly logicalRole: LogicalRole,
     /** server 生成本地熵的种子（与 randomSeed 混合生成 sid）。 */
     localSeed?: number
   ) {
@@ -47,7 +48,7 @@ export class Handshake {
     }
   }
 
-  /** server 产生首条 Hello。client 不调。 */
+  /** Logical Server 产生首条 Hello。Logical Client 不调。 */
   startHello(): RpcPayload {
     return rpcPayload({
       op: RpcOp.Hello,
@@ -110,8 +111,8 @@ export class Handshake {
   }
 
   private handleHello(payload: RpcPayload): HandshakeResult {
-    if (this.role !== "client") {
-      // server 不应收到 Hello（自己是发送方）；忽略。
+    // Logical Client 收 Hello 回 Identify；Logical Server 不应收到 Hello（自己是发送方）
+    if (this.logicalRole !== "client") {
       return { becameReady: false };
     }
     if (this.stateValue === "LINK_CONNECTED") {
@@ -150,7 +151,8 @@ export class Handshake {
   }
 
   private handleIdentify(payload: RpcPayload): HandshakeResult {
-    if (this.role !== "server") {
+    // Logical Server 收 Identify 回 Identified、生成 sid
+    if (this.logicalRole !== "server") {
       return { becameReady: false };
     }
     try {
@@ -178,7 +180,8 @@ export class Handshake {
   }
 
   private handleIdentified(payload: RpcPayload): HandshakeResult {
-    if (this.role !== "client") {
+    // Logical Client 收 Identified 变 ready
+    if (this.logicalRole !== "client") {
       return { becameReady: false };
     }
     // sid 在 envelope 外层（conformance: identified.d == {}）

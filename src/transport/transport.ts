@@ -10,6 +10,24 @@ import type { EventStream } from "../types/events.js";
 /** wire 模式：Standard Framed Binary（TCP）或 WebSocket Unframed JSON。 */
 export type WireMode = "framed-binary" | "unframed-json";
 
+/**
+ * Physical 角色：谁发起传输连接（TCP/WS socket）。
+ * 驱动 CONTROL OPEN/ACCEPT——Physical Client 发 OPEN，Physical Server 回 ACCEPT。
+ * （spec: OPEN 跟随 Physical Client -> Physical Server）
+ */
+export type PhysicalRole = "client" | "server";
+
+/**
+ * Logical 角色：谁是能力提供方。
+ * 驱动 RPC Hello/Identify/Identified——Logical Server 永远发 Hello、分配 sid；Logical Client 发 Identify。
+ * （spec: Hello 永远由 Logical Server -> Logical Client）
+ *
+ * Physical 角色与 Logical 角色正交：经典场景下 AxtpClient=Physical Client+Logical Client、
+ * AxtpServer=Physical Server+Logical Server；反向连接拓扑（设备主动连云但仍是 Logical Server）
+ * 下二者分离，需分别指定。
+ */
+export type LogicalRole = "client" | "server";
+
 /** 传输能力声明。 */
 export interface TransportCapabilities {
   readonly wireMode: WireMode;
