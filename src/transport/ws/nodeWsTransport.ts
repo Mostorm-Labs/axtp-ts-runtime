@@ -47,13 +47,16 @@ class WsTransport implements ITransport, NativePingCapable {
   readonly onError = new EventStream<AxtpError>();
   readonly capabilities = unframedJsonCapabilities();
   private connected = true;
+  /** WS-JSON 以文本帧传输 JSON，发送前需 bytes→string。 */
+  private readonly textDecoder = new TextDecoder();
   /** attach 前的消息缓冲（防止 ws message 在 Connection 订阅前到达丢失）。 */
   private attached = false;
   private readonly buffered: Bytes[] = [];
 
   constructor(private readonly ws: WebSocket) {
     ws.on("message", (data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
-      void isBinary;
+      // WS-JSON profile 仅承载文本 JSON，拒绝二进制帧（spec: WS MUST NOT 承载 STREAM/CRC/Frame Header）。
+      if (isBinary) return;
       let bytes: Bytes;
       if (Array.isArray(data)) {
         const total = data.reduce((s, b) => s + b.length, 0);
@@ -90,7 +93,9 @@ class WsTransport implements ITransport, NativePingCapable {
 
   send(bytes: Bytes): void {
     if (!this.connected) return;
-    this.ws.send(bytes);
+    // WS-JSON profile 是文本 JSON：必须以文本帧（opcode 0x1）发送，而非二进制帧。
+    // bytes 是 UTF-8 编码的 JSON 文本，解码成 string 后以文本帧发送。
+    this.ws.send(this.textDecoder.decode(bytes), { binary: false });
   }
 
   ping(): void {
