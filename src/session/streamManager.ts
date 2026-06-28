@@ -5,9 +5,9 @@
 
 import { ErrorCode } from "../protocol/generated/axtp_ids_generated.js";
 import type { StreamPayload } from "../protocol/model.js";
-import { Stream } from "../sdk/stream.js";
 import { AxtpError } from "../types/error.js";
 import type { SessionIO } from "./handshakeOrchestrator.js";
+import { Stream } from "./stream.js";
 import { StreamRegistry, type StreamContext } from "./streamRegistry.js";
 
 export class StreamManager {

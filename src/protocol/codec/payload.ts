@@ -11,6 +11,7 @@ import {
 } from "../../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload, StreamPayload } from "../model.js";
 import { rpcPayload } from "../model.js";
+import { decodeJsonRpc } from "./jsonRpc.js";
 import { decodeStream } from "./stream.js";
 
 /** 入站分发目标。 */
@@ -51,19 +52,9 @@ export class PayloadDecoder {
       return;
     }
     const jsonBody = body.slice(1);
-    // 复用 jsonRpc 解码逻辑：把 JSON 文本解码为 RpcPayload。
-    // 注意：framed-binary 下 envelope 仍是 {sid,op,d} JSON。
-    // 这里通过动态导入避免循环；实际 jsonRpc 是纯函数，直接 import。
-    const payload = decodeFramedRpc(jsonBody);
+    const payload = decodeJsonRpc(jsonBody);
     if (payload !== undefined) this.sink.onRpc(payload);
   }
-}
-
-// 延迟引用 jsonRpc（避免 codec 内部循环）。
-import { decodeJsonRpc } from "./jsonRpc.js";
-
-function decodeFramedRpc(jsonBody: Uint8Array): RpcPayload | undefined {
-  return decodeJsonRpc(jsonBody);
 }
 
 /** 编码 framed-binary RPC message body（rpcEncoding 前缀 + JSON）。 */

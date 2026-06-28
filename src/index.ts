@@ -19,8 +19,8 @@ export type {
 } from "./session/session.js";
 
 // Stream
-export { Stream } from "./sdk/stream.js";
-export type { StreamStats } from "./sdk/stream.js";
+export { Stream } from "./session/stream.js";
+export type { StreamStats } from "./session/stream.js";
 
 // 重连
 export type { ReconnectInfo, ReconnectPolicy } from "./protocol/reconnect.js";

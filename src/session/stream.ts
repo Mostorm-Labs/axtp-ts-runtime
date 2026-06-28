@@ -1,12 +1,11 @@
 // Stream：应用层数据流句柄（双向）。
-// 建流通过 RPC method（video.openStream 等）协商，streamId 由 server 分配。
+// 归 session 层（由 StreamManager 构造，依赖 StreamContext 同目录）。
 // onChunk 接收对端数据（cursor 透传，Core 不解释，应用层按 cursorUnit 解释）。
 // send 发送本地数据。close 通过 RPC（video.closeStream）或连接断开清理。
-// seqId 严格校验是 profile-specific，Core 只统计不强制（spec:251）。
 
 import type { Bytes } from "../io/bytes.js";
-import type { StreamContext } from "../session/streamRegistry.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
+import type { StreamContext } from "./streamRegistry.js";
 
 export interface StreamStats {
   readonly chunks: number;

@@ -2,13 +2,7 @@
 // connect() 建立 transport + Session。自动重连由 Session+Connection 协作（SDK 只转发事件）。
 // handler/event 注册到 Session，重连不换 Session 实例，表自然保留——无需快照迁移。
 
-import type {
-  EventName,
-  EventPayload,
-  MethodName,
-  MethodRequest,
-  MethodResponse
-} from "../protocol/generated/registry.js";
+import type { ReconnectPolicy } from "../protocol/reconnect.js";
 import {
   AxtpSession,
   type CallContext,
@@ -17,10 +11,16 @@ import {
   type UntypedEventHandler,
   type UntypedMethodHandler
 } from "../session/session.js";
-import type { ReconnectPolicy } from "../protocol/reconnect.js";
 import type { IClientTransport } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
+import type {
+  EventName,
+  EventPayload,
+  MethodName,
+  MethodRequest,
+  MethodResponse
+} from "../types/registry.js";
 
 export interface ClientOptions extends SessionOptions {
   /** 传输重连策略（透传给 Session→Connection）。 */
@@ -33,7 +33,10 @@ export class AxtpClient {
 
   private readonly onConnectStream = new EventStream<void>();
   private readonly onDisconnectStream = new EventStream<{ reason: string; remote: boolean }>();
-  private readonly onReconnectStream = new EventStream<{ attempt: number; totalDowntimeMs: number }>();
+  private readonly onReconnectStream = new EventStream<{
+    attempt: number;
+    totalDowntimeMs: number;
+  }>();
   private readonly onReconnectFailedStream = new EventStream<void>();
 
   constructor(
@@ -88,7 +91,11 @@ export class AxtpClient {
 
   // ===== 四件套（转发 Session）=====
 
-  call<K extends MethodName>(method: K, params: MethodRequest<K>, options?: CallOptions): Promise<MethodResponse<K>>;
+  call<K extends MethodName>(
+    method: K,
+    params: MethodRequest<K>,
+    options?: CallOptions
+  ): Promise<MethodResponse<K>>;
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown>;
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
     this.requireUsable();
@@ -97,10 +104,16 @@ export class AxtpClient {
 
   handle<K extends MethodName>(
     method: K,
-    handler: (ctx: CallContext, params: MethodRequest<K>) => MethodResponse<K> | Promise<MethodResponse<K>>
+    handler: (
+      ctx: CallContext,
+      params: MethodRequest<K>
+    ) => MethodResponse<K> | Promise<MethodResponse<K>>
   ): () => void;
   handle(method: string, handler: UntypedMethodHandler): () => void;
-  handle(method: string, handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>): () => void {
+  handle(
+    method: string,
+    handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
+  ): () => void {
     return this.session!.handle(method, handler as UntypedMethodHandler);
   }
 
@@ -121,10 +134,6 @@ export class AxtpClient {
   async close(): Promise<void> {
     this.session?.close();
     this.connected = false;
-  }
-
-  get session_(): AxtpSession | undefined {
-    return this.session;
   }
 
   private requireUsable(): void {

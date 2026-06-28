@@ -2,9 +2,8 @@
 // 每个 WS message 即一个 AXTP JSON envelope {sid,op,d}。
 // 多连接：每个 ws 连接产出一个 ITransport 经 onConnection 上报。
 //
-// 心跳：WS 用原生 ping/pong（spec 明确 WS 不走 CONTROL）。
-// 为保持 ITransport 接口纯净，WS transport 额外实现可选能力探测接口 NativePingCapable，
-// Connection 用鸭子类型（hasNativePing）取用——不污染 ITransport，也不让 Connection 硬依赖 ws 类型。
+// 心跳：WS 用原生 ping/pong（spec 明确 WS 不走 CONTROL），
+// 通过 ITransport.sendKeepalive/onKeepaliveAck 暴露（capabilities.supportsKeepalive=true）。
 
 import { WebSocket, WebSocketServer } from "ws";
 import type { Bytes } from "../../io/bytes.js";
@@ -19,19 +18,6 @@ import {
   type ITransport
 } from "../transport.js";
 
-/** 可选能力探测：WS transport 额外提供原生 ping/pong，Connection 用它做心跳。 */
-export interface NativePingCapable {
-  /** 发送原生 ping 帧。 */
-  ping(): void;
-  /** 订阅原生 pong 到达。 */
-  onPong(listener: () => void): () => void;
-}
-
-/** 鸭子类型判断 transport 是否提供原生 ping 能力。 */
-export function hasNativePing(t: ITransport): t is ITransport & NativePingCapable {
-  return typeof (t as Partial<NativePingCapable>).ping === "function";
-}
-
 interface WsClientOptions {
   url: string;
   /** 协议子列表（可选）。 */
@@ -41,7 +27,7 @@ interface WsClientOptions {
 }
 
 /** 一条已建立的 WS 连接。 */
-class WsTransport implements ITransport, NativePingCapable {
+class WsTransport implements ITransport {
   readonly onMessage = new EventStream<Bytes>();
   readonly onClose = new EventStream<CloseReason>();
   readonly onError = new EventStream<AxtpError>();
@@ -94,15 +80,16 @@ class WsTransport implements ITransport, NativePingCapable {
   send(bytes: Bytes): void {
     if (!this.connected) return;
     // WS-JSON profile 是文本 JSON：必须以文本帧（opcode 0x1）发送，而非二进制帧。
-    // bytes 是 UTF-8 编码的 JSON 文本，解码成 string 后以文本帧发送。
     this.ws.send(this.textDecoder.decode(bytes), { binary: false });
   }
 
-  ping(): void {
+  /** 保活探测：WS 映射到 ws.ping()。 */
+  sendKeepalive(): void {
     if (this.connected) this.ws.ping();
   }
 
-  onPong(listener: () => void): () => void {
+  /** 保活确认：WS 映射到 ws pong 事件。 */
+  onKeepaliveAck(listener: () => void): () => void {
     const handler = (): void => listener();
     this.ws.on("pong", handler);
     return () => {
@@ -195,7 +182,8 @@ export class NodeWsClientTransport implements IClientTransport {
   constructor(private readonly options: WsClientOptions) {}
 
   connect(): Promise<ITransport> {
-    if (!this.available) return Promise.reject(new AxtpError(ErrorCode.Unavailable, "transport unavailable"));
+    if (!this.available)
+      return Promise.reject(new AxtpError(ErrorCode.Unavailable, "transport unavailable"));
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(this.options.url, this.options.protocols, {
         headers: this.options.headers

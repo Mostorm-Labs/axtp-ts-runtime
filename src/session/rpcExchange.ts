@@ -1,7 +1,6 @@
-// RpcExchange：RPC 请求/响应收发（单一职责：call 发起 + dispatcher 匹配 + 入站 Request 路由）。
+// RpcExchange：RPC 请求/响应/事件 收发（单一职责：call/emit 发起 + dispatcher 匹配 + 入站 Request/Event 路由）。
 // 持有 RpcDispatcher（pending call Promise 匹配）。
-// doCall 发起请求（通过 SessionIO 发送），dispatchRequest 入站 Request 路由到 HandlerRouter。
-// 响应到达由 dispatcher.resolve 匹配。
+// 通过 SessionIO 发送，通过 HandlerRouter 路由入站。
 
 import { RpcDispatcher } from "../protocol/engine/rpcDispatcher.js";
 import { ErrorCode, RpcOp } from "../protocol/generated/axtp_ids_generated.js";
@@ -11,7 +10,7 @@ import { AxtpError } from "../types/error.js";
 import { registry } from "../types/registry.js";
 import type { HandlerRouter } from "./handlerRouter.js";
 import type { SessionIO } from "./handshakeOrchestrator.js";
-import type { CallContext } from "./session.js";
+import type { CallContext } from "./types.js";
 
 export class RpcExchange {
   readonly dispatcher = new RpcDispatcher();
@@ -59,6 +58,20 @@ export class RpcExchange {
         );
       }
     });
+  }
+
+  /** 发起 emit（事件发送）。 */
+  emitEvent(event: string, payload: unknown): Promise<void> {
+    const eventId = registry.eventId(event as never) ?? 0;
+    const rpc = rpcPayload({
+      op: RpcOp.Event,
+      methodOrEventId: eventId,
+      jsonSid: this.getSid(),
+      body: new TextEncoder().encode(JSON.stringify(payload ?? {})),
+      meta: { jsonMethodOrEventName: event }
+    });
+    this.io.sendRpc(rpc);
+    return Promise.resolve();
   }
 
   /** 入站 RequestResponse：匹配 dispatcher。 */
@@ -125,6 +138,26 @@ export class RpcExchange {
           );
         }
       );
+  }
+
+  /** 入站 Event：路由到 event handler。 */
+  dispatchEvent(payload: RpcPayload): void {
+    const eventName = payload.meta.jsonMethodOrEventName ?? "";
+    const handlers = this.router.getEventHandlers(eventName);
+    if (handlers.size === 0) return;
+    let data: unknown;
+    try {
+      data = payload.body.length === 0 ? {} : JSON.parse(new TextDecoder().decode(payload.body));
+    } catch {
+      return;
+    }
+    for (const handler of handlers) {
+      try {
+        handler(data);
+      } catch {
+        // 单个 handler 抛错不影响其它
+      }
+    }
   }
 
   /** 断连时 reject 所有 pending。 */

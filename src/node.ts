@@ -9,13 +9,11 @@ export {
   NodeTcpServerTransport
 } from "./transport/tcp/nodeTcpTransport.js";
 export { NodeWsClientTransport, NodeWsServerTransport } from "./transport/ws/nodeWsTransport.js";
-export type { NativePingCapable } from "./transport/ws/nodeWsTransport.js";
-export { hasNativePing } from "./transport/ws/nodeWsTransport.js";
 
 // Mock（测试/开发用）
 export {
+  createMockTransportPair,
   MockClientTransport,
   MockServerTransport,
-  MockTransport,
-  createMockTransportPair
+  MockTransport
 } from "./transport/mock/mockTransport.js";

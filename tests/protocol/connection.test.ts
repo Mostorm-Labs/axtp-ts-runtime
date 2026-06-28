@@ -180,9 +180,9 @@ describe("Connection 心跳（framed）", () => {
 });
 
 describe("Connection 心跳（WS unframed-json）", () => {
-  it("link ready 后启动 ws ping 心跳", async () => {
-    // 用真实 NodeWsTransport 回环：WS 心跳用 ws.ping()/pong（NativePingCapable），mock 无此能力。
-    const { NodeWsServerTransport, NodeWsClientTransport, hasNativePing } =
+  it("link ready 后启动 ws keepalive 心跳", async () => {
+    // 用真实 NodeWsTransport 回环：WS 心跳用 sendKeepalive/onKeepaliveAck。
+    const { NodeWsServerTransport, NodeWsClientTransport } =
       await import("../../src/transport/ws/nodeWsTransport.js");
     const port = 19300;
 
@@ -200,9 +200,11 @@ describe("Connection 心跳（WS unframed-json）", () => {
     const clientTransport = new NodeWsClientTransport({ url: `ws://127.0.0.1:${port}` });
     const clientConn = await clientTransport.connect();
 
-    // client transport 是 NativePingCapable，spy ping() 调用
-    expect(hasNativePing(clientConn)).toBe(true);
-    const pingSpy = vi.spyOn(clientConn as unknown as { ping: () => void }, "ping");
+    // client transport 支持 keepalive，spy sendKeepalive() 调用
+    const keepaliveSpy = vi.spyOn(
+      clientConn as unknown as { sendKeepalive: () => void },
+      "sendKeepalive"
+    );
 
     // client 端 Connection 启动（WS 模式 fireLinkReady + startHeartbeat）
     const clientConnection = new Connection("client", clientConn, {
@@ -214,8 +216,8 @@ describe("Connection 心跳（WS unframed-json）", () => {
     // 等待心跳周期（interval 50ms，等 200ms 应至少触发几次）
     await new Promise((r) => setTimeout(r, 200));
 
-    // WS 心跳应已启动：client 的 ping() 被定时调用
-    expect(pingSpy.mock.calls.length).toBeGreaterThan(0);
+    // WS 心跳应已启动：client 的 sendKeepalive() 被定时调用
+    expect(keepaliveSpy.mock.calls.length).toBeGreaterThan(0);
 
     clientConnection.close();
     await serverTransport.close();

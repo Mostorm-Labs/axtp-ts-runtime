@@ -8,7 +8,7 @@
 //   Connection 只管传输层重连，不碰 Session/handler。
 //
 // 心跳：framed 在链路 ready（FRAMING_READY/ACCEPT）启动，用 CONTROL Heartbeat/Ack；
-//       WS 用原生 ping/pong（hasNativePing 鸭子类型探测，不污染 ITransport 接口）。
+//       WS 用原生 keepalive（ITransport.sendKeepalive/onKeepaliveAck，capabilities.supportsKeepalive 声明）。
 
 import type { Bytes } from "../io/bytes.js";
 import { PayloadType, RpcEncoding } from "../protocol/generated/axtp_ids_generated.js";
@@ -19,7 +19,6 @@ import type {
   TransportCapabilities
 } from "../transport/transport.js";
 import { CloseCode } from "../transport/transport.js";
-import { hasNativePing } from "../transport/ws/nodeWsTransport.js";
 import type { AxtpError } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import {
@@ -380,22 +379,24 @@ export class Connection {
     const interval = negotiatedIntervalMs || this.options.heartbeatIntervalMs || 30000;
     const timeout = this.options.heartbeatTimeoutMs ?? Math.max(interval * 2, 10000);
 
-    if (this.capabilities.wireMode === "framed-binary") {
+    if (this.capabilities.supportsControl) {
+      // framed: CONTROL Heartbeat/Ack
       this.heartbeat = new Heartbeat({
         intervalMs: interval,
         timeoutMs: timeout,
         onTick: () => this.sendFramedMessage(PayloadType.Control, encodeHeartbeat(1)),
         onTimeout: () => this.close(CloseCode.HeartbeatTimeout, "heartbeat timeout")
       });
-    } else if (hasNativePing(this.transport)) {
-      const ws = this.transport;
+    } else if (this.capabilities.supportsKeepalive) {
+      // WS: 原生 keepalive（ITransport.sendKeepalive/onKeepaliveAck）
+      const t = this.transport;
       this.heartbeat = new Heartbeat({
         intervalMs: interval,
         timeoutMs: timeout,
-        onTick: () => ws.ping(),
+        onTick: () => t.sendKeepalive?.(),
         onTimeout: () => this.close(CloseCode.HeartbeatTimeout, "heartbeat timeout")
       });
-      ws.onPong(() => this.heartbeat?.reset());
+      t.onKeepaliveAck?.(() => this.heartbeat?.reset());
     }
     this.heartbeat?.start();
   }

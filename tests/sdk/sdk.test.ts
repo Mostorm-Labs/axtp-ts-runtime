@@ -68,7 +68,7 @@ describe("AxtpServer 多 client + 全局 handle", () => {
       return { from: "client" };
     });
     await settle(10);
-    const sessionId = (server.getSessions()[0] as unknown as { __id: number }).__id;
+    const sessionId = server.getSessions()[0].id;
     const result = await server.call(sessionId, "audio.getAlgorithmConfig", {});
     expect(called).toBe(true);
     expect(result).toEqual({ from: "client" });
@@ -233,7 +233,7 @@ describe("Cloud Reverse 默认场景（发起连接方=Logical Server）", () =>
     client.handle("audio.getAlgorithmConfig", () => ({ provider: "client" }));
 
     // server（Logical Client）主动调用 client
-    const sessionId = (server.getSessions()[0] as unknown as { __id: number }).__id;
+    const sessionId = server.getSessions()[0].id;
     const result = await server.call(sessionId, "audio.getAlgorithmConfig", {});
     expect(result).toEqual({ provider: "client" });
   });

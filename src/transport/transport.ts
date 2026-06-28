@@ -35,6 +35,8 @@ export interface TransportCapabilities {
   readonly messageOriented: boolean;
   /** framed=true（存在 CONTROL OPEN/ACCEPT/HEARTBEAT），WS=false。 */
   readonly supportsControl: boolean;
+  /** 是否支持原生保活探测（WS=true 用 sendKeepalive/onKeepaliveAck；framed=false 走 CONTROL Heartbeat）。 */
+  readonly supportsKeepalive: boolean;
 }
 
 /** 连接关闭原因。 */
@@ -69,6 +71,10 @@ export interface ITransport {
   isConnected(): boolean;
   /** Connection 接管：停止内部缓冲，flush 已缓冲消息（真实 transport 实现，mock 可选）。 */
   attach?(): void;
+  /** 发送保活探测（supportsKeepalive=true 时实现）。 */
+  sendKeepalive?(): void;
+  /** 订阅保活确认到达（supportsKeepalive=true 时实现）。 */
+  onKeepaliveAck?(listener: () => void): () => void;
 }
 
 /** server 侧：接受多连接。 */
@@ -95,9 +101,19 @@ export interface IClientTransport {
 
 /** 默认能力工厂，供具体 transport 复用。 */
 export function framedBinaryCapabilities(): TransportCapabilities {
-  return { wireMode: "framed-binary", messageOriented: false, supportsControl: true };
+  return {
+    wireMode: "framed-binary",
+    messageOriented: false,
+    supportsControl: true,
+    supportsKeepalive: false
+  };
 }
 
 export function unframedJsonCapabilities(): TransportCapabilities {
-  return { wireMode: "unframed-json", messageOriented: true, supportsControl: false };
+  return {
+    wireMode: "unframed-json",
+    messageOriented: true,
+    supportsControl: false,
+    supportsKeepalive: true
+  };
 }
