@@ -2,15 +2,15 @@
 // 持有 RpcDispatcher（pending call Promise 匹配）。
 // 通过 SessionIO 发送，通过 HandlerRouter 路由入站。
 
-import { RpcDispatcher } from "../protocol/engine/rpcDispatcher.js";
-import { ErrorCode, RpcOp } from "../protocol/generated/axtp_ids_generated.js";
-import type { RpcPayload } from "../protocol/model.js";
-import { rpcPayload } from "../protocol/model.js";
-import { AxtpError } from "../types/error.js";
-import { registry } from "../types/registry.js";
-import type { HandlerRouter } from "./handlerRouter.js";
-import type { SessionIO } from "./handshakeOrchestrator.js";
-import type { CallContext } from "./types.js";
+import { ErrorCode, RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
+import type { RpcPayload } from "../../protocol/model.js";
+import { rpcPayload } from "../../protocol/model.js";
+import { AxtpError } from "../../types/error.js";
+import { registry } from "../../types/registry.js";
+import type { HandlerRouter } from "../handler/handlerRouter.js";
+import type { SessionIO } from "../handshake/handshakeOrchestrator.js";
+import type { CallContext } from "../types.js";
+import { RpcDispatcher } from "./rpcDispatcher.js";
 
 export class RpcExchange {
   readonly dispatcher = new RpcDispatcher();

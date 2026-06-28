@@ -99,6 +99,9 @@ export interface IClientTransport {
   isAvailable(): boolean;
 }
 
+/** transport 工厂：返回一条已建立的传输连接。供 Connection 重连使用。 */
+export type TransportFactory = () => Promise<ITransport>;
+
 /** 默认能力工厂，供具体 transport 复用。 */
 export function framedBinaryCapabilities(): TransportCapabilities {
   return {

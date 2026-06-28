@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Heartbeat } from "../../src/connection/heartbeat.js";
 import { hexToBytes } from "../../src/io/bytes.js";
 import {
   decodeControl,
@@ -25,9 +26,6 @@ import {
   decodeJsonRpc
 } from "../../src/protocol/codec/jsonRpc.js";
 import { decodeStream, encodeStream, kStreamHeaderSize } from "../../src/protocol/codec/stream.js";
-import { Handshake } from "../../src/protocol/engine/handshake.js";
-import { Heartbeat } from "../../src/protocol/engine/heartbeat.js";
-import { RpcDispatcher } from "../../src/protocol/engine/rpcDispatcher.js";
 import {
   ControlOpcode,
   PayloadType,
@@ -35,6 +33,8 @@ import {
 } from "../../src/protocol/generated/axtp_ids_generated.js";
 import type { Frame, Message } from "../../src/protocol/model.js";
 import { rpcPayload } from "../../src/protocol/model.js";
+import { Handshake } from "../../src/session/handshake/handshake.js";
+import { RpcDispatcher } from "../../src/session/rpc/rpcDispatcher.js";
 import { AxtpError, ErrorCode } from "../../src/types/error.js";
 
 describe("CONTROL codec 6 TLV", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Connection } from "../../src/protocol/connection.js";
+import { Connection } from "../../src/connection/connection.js";
 import { RpcOp } from "../../src/protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../../src/protocol/model.js";
 import { rpcPayload } from "../../src/protocol/model.js";

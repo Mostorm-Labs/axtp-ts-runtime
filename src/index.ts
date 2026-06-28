@@ -19,11 +19,11 @@ export type {
 } from "./session/session.js";
 
 // Stream
-export { Stream } from "./session/stream.js";
-export type { StreamStats } from "./session/stream.js";
+export { Stream } from "./session/stream/stream.js";
+export type { StreamStats } from "./session/stream/stream.js";
 
 // 重连
-export type { ReconnectInfo, ReconnectPolicy } from "./protocol/reconnect.js";
+export type { ReconnectInfo, ReconnectPolicy } from "./connection/reconnect.js";
 
 // 类型（单一事实源）
 export {
@@ -51,8 +51,8 @@ export { EventStream } from "./types/events.js";
 // 角色（Physical 驱动 CONTROL OPEN/ACCEPT，Logical 驱动 RPC Hello；二者正交，用于 Cloud Reverse 拓扑）
 export type { LogicalRole, PhysicalRole } from "./transport/transport.js";
 
-// 协议常量（供高级用户）
-export { ControlOpcode, PayloadType, RpcOp } from "./protocol/generated/axtp_ids_generated.js";
+// 协议常量（供高级用户，从 model.ts 中转，不直连 generated）
+export { ControlOpcode, PayloadType, RpcOp } from "./protocol/model.js";
 
 // IO（Bytes 类型）
 export { bytesToHex, bytesToText, concatBytes, hexToBytes, toBytes } from "./io/bytes.js";

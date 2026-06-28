@@ -2,10 +2,10 @@
 // 持有 Handshake，onLinkReady 时 Logical Server 发 Hello，ingest 握手消息推进状态。
 // 通过 SessionIO 发送 outbound（不直接持有 Connection）。
 
-import { Handshake } from "../protocol/engine/handshake.js";
-import { RpcOp } from "../protocol/generated/axtp_ids_generated.js";
-import type { RpcPayload } from "../protocol/model.js";
-import type { LogicalRole } from "../transport/transport.js";
+import { RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
+import type { RpcPayload } from "../../protocol/model.js";
+import type { LogicalRole } from "../../transport/transport.js";
+import { Handshake } from "./handshake.js";
 
 /** Session 提供给子组件的发送接口（避免子组件直接依赖 Connection）。 */
 export interface SessionIO {

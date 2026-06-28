@@ -9,10 +9,10 @@
 // Identified.d = {}（对齐 conformance；sid 在 envelope 外层）。
 
 import { ErrorCode, RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
+import type { RpcPayload } from "../../protocol/model.js";
+import { rpcPayload } from "../../protocol/model.js";
 import type { LogicalRole } from "../../transport/transport.js";
 import { AxtpError } from "../../types/error.js";
-import type { RpcPayload } from "../model.js";
-import { rpcPayload } from "../model.js";
 
 export type SessionState = "LINK_CONNECTED" | "FRAMING_READY" | "APP_READY" | "CLOSING";
 

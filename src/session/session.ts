@@ -6,21 +6,22 @@
 // 重连会话重建：Connection 管传输重连（onReconnect），Session 监听后重建握手（HandshakeOrchestrator.reset）。
 // handler 表在 Session 里，重连不换 Session 实例，表自然保留——无需快照迁移。
 
-import { Connection, type ConnectionOptions } from "../protocol/connection.js";
-import type { SessionState } from "../protocol/engine/handshake.js";
+import { Connection, type ConnectionOptions } from "../connection/connection.js";
 import { RpcOp } from "../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload, StreamPayload } from "../protocol/model.js";
 import type { ITransport, LogicalRole, PhysicalRole } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
-import { HandlerRouter } from "./handlerRouter.js";
-import { HandshakeOrchestrator, type SessionIO } from "./handshakeOrchestrator.js";
-import { RpcExchange } from "./rpcExchange.js";
-import type { Stream } from "./stream.js";
-import { StreamManager } from "./streamManager.js";
+import { HandlerRouter } from "./handler/handlerRouter.js";
+import type { SessionState } from "./handshake/handshake.js";
+import { HandshakeOrchestrator } from "./handshake/handshakeOrchestrator.js";
+import { RpcExchange } from "./rpc/rpcExchange.js";
+import type { Stream } from "./stream/stream.js";
+import { StreamManager } from "./stream/streamManager.js";
 import type {
   CallContext,
   CallOptions,
+  SessionIO,
   SessionOptions,
   UntypedEventHandler,
   UntypedMethodHandler

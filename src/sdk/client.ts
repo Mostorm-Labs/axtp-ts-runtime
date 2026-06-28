@@ -2,7 +2,7 @@
 // connect() 建立 transport + Session。自动重连由 Session+Connection 协作（SDK 只转发事件）。
 // handler/event 注册到 Session，重连不换 Session 实例，表自然保留——无需快照迁移。
 
-import type { ReconnectPolicy } from "../protocol/reconnect.js";
+import type { ReconnectPolicy } from "../connection/reconnect.js";
 import {
   AxtpSession,
   type CallContext,

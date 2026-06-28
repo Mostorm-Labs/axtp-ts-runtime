@@ -11,34 +11,35 @@
 //       WS 用原生 keepalive（ITransport.sendKeepalive/onKeepaliveAck，capabilities.supportsKeepalive 声明）。
 
 import type { Bytes } from "../io/bytes.js";
-import { PayloadType, RpcEncoding } from "../protocol/generated/axtp_ids_generated.js";
-import type {
-  CloseReason,
-  ITransport,
-  PhysicalRole,
-  TransportCapabilities
-} from "../transport/transport.js";
-import { CloseCode } from "../transport/transport.js";
-import type { AxtpError } from "../types/error.js";
-import { EventStream } from "../types/events.js";
 import {
   defaultOpenParams,
   encodeHeartbeat,
   encodeHeartbeatAck,
   type NegotiationParams
-} from "./codec/control.js";
+} from "../protocol/codec/control.js";
 import {
   FrameDecoder,
   FrameEncoder,
   MessageFragmenter,
   MessageReassembler
-} from "./codec/frame.js";
-import { decodeJsonRpc, encodeJsonRpc } from "./codec/jsonRpc.js";
-import { PayloadDecoder } from "./codec/payload.js";
-import { encodeStream } from "./codec/stream.js";
-import { ControlSession, type NegotiatedLink } from "./engine/controlSession.js";
-import { Heartbeat } from "./engine/heartbeat.js";
-import type { Message, RpcPayload, StreamPayload } from "./model.js";
+} from "../protocol/codec/frame.js";
+import { decodeJsonRpc, encodeJsonRpc } from "../protocol/codec/jsonRpc.js";
+import { PayloadDecoder } from "../protocol/codec/payload.js";
+import { encodeStream } from "../protocol/codec/stream.js";
+import { PayloadType, RpcEncoding } from "../protocol/generated/axtp_ids_generated.js";
+import type { Message, RpcPayload, StreamPayload } from "../protocol/model.js";
+import type {
+  CloseReason,
+  ITransport,
+  PhysicalRole,
+  TransportCapabilities,
+  TransportFactory
+} from "../transport/transport.js";
+import { CloseCode } from "../transport/transport.js";
+import type { AxtpError } from "../types/error.js";
+import { EventStream } from "../types/events.js";
+import { ControlSession, type NegotiatedLink } from "./controlSession.js";
+import { Heartbeat } from "./heartbeat.js";
 import { nextDelay, resolvePolicy, type ReconnectInfo, type ReconnectPolicy } from "./reconnect.js";
 
 export interface ConnectionOptions {
@@ -49,9 +50,6 @@ export interface ConnectionOptions {
   /** 传输重连策略（仅 client 场景，需 transportFactory）。 */
   reconnect?: ReconnectPolicy;
 }
-
-/** transport 工厂：返回一条已建立的传输连接。client 场景 = () => clientTransport.connect()。 */
-export type TransportFactory = () => Promise<ITransport>;
 
 /**
  * ReconnectCoordinator：传输重连编排（退避 + transportFactory + 链路重建触发）。

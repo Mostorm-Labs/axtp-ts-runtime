@@ -3,7 +3,7 @@
 // handle/on 全局生效：注册到 HandlerRegistry，所有 session 委托查询。
 // call(sessionId, ...) 单播；emit(...) 广播。
 
-import { HandlerRegistry } from "../session/handlerRegistry.js";
+import { HandlerRegistry } from "../session/handler/handlerRegistry.js";
 import {
   AxtpSession,
   type CallContext,

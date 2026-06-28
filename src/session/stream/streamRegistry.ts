@@ -4,9 +4,9 @@
 // teardown：abortAll 在断连/重连时释放所有 StreamContext（spec:253 MUST）。
 // streamId 由 openStream 响应方(server)分配（非零 uint32）。
 
-import type { Bytes } from "../io/bytes.js";
-import type { StreamPayload } from "../protocol/model.js";
-import { AxtpError, ErrorCode } from "../types/error.js";
+import type { Bytes } from "../../io/bytes.js";
+import type { StreamPayload } from "../../protocol/model.js";
+import { AxtpError, ErrorCode } from "../../types/error.js";
 
 export interface StreamChunkHandler {
   onChunk(data: Bytes, cursor: bigint): void;

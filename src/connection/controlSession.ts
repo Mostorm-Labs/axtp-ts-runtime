@@ -5,8 +5,6 @@
 // spec:142 Phase1 不要求 ACK/NACK/RESUME。
 // 协商（maxFrameSize/heartbeatIntervalMs/supportedRpcEncodings）结果供 Connection 配置 codec + 心跳。
 
-import { ControlOpcode, ErrorCode } from "../../protocol/generated/axtp_ids_generated.js";
-import type { CloseCode, CloseReason, PhysicalRole } from "../../transport/transport.js";
 import {
   decodeControl,
   defaultOpenParams,
@@ -16,7 +14,9 @@ import {
   encodeOpen,
   encodeReject,
   type NegotiationParams
-} from "../codec/control.js";
+} from "../protocol/codec/control.js";
+import { ControlOpcode, ErrorCode } from "../protocol/generated/axtp_ids_generated.js";
+import type { CloseCode, CloseReason, PhysicalRole } from "../transport/transport.js";
 
 export interface NegotiatedLink {
   readonly maxFrameSize: number;

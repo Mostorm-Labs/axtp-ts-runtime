@@ -3,8 +3,8 @@
 // onChunk 接收对端数据（cursor 透传，Core 不解释，应用层按 cursorUnit 解释）。
 // send 发送本地数据。close 通过 RPC（video.closeStream）或连接断开清理。
 
-import type { Bytes } from "../io/bytes.js";
-import { AxtpError, ErrorCode } from "../types/error.js";
+import type { Bytes } from "../../io/bytes.js";
+import { AxtpError, ErrorCode } from "../../types/error.js";
 import type { StreamContext } from "./streamRegistry.js";
 
 export interface StreamStats {

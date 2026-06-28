@@ -4,8 +4,8 @@
 // requestId 为 uint32，从 1 递增、回绕。
 
 import { ErrorCode } from "../../protocol/generated/axtp_ids_generated.js";
+import type { RpcPayload } from "../../protocol/model.js";
 import { AxtpError } from "../../types/error.js";
-import type { RpcPayload } from "../model.js";
 
 interface PendingEntry {
   readonly resolve: (payload: RpcPayload) => void;

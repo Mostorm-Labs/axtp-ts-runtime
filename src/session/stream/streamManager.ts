@@ -3,10 +3,10 @@
 // openStream 走 RPC（video.openStream），onStream 注册建流 handler。
 // 通过 SessionIO 发送 STREAM 数据帧。
 
-import { ErrorCode } from "../protocol/generated/axtp_ids_generated.js";
-import type { StreamPayload } from "../protocol/model.js";
-import { AxtpError } from "../types/error.js";
-import type { SessionIO } from "./handshakeOrchestrator.js";
+import { ErrorCode } from "../../protocol/generated/axtp_ids_generated.js";
+import type { StreamPayload } from "../../protocol/model.js";
+import { AxtpError } from "../../types/error.js";
+import type { SessionIO } from "../handshake/handshakeOrchestrator.js";
 import { Stream } from "./stream.js";
 import { StreamRegistry, type StreamContext } from "./streamRegistry.js";
 

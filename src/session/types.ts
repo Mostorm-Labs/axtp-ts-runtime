@@ -1,10 +1,9 @@
-// Session 层共享类型（消除 session.ts ↔ rpcExchange.ts 循环类型依赖）。
-// CallContext/CallOptions/MethodHandler/EventHandler 定义在此，
-// 子组件和 Session 门面都从 types.ts 引入，避免互相 import。
+// Session 层共享类型（消除子组件循环依赖）。
+// CallContext/CallOptions/MethodHandler/EventHandler/SessionIO 定义在此。
 
-import type { TransportFactory } from "../protocol/connection.js";
-import type { ReconnectPolicy } from "../protocol/reconnect.js";
-import type { LogicalRole, PhysicalRole } from "../transport/transport.js";
+import type { ReconnectPolicy } from "../connection/reconnect.js";
+import type { RpcPayload } from "../protocol/model.js";
+import type { LogicalRole, PhysicalRole, TransportFactory } from "../transport/transport.js";
 import type {
   EventName,
   EventPayload,
@@ -16,7 +15,12 @@ import type {
   GlobalHandlerSource,
   UntypedEventHandler,
   UntypedMethodHandler
-} from "./handlerRouter.js";
+} from "./handler/handlerRouter.js";
+
+/** Session 提供给子组件的发送接口（避免子组件直接依赖 Connection）。 */
+export interface SessionIO {
+  sendRpc(payload: RpcPayload): void;
+}
 
 /** call 选项。 */
 export interface CallOptions {
@@ -57,5 +61,5 @@ export interface SessionOptions {
   handshakeSeed?: number;
 }
 
-// 重新导出 handler 类型（子组件统一从这里或 handlerRouter 取）
+// 重新导出 handler 类型（子组件统一从这里取）
 export type { GlobalHandlerSource, UntypedEventHandler, UntypedMethodHandler };
