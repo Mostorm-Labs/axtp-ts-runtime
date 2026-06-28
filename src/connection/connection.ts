@@ -4,11 +4,11 @@
 // 不做应用语义（sid/handler/pending call 都归 Session）。
 //
 // 重连（传输层）：transport.onClose → ReconnectCoordinator 退避 → transportFactory() 重建传输
-//   → 重建 codec pipeline + 链路 + 心跳 → onReconnect 通知 Session（Session 负责会话重建）。
+//   → emit onReconnect（Session reset 握手）→ attachTransport + 启动链路。
 //   Connection 只管传输层重连，不碰 Session/handler。
 //
-// 心跳：framed 在链路 ready（FRAMING_READY/ACCEPT）启动，用 CONTROL Heartbeat/Ack；
-//       WS 用原生 keepalive（ITransport.sendKeepalive/onKeepaliveAck，capabilities.supportsKeepalive 声明）。
+// 心跳：framed 在链路 ready 启动，用 CONTROL Heartbeat/Ack；
+//       WS 用原生 keepalive（ITransport.sendKeepalive/onKeepaliveAck）。
 
 import type { Bytes } from "../io/bytes.js";
 import {
@@ -36,7 +36,7 @@ import type {
   TransportFactory
 } from "../transport/transport.js";
 import { CloseCode } from "../transport/transport.js";
-import type { AxtpError } from "../types/error.js";
+import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import { ControlSession, type NegotiatedLink } from "./controlSession.js";
 import { Heartbeat } from "./heartbeat.js";
@@ -53,7 +53,7 @@ export interface ConnectionOptions {
 
 /**
  * ReconnectCoordinator：传输重连编排（退避 + transportFactory + 链路重建触发）。
- * 只管传输层：触发 onAttempt（Connection 在此重建 pipeline+链路），成功/失败回调。
+ * 失败时 emit onError 通知上层，成功时通过 onReconnected 回调重建 pipeline。
  */
 class ReconnectCoordinator {
   private attempts = 0;
@@ -65,7 +65,8 @@ class ReconnectCoordinator {
     private readonly transportFactory: TransportFactory,
     private readonly onReconnected: (transport: ITransport) => void,
     private readonly onSuccess: () => void,
-    private readonly onFailed: () => void
+    private readonly onFailed: () => void,
+    private readonly onError: (err: AxtpError) => void
   ) {}
 
   start(): void {
@@ -96,7 +97,13 @@ class ReconnectCoordinator {
     const delay = nextDelay(this.policy, this.attempts);
     this.attempts += 1;
     this.timer = setTimeout(() => {
-      this.attempt().catch(() => {
+      this.attempt().catch((err) => {
+        // 重连尝试失败：通知 onError，继续退避
+        this.onError(
+          err instanceof AxtpError
+            ? err
+            : new AxtpError(ErrorCode.TransportDisconnected, `reconnect attempt failed: ${err}`)
+        );
         if (this.active) this.schedule();
       });
     }, delay);
@@ -140,6 +147,9 @@ export class Connection {
   private fragmenter: MessageFragmenter;
   private readonly frameEncoder = new FrameEncoder();
 
+  /** transport 事件订阅句柄（detach 时取消） */
+  private transportUnsubs: Array<() => void> = [];
+
   private started = false;
   private closed = false;
   private linkReadyFired = false;
@@ -166,7 +176,8 @@ export class Connection {
         transportFactory,
         (newTransport) => this.handleReconnected(newTransport),
         () => this.handleReconnectSuccess(),
-        () => this.handleReconnectFailed()
+        () => this.handleReconnectFailed(),
+        (err) => this.onError.emit(err)
       );
     }
 
@@ -177,9 +188,13 @@ export class Connection {
 
   /**
    * 绑定一条 transport：建立 codec pipeline（framed）+ 订阅事件 + attach 缓冲。
-   * 构造和重连都调此方法。
+   * 构造和重连都调此方法。重连时先 detach 旧 transport 订阅。
    */
   private attachTransport(transport: ITransport): void {
+    // detach 旧 transport 订阅（M6：防止旧 transport 事件污染）
+    for (const unsub of this.transportUnsubs) unsub();
+    this.transportUnsubs = [];
+
     if (this.capabilities.supportsControl) {
       this.controlSession = new ControlSession(
         this.physicalRole,
@@ -213,16 +228,20 @@ export class Connection {
     }
 
     // 订阅 transport 事件（start 前缓冲）。
-    transport.onMessage.subscribe((bytes) => {
-      if (this.closed) return;
-      if (!this.started) {
-        this.pendingBytes.push(bytes);
-        return;
-      }
-      this.onTransportBytes(bytes);
-    });
-    transport.onClose.subscribe((reason) => this.handleTransportClose(reason, transport));
-    transport.onError.subscribe((err) => this.onError.emit(err));
+    this.transportUnsubs.push(
+      transport.onMessage.subscribe((bytes) => {
+        if (this.closed) return;
+        if (!this.started) {
+          this.pendingBytes.push(bytes);
+          return;
+        }
+        this.onTransportBytes(bytes);
+      })
+    );
+    this.transportUnsubs.push(
+      transport.onClose.subscribe((reason) => this.handleTransportClose(reason))
+    );
+    this.transportUnsubs.push(transport.onError.subscribe((err) => this.onError.emit(err)));
 
     transport.attach?.();
   }
@@ -234,7 +253,7 @@ export class Connection {
     this.flushPendingAndStartLink();
   }
 
-  /** flush 缓冲 + 启动链路（构造 start 和重连都用）。 */
+  /** flush 缓冲 + 启动链路（首次 start 用）。 */
   private flushPendingAndStartLink(): void {
     const buffered = this.pendingBytes.splice(0);
     for (const bytes of buffered) this.onTransportBytes(bytes);
@@ -248,9 +267,15 @@ export class Connection {
     }
   }
 
-  /** 发送 RpcPayload（应用层，Session 调用）。 */
+  /**
+   * 发送 RpcPayload（应用层，Session 调用）。
+   * H2：重连中抛错而非静默丢弃，让调用方知道消息未发出。
+   */
   sendRpc(payload: RpcPayload): void {
-    if (this.closed || this.reconnecting) return;
+    if (this.closed) return;
+    if (this.reconnecting) {
+      throw new AxtpError(ErrorCode.TransportDisconnected, "connection reconnecting");
+    }
     const jsonBytes = encodeJsonRpc(payload);
     if (this.capabilities.supportsControl) {
       this.sendFramedMessage(PayloadType.Rpc, this.wrapRpcEncoding(jsonBytes));
@@ -259,9 +284,16 @@ export class Connection {
     }
   }
 
-  /** 发送 StreamPayload（framed only）。 */
+  /**
+   * 发送 StreamPayload（framed only）。
+   * H2：重连中抛错而非静默丢弃。
+   */
   sendStream(payload: StreamPayload): void {
-    if (this.closed || this.reconnecting || !this.capabilities.supportsControl) return;
+    if (this.closed) return;
+    if (this.reconnecting) {
+      throw new AxtpError(ErrorCode.TransportDisconnected, "connection reconnecting");
+    }
+    if (!this.capabilities.supportsControl) return;
     this.sendFramedMessage(PayloadType.Stream, encodeStream(payload));
   }
 
@@ -289,7 +321,7 @@ export class Connection {
 
   // ===== 重连（传输层）=====
 
-  private handleTransportClose(reason: CloseReason, _closedTransport: ITransport): void {
+  private handleTransportClose(reason: CloseReason): void {
     if (this.closed) return;
     // 停心跳、清理当前 transport 绑定的链路状态
     this.heartbeat?.stop();
@@ -311,16 +343,38 @@ export class Connection {
     }
   }
 
-  /** ReconnectCoordinator 回调：拿到新 transport，重建 pipeline + 链路。 */
+  /**
+   * ReconnectCoordinator 回调：拿到新 transport，重建 pipeline + 链路。
+   * H1：先 emit onReconnect（让 Session reset 握手状态），再 attachTransport + 启动链路。
+   * 这样 Session.handleReconnect 在 onLinkReady 之前执行，握手状态机正确 reset。
+   */
   private handleReconnected(newTransport: ITransport): void {
     this.transport = newTransport;
-    // 重置 start 状态以重新走 flushPendingAndStartLink
+    this.linkReadyFired = false;
     this.pendingBytes = [];
+
+    // 先 emit onReconnect，让 Session reset 握手（必须在 fireLinkReady/onLinkReady 之前）
+    const attempt = this.reconnectCoordinator?.attemptCount ?? 0;
+    this.onReconnect.emit({ attempt, totalDowntimeMs: 0 });
+
+    // attachTransport 会 detach 旧 transport + 订阅新 transport + 建 codec pipeline
     this.attachTransport(newTransport);
-    this.flushPendingAndStartLink();
+
+    // 启动链路（不发 OPEN 走 flushPending，直接启动）
+    if (this.capabilities.supportsControl) {
+      const cs = this.controlSession;
+      if (this.physicalRole === "client" && cs !== undefined) cs.sendOpen();
+    } else {
+      this.fireLinkReady();
+      this.startHeartbeat(this.options.heartbeatIntervalMs ?? 30000);
+    }
+
+    // 标记重连完成
+    this.reconnecting = false;
+    this.handleReconnectSuccess();
   }
 
-  /** 链路重建成功（fireLinkReady 触发后，Session 会收到 onLinkReady 重建会话）。 */
+  /** 链路重建成功。 */
   private handleReconnectSuccess(): void {
     this.reconnectCoordinator?.notifySuccess();
   }
@@ -351,26 +405,12 @@ export class Connection {
     this.fragmenter.setMaxFrameSize(neg.maxFrameSize);
     this.fireLinkReady();
     this.startHeartbeat(neg.heartbeatIntervalMs);
-    // 重连场景：链路 ready 表示传输重连成功
-    if (this.reconnecting) {
-      this.reconnecting = false;
-      const attempt = this.reconnectCoordinator?.attemptCount ?? 0;
-      this.onReconnect.emit({ attempt, totalDowntimeMs: 0 });
-      this.handleReconnectSuccess();
-    }
   }
 
   private fireLinkReady(): void {
     if (this.linkReadyFired) return;
     this.linkReadyFired = true;
     this.onLinkReady.emit(undefined);
-    // WS 模式：fireLinkReady 后也要标记重连成功（framed 走 onNegotiatedLinkReady）
-    if (this.reconnecting && !this.capabilities.supportsControl) {
-      this.reconnecting = false;
-      const attempt = this.reconnectCoordinator?.attemptCount ?? 0;
-      this.onReconnect.emit({ attempt, totalDowntimeMs: 0 });
-      this.handleReconnectSuccess();
-    }
   }
 
   private startHeartbeat(negotiatedIntervalMs: number): void {
@@ -395,6 +435,11 @@ export class Connection {
         onTimeout: () => this.close(CloseCode.HeartbeatTimeout, "heartbeat timeout")
       });
       t.onKeepaliveAck?.(() => this.heartbeat?.reset());
+    } else {
+      // M8：两种心跳能力都不支持，告警（连接挂死时无法检测）
+      console.warn(
+        "[AXTP] Transport supports neither CONTROL heartbeat nor native keepalive; connection may hang silently"
+      );
     }
     this.heartbeat?.start();
   }
@@ -421,5 +466,7 @@ export class Connection {
     this.onError.close();
     this.onReconnect.close();
     this.onReconnectFailed.close();
+    // L：onClose 最后关闭（emit 完再 close）
+    this.onClose.close();
   }
 }

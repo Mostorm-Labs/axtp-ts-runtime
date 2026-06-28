@@ -3,7 +3,12 @@
 
 import type { ReconnectPolicy } from "../connection/reconnect.js";
 import type { RpcPayload } from "../protocol/model.js";
-import type { LogicalRole, PhysicalRole, TransportFactory } from "../transport/transport.js";
+import type {
+  CloseCode,
+  LogicalRole,
+  PhysicalRole,
+  TransportFactory
+} from "../transport/transport.js";
 import type {
   EventName,
   EventPayload,
@@ -31,7 +36,8 @@ export interface CallOptions {
 export interface CallContext {
   readonly requestId: number;
   readonly sid: string;
-  reply: <K extends EventName>(event: K, payload: EventPayload<K>) => Promise<void>;
+  /** 向该对端推送事件（非 RPC 响应，是独立的 Event 消息）。 */
+  emit: <K extends EventName>(event: K, payload: EventPayload<K>) => Promise<void>;
 }
 
 export type MethodHandler<K extends MethodName> = (
@@ -43,7 +49,7 @@ export type EventHandler<K extends EventName> = (payload: EventPayload<K>) => vo
 
 /**
  * Session 选项（不继承 ConnectionOptions，避免连接层参数泄漏到用户 API）。
- * 连接参数（heartbeat/maxFrameSize/reconnect）在此内联声明，Session 内部构造 ConnectionOptions 传递。
+ * 连接参数在此内联声明，Session 内部构造 ConnectionOptions 传递。
  */
 export interface SessionOptions {
   // === 连接参数（透传给 Connection，但不暴露 negotiationParams 等链路细节） ===
@@ -56,9 +62,18 @@ export interface SessionOptions {
   physicalRole?: PhysicalRole;
   logicalRole?: LogicalRole;
   defaultTimeoutMs?: number;
+  /** 握手超时 ms（超时后 onReady reject + close）。 */
+  handshakeTimeoutMs?: number;
   globalHandlers?: GlobalHandlerSource;
   transportFactory?: TransportFactory;
   handshakeSeed?: number;
+}
+
+/** Session 关闭信息（保留 CloseCode）。 */
+export interface SessionCloseInfo {
+  readonly code: CloseCode;
+  readonly reason: string;
+  readonly remote: boolean;
 }
 
 // 重新导出 handler 类型（子组件统一从这里取）

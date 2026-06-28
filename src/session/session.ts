@@ -9,9 +9,16 @@
 import { Connection, type ConnectionOptions } from "../connection/connection.js";
 import { RpcOp } from "../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload, StreamPayload } from "../protocol/model.js";
-import type { ITransport, LogicalRole, PhysicalRole } from "../transport/transport.js";
+import type { CloseReason, ITransport, LogicalRole, PhysicalRole } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
+import type {
+  EventName,
+  EventPayload,
+  MethodName,
+  MethodRequest,
+  MethodResponse
+} from "../types/registry.js";
 import { HandlerRouter } from "./handler/handlerRouter.js";
 import type { SessionState } from "./handshake/handshake.js";
 import { HandshakeOrchestrator } from "./handshake/handshakeOrchestrator.js";
@@ -21,6 +28,9 @@ import { StreamManager } from "./stream/streamManager.js";
 import type {
   CallContext,
   CallOptions,
+  EventHandler,
+  MethodHandler,
+  SessionCloseInfo,
   SessionIO,
   SessionOptions,
   UntypedEventHandler,
@@ -34,6 +44,7 @@ export type {
   EventHandler,
   GlobalHandlerSource,
   MethodHandler,
+  SessionCloseInfo,
   SessionOptions,
   UntypedEventHandler,
   UntypedMethodHandler
@@ -43,7 +54,6 @@ let nextSessionId = 1;
 
 export class AxtpSession {
   private conn: Connection;
-  private readonly options: SessionOptions;
   private readonly logicalRole: LogicalRole;
   private readonly physicalRole: PhysicalRole;
 
@@ -57,20 +67,21 @@ export class AxtpSession {
   private readonly io: SessionIO & { sendStream: (p: StreamPayload) => void };
 
   private readonly onReadyStream = new EventStream<void>();
-  private readonly onCloseStream = new EventStream<{ reason: string; remote: boolean }>();
+  private readonly onCloseStream = new EventStream<SessionCloseInfo>();
   private readonly onReconnectStream = new EventStream<{
     attempt: number;
     totalDowntimeMs: number;
   }>();
+  private readonly onErrorStream = new EventStream<AxtpError>();
 
   private ready = false;
   private closed = false;
   private readonly defaultTimeoutMs: number;
-  /** 公开 id（供 server.call(sessionId) / getSessions 使用）。 */
+  private handshakeTimer: ReturnType<typeof setTimeout> | undefined;
+  /** 公开 id（仅在创建它的 server/client 内有效，非全局唯一）。 */
   readonly id: number;
 
   constructor(transport: ITransport, options: SessionOptions = {}) {
-    this.options = options;
     const physicalRole = options.physicalRole ?? "client";
     const logicalRole = options.logicalRole ?? "server";
     this.physicalRole = physicalRole;
@@ -108,24 +119,54 @@ export class AxtpSession {
     this.conn.onPayload.subscribe((p) => this.ingest(p));
     this.conn.onStream.subscribe((s) => this.streamMgr.onData(s));
     this.conn.onLinkReady.subscribe(() => this.onLinkReady());
-    this.conn.onClose.subscribe((r) => this.handleClose(r.reason, r.remote));
+    this.conn.onClose.subscribe((r) => this.handleClose(r));
     this.conn.onReconnect.subscribe((info) => this.handleReconnect(info.attempt));
+    this.conn.onError.subscribe((err) => this.onErrorStream.emit(err));
+
+    // H3：握手超时（防止 onReady 永不 resolve）
+    const timeoutMs = options.handshakeTimeoutMs ?? 15000;
+    this.handshakeTimer = setTimeout(() => {
+      if (!this.ready && !this.closed) {
+        this.handleClose({
+          code: 3, // CloseCode.HandshakeFailed
+          reason: "handshake timeout",
+          remote: false
+        });
+      }
+    }, timeoutMs);
+
+    // onReady Promise：握手完成 resolve；close 前 reject（若有人 await）。
+    // noop catch 防止 unhandled rejection（测试中 session close 但无人 await onReady）。
+    this.onReady = new Promise<void>((resolve, reject) => {
+      this.onReadyReject = reject;
+      this.onReadyStream.subscribe(() => {
+        if (this.handshakeTimer !== undefined) {
+          clearTimeout(this.handshakeTimer);
+          this.handshakeTimer = undefined;
+        }
+        resolve();
+      });
+    });
+    this.onReady.catch(() => {});
 
     this.conn.start();
   }
 
   // ===== 生命周期 =====
 
-  readonly onReady: Promise<void> = new Promise((resolve) => {
-    this.onReadyStream.subscribe(() => resolve());
-  });
+  private onReadyReject?: (err: AxtpError) => void;
+  readonly onReady: Promise<void>;
 
   get onReadyEvent(): EventStream<void> {
     return this.onReadyStream;
   }
 
-  get onClose(): EventStream<{ reason: string; remote: boolean }> {
+  get onClose(): EventStream<SessionCloseInfo> {
     return this.onCloseStream;
+  }
+
+  get onError(): EventStream<AxtpError> {
+    return this.onErrorStream;
   }
 
   get onReconnect(): EventStream<{ attempt: number; totalDowntimeMs: number }> {
@@ -149,20 +190,27 @@ export class AxtpSession {
   }
 
   close(): void {
-    if (this.closed) return;
-    this.rpc.rejectAll(new AxtpError(ErrorCode.TransportDisconnected, "session closed"));
-    this.streamMgr.abortAll("session closed");
+    // M5：只调 conn.close()，让 handleClose 统一清理
     this.conn.close();
-    this.handleClose("local close", false);
   }
 
-  // ===== 四件套（转发子组件）=====
+  // ===== typed 四件套（重载）=====
 
+  /** call：内置 typed / vendor untyped */
+  call<K extends MethodName>(
+    method: K,
+    params: MethodRequest<K>,
+    options?: CallOptions
+  ): Promise<MethodResponse<K>>;
+  call(method: string, params: unknown, options?: CallOptions): Promise<unknown>;
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
     this.requireReady();
     return this.rpc.call(method, params, options?.timeoutMs ?? this.defaultTimeoutMs);
   }
 
+  /** handle：内置 typed / vendor untyped */
+  handle<K extends MethodName>(method: K, handler: MethodHandler<K>): () => void;
+  handle(method: string, handler: UntypedMethodHandler): () => void;
   handle(
     method: string,
     handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
@@ -174,11 +222,17 @@ export class AxtpSession {
     this.router.removeMethod(method, handler);
   }
 
+  /** emit：内置 typed / vendor untyped */
+  emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
+  emit(event: string, payload: unknown): Promise<void>;
   emit(event: string, payload: unknown): Promise<void> {
     this.requireReady();
     return this.rpc.emitEvent(event, payload);
   }
 
+  /** on：内置 typed / vendor untyped */
+  on<K extends EventName>(event: K, handler: EventHandler<K>): () => void;
+  on(event: string, handler: UntypedEventHandler): () => void;
   on(event: string, handler: UntypedEventHandler): () => void {
     return this.router.addEventListener(event, handler);
   }
@@ -202,10 +256,14 @@ export class AxtpSession {
     method: string,
     handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
   ): () => void {
+    // M3：onStreamCreated 把 Stream 存到闭包变量（handler 可在返回后通过外部引用访问）
+    const streamHolder: { stream?: Stream } = {};
     return this.handle(method, ((ctx: unknown, params: unknown) =>
       this.streamMgr.wrapStreamHandler(
         async (p) => handler(ctx as CallContext, p),
-        () => {}
+        (stream) => {
+          streamHolder.stream = stream;
+        }
       )(ctx, params)) as UntypedMethodHandler);
   }
 
@@ -259,7 +317,7 @@ export class AxtpSession {
     return {
       requestId,
       sid: this.sid,
-      reply: (event, payload) => this.emit(event, payload)
+      emit: (event, payload) => this.emit(event, payload)
     };
   }
 
@@ -268,15 +326,42 @@ export class AxtpSession {
     if (!this.ready) throw new AxtpError(ErrorCode.InvalidState, "session not ready");
   }
 
-  private handleClose(reason: string, remote: boolean): void {
+  /** M4+M5：接收完整 CloseReason，统一清理所有资源 */
+  private handleClose(reason: CloseReason): void {
     if (this.closed) return;
     this.closed = true;
     this.ready = false;
+
+    // 清理握手超时 timer
+    if (this.handshakeTimer !== undefined) {
+      clearTimeout(this.handshakeTimer);
+      this.handshakeTimer = undefined;
+    }
+
+    // 清理 pending + stream
     this.rpc.rejectAll(
-      new AxtpError(ErrorCode.TransportDisconnected, `connection closed: ${reason}`)
+      new AxtpError(ErrorCode.TransportDisconnected, `connection closed: ${reason.reason}`)
     );
-    this.streamMgr.abortAll(`connection closed: ${reason}`);
-    this.onCloseStream.emit({ reason, remote });
+    this.streamMgr.abortAll(`connection closed: ${reason.reason}`);
+
+    // 如果 onReady 还没 resolve（握手未完成），reject 它
+    if (!this.ready && this.onReadyReject !== undefined) {
+      this.onReadyReject(
+        new AxtpError(ErrorCode.TransportDisconnected, "session closed before ready")
+      );
+    }
+
+    // M4：保留完整 CloseCode
+    this.onCloseStream.emit({
+      code: reason.code,
+      reason: reason.reason,
+      remote: reason.remote
+    });
+
+    // M5：统一关闭所有 EventStream
     this.onReadyStream.close();
+    this.onCloseStream.close();
+    this.onReconnectStream.close();
+    this.onErrorStream.close();
   }
 }
