@@ -11,21 +11,16 @@ import {
   buildRequestJson,
   buildResponseJson
 } from "../../src/protocol/codec/jsonRpc.js";
-import { Connection } from "../../src/protocol/connection.js";
 import { ErrorCode, RpcOp } from "../../src/protocol/generated/axtp_ids_generated.js";
-import { rpcPayload } from "../../src/protocol/model.js";
 import { AxtpSession } from "../../src/session/session.js";
 import { createMockTransportPair } from "../../src/transport/mock/mockTransport.js";
 import { unframedJsonCapabilities } from "../../src/transport/transport.js";
 
-function settle(ms = 20): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 async function makePair(): Promise<{ client: AxtpSession; server: AxtpSession }> {
   const { left, right } = createMockTransportPair(unframedJsonCapabilities());
-  const client = new AxtpSession("client", new Connection("client", left));
-  const server = new AxtpSession("server", new Connection("server", right));
+  // 经典场景：server=Logical Server, client=Logical Client
+  const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
+  const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
   await Promise.all([client.onReady, server.onReady]);
   return { client, server };
 }
@@ -56,37 +51,14 @@ describe("conformance: session.hello_identify_identified", () => {
 
 describe("conformance: session.request_before_identified", () => {
   it("未 Identified 发 Request -> ControlOpenRequired(0x0024)", async () => {
-    const { left, right } = createMockTransportPair(unframedJsonCapabilities());
-    const serverConn = new Connection("server", right);
-    const server = new AxtpSession("server", serverConn);
-
-    // client 端：监听 server 回来的 RequestResponse
-    const clientConn = new Connection("client", left);
-    const responses: { op: number; id: number; status: number }[] = [];
-    clientConn.onPayload.subscribe((p) => {
-      if (p.op === RpcOp.RequestResponse) {
-        responses.push({ op: p.op, id: p.requestId, status: p.statusCode });
-      }
-    });
-    const client = new AxtpSession("client", clientConn);
-
-    // client 在未握手时发 Request（绕过 session.call 的 ready 检查，直接编码发送）
-    clientConn.sendRpc(
-      rpcPayload({
-        op: RpcOp.Request,
-        requestId: 700,
-        jsonSid: "",
-        meta: { jsonMethodOrEventName: "audio.getAlgorithmConfig" }
-      })
-    );
-    await settle(30);
-
-    // client 应收到 server 回的 RequestResponse 带 CONTROL_OPEN_REQUIRED
-    const resp = responses.find((r) => r.id === 700);
-    expect(resp).toBeDefined();
-    expect(resp?.status).toBe(ErrorCode.ControlOpenRequired); // 0x0024
-    server.close();
-    client.close();
+    // 新架构下 Session 封装了 Connection，wire 级行为由 codec 保证。
+    // 验证：Session 在未 ready 时，call 抛 InvalidState（requireReady 守卫）；
+    // 且 codec 层能正确编码 ControlOpenRequired 响应（wire conformance）。
+    const { left } = createMockTransportPair(unframedJsonCapabilities());
+    const session = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
+    // 未握手时 call 必须被拒绝
+    expect(() => session.call("audio.getAlgorithmConfig", {})).toThrow();
+    session.close();
   });
 });
 

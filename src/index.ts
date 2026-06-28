@@ -23,14 +23,14 @@ export { Stream } from "./sdk/stream.js";
 export type { StreamStats } from "./sdk/stream.js";
 
 // 重连
-export type { ReconnectInfo, ReconnectPolicy } from "./sdk/reconnect.js";
+export type { ReconnectInfo, ReconnectPolicy } from "./protocol/reconnect.js";
 
 // 类型（单一事实源）
 export {
-  EVENT_REGISTRY,
-  METHOD_REGISTRY,
   computeEventMasks,
+  EVENT_REGISTRY,
   isEventSubscribed,
+  METHOD_REGISTRY,
   registry,
   type EventId,
   type EventName,
@@ -42,7 +42,7 @@ export {
 } from "./types/registry.js";
 
 // 错误
-export { AxtpError, ErrorCode, connectionClosedError, notReadyError } from "./types/error.js";
+export { AxtpError, connectionClosedError, ErrorCode, notReadyError } from "./types/error.js";
 export type { AxtpErrorOptions } from "./types/error.js";
 
 // 事件流
@@ -55,5 +55,5 @@ export type { LogicalRole, PhysicalRole } from "./transport/transport.js";
 export { ControlOpcode, PayloadType, RpcOp } from "./protocol/generated/axtp_ids_generated.js";
 
 // IO（Bytes 类型）
-export type { Bytes } from "./io/bytes.js";
 export { bytesToHex, bytesToText, concatBytes, hexToBytes, toBytes } from "./io/bytes.js";
+export type { Bytes } from "./io/bytes.js";

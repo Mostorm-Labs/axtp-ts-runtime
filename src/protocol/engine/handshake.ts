@@ -93,6 +93,16 @@ export class Handshake {
     return this.sidValue;
   }
 
+  get role(): LogicalRole {
+    return this.logicalRole;
+  }
+
+  /** 重连后重置握手状态（重新走 Hello/Identify/Identified）。 */
+  reset(): void {
+    this.stateValue = "LINK_CONNECTED";
+    this.sidValue = "";
+  }
+
   /** 进入 CLOSING（连接关闭流程）。 */
   enterClosing(): void {
     this.stateValue = "CLOSING";

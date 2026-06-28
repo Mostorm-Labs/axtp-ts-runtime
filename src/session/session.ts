@@ -1,16 +1,21 @@
-// AxtpSession：RPC Session（会话语义，暴露给上层）。
-// 持有 Handshake（Hello/Identify/Identified 状态机）+ RpcDispatcher（pending call）+ StreamRegistry。
-// 使用 Connection 的收发能力（onPayload 上交解码后的 RpcPayload，sendRpc 发出）。
-// handler 表按 name 索引——规避 method id 与 event id 共享同一数字空间。
+// AxtpSession：RPC Session 门面（会话语义，暴露给上层）。
+// 组合子组件（HandshakeOrchestrator/RpcExchange/StreamManager/HandlerRouter），
+// 创建+持有 Connection，订阅其事件。
 //
-// typed 重载：内置 spec 方法（K extends MethodName）强类型；vendor/自定义（string）同 JSON 便利但 unknown。
-// 会话状态机规范 4 态：LINK_CONNECTED -> FRAMING_READY -> APP_READY -> CLOSING。
-// 未 ready 发请求 -> CONTROL_OPEN_REQUIRED（conformance 对齐）。
+// 单一职责：Session 只做"组合编排 + 生命周期 + 会话重建"。
+// - HandshakeOrchestrator：握手状态机
+// - RpcExchange：RPC 收发
+// - StreamManager：STREAM 管理
+// - HandlerRouter：handler 表 + 全局委托
+//
+// 重连会话重建：Connection 管传输重连（onReconnect），Session 监听后重建握手（HandshakeOrchestrator.reset）。
+// handler 表在 Session 里，重连不换 Session 实例，表自然保留——无需快照迁移。
 
-import type { Bytes } from "../io/bytes.js";
-import type { Connection } from "../protocol/connection.js";
-import { Handshake } from "../protocol/engine/handshake.js";
-import { RpcDispatcher } from "../protocol/engine/rpcDispatcher.js";
+import {
+  Connection,
+  type ConnectionOptions,
+  type TransportFactory
+} from "../protocol/connection.js";
 import { RpcOp } from "../protocol/generated/axtp_ids_generated.js";
 import type {
   EventName,
@@ -19,18 +24,28 @@ import type {
   MethodRequest,
   MethodResponse
 } from "../protocol/generated/registry.js";
-import type { RpcPayload } from "../protocol/model.js";
+import type { RpcPayload, StreamPayload } from "../protocol/model.js";
 import { rpcPayload } from "../protocol/model.js";
-import { Stream } from "../sdk/stream.js";
-import type { LogicalRole } from "../transport/transport.js";
+import type { Stream } from "../sdk/stream.js";
+import type { ITransport, LogicalRole, PhysicalRole } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import { registry } from "../types/registry.js";
-import { StreamRegistry, type StreamContext } from "./streamRegistry.js";
+import {
+  HandlerRouter,
+  type GlobalHandlerSource,
+  type UntypedEventHandler,
+  type UntypedMethodHandler
+} from "./handlerRouter.js";
+import { HandshakeOrchestrator, type SessionIO } from "./handshakeOrchestrator.js";
+import { RpcExchange } from "./rpcExchange.js";
+import { StreamManager } from "./streamManager.js";
+
+// 重新导出类型（兼容旧引用，实际定义在 handlerRouter）
+export type { GlobalHandlerSource, UntypedEventHandler, UntypedMethodHandler };
 
 /** call 选项。 */
 export interface CallOptions {
-  /** 超时 ms（默认 10000）。 */
   timeoutMs?: number;
 }
 
@@ -38,89 +53,99 @@ export interface CallOptions {
 export interface CallContext {
   readonly requestId: number;
   readonly sid: string;
-  /** 便捷：向该对端推事件。 */
   reply: <K extends EventName>(event: K, payload: EventPayload<K>) => Promise<void>;
 }
 
-/** 方法 handler（typed）。 */
 export type MethodHandler<K extends MethodName> = (
   ctx: CallContext,
   params: MethodRequest<K>
 ) => MethodResponse<K> | Promise<MethodResponse<K>>;
 
-/** 事件 handler（typed）。 */
 export type EventHandler<K extends EventName> = (payload: EventPayload<K>) => void;
 
-/** vendor/untyped 方法 handler。 */
-export type UntypedMethodHandler = (
-  ctx: CallContext,
-  params: unknown
-) => unknown | Promise<unknown>;
-
-/** vendor/untyped 事件 handler。 */
-export type UntypedEventHandler = (payload: unknown) => void;
-
-export interface SessionOptions {
-  /** client 在 Identify 携带的 eventMasks（订阅意图）。 */
-  eventMasks?: string;
-  /** Handshake 本地种子。 */
-  handshakeSeed?: number;
+export interface SessionOptions extends ConnectionOptions {
+  /** Physical 角色（client 发起连接 / server 接受连接）。默认由 transport 类型推导。 */
+  physicalRole?: PhysicalRole;
+  /** Logical 角色：默认 "server"（Cloud Reverse 主场景：发起连接方=能力提供方）。 */
+  logicalRole?: LogicalRole;
   /** call 默认超时。 */
   defaultTimeoutMs?: number;
-  /** server 端：全局 handler registry 委托（dispatchRequest/dispatchEvent miss 时查此）。 */
-  globalHandlers?: {
-    getMethod: (name: string) => UntypedMethodHandler | undefined;
-    getEventListeners: (name: string) => Set<UntypedEventHandler> | undefined;
-  };
+  /** server 端：全局 handler registry 委托。 */
+  globalHandlers?: GlobalHandlerSource;
+  /** 传输重连工厂（client 场景 = () => clientTransport.connect()）。 */
+  transportFactory?: TransportFactory;
+  /** Handshake 本地种子。 */
+  handshakeSeed?: number;
 }
 
 export class AxtpSession {
-  private readonly conn: Connection;
-  readonly handshake: Handshake;
-  readonly dispatcher = new RpcDispatcher();
-  readonly streams = new StreamRegistry();
+  private conn: Connection;
+  private readonly options: SessionOptions;
+  private readonly logicalRole: LogicalRole;
+  private readonly physicalRole: PhysicalRole;
 
-  /** 按 name 索引的 method handler 表。 */
-  private readonly methodHandlers = new Map<string, UntypedMethodHandler>();
-  /** 按 name 索引的 event handler 表。typed/vendor 共享同一 entry。 */
-  private readonly eventHandlers = new Map<string, Set<UntypedEventHandler>>();
-  /** server 端全局 handler 委托（dispatchRequest 本地 miss 时查此）。 */
-  private readonly globalHandlers?: {
-    getMethod: (name: string) => UntypedMethodHandler | undefined;
-    getEventListeners: (name: string) => Set<UntypedEventHandler> | undefined;
-  };
+  // 子组件
+  private readonly router: HandlerRouter;
+  private readonly handshakeOrch: HandshakeOrchestrator;
+  private readonly rpc: RpcExchange;
+  private readonly streamMgr: StreamManager;
+
+  // SessionIO：子组件通过此发送（转发到 Connection）
+  private readonly io: SessionIO & { sendStream: (p: StreamPayload) => void };
 
   private readonly onReadyStream = new EventStream<void>();
   private readonly onCloseStream = new EventStream<{ reason: string; remote: boolean }>();
+  private readonly onReconnectStream = new EventStream<{
+    attempt: number;
+    totalDowntimeMs: number;
+  }>();
 
   private ready = false;
   private closed = false;
   private readonly defaultTimeoutMs: number;
 
-  constructor(
-    private readonly logicalRole: LogicalRole,
-    conn: Connection,
-    options: SessionOptions = {}
-  ) {
-    this.conn = conn;
+  constructor(transport: ITransport, options: SessionOptions = {}) {
+    this.options = options;
+    this.logicalRole = options.logicalRole ?? "server";
+    this.physicalRole = options.physicalRole ?? "client";
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? 10000;
-    this.handshake = new Handshake(logicalRole, options.handshakeSeed);
-    this.globalHandlers = options.globalHandlers;
-    if (options.eventMasks) this.handshake.setEventMasks(options.eventMasks);
 
-    // 订阅 Connection 事件（回调已就绪后 start）
+    // 创建 Connection（Session 持有，SDK 不知 Connection）
+    this.conn = new Connection(this.physicalRole, transport, options, options.transportFactory);
+
+    // SessionIO：子组件通过此发送（转发到 Connection）
+    this.io = {
+      sendRpc: (p) => this.conn.sendRpc(p),
+      sendStream: (p) => this.conn.sendStream(p)
+    };
+
+    // 子组件
+    this.router = new HandlerRouter(options.globalHandlers);
+    this.handshakeOrch = new HandshakeOrchestrator(
+      this.logicalRole,
+      this.io,
+      options.handshakeSeed
+    );
+    this.rpc = new RpcExchange(
+      this.io,
+      this.router,
+      () => this.handshakeOrch.sid,
+      (requestId) => this.makeCallContext(requestId)
+    );
+    this.streamMgr = new StreamManager(this.io);
+
+    // 订阅 Connection 事件
     this.conn.onPayload.subscribe((p) => this.ingest(p));
-    this.conn.onStream.subscribe((s) => this.streams.onData(s));
+    this.conn.onStream.subscribe((s) => this.streamMgr.onData(s));
     this.conn.onLinkReady.subscribe(() => this.onLinkReady());
     this.conn.onClose.subscribe((r) => this.handleClose(r.reason, r.remote));
+    this.conn.onReconnect.subscribe((info) => this.handleReconnect(info.attempt));
 
-    // 启动 Connection 接收
     this.conn.start();
   }
 
   // ===== 生命周期 =====
 
-  /** APP_READY 后 resolve。 */
   readonly onReady: Promise<void> = new Promise((resolve) => {
     this.onReadyStream.subscribe(() => resolve());
   });
@@ -133,6 +158,10 @@ export class AxtpSession {
     return this.onCloseStream;
   }
 
+  get onReconnect(): EventStream<{ attempt: number; totalDowntimeMs: number }> {
+    return this.onReconnectStream;
+  }
+
   get isReady(): boolean {
     return this.ready;
   }
@@ -142,95 +171,23 @@ export class AxtpSession {
   }
 
   get sid(): string {
-    return this.handshake.sid;
+    return this.handshakeOrch.sid;
   }
 
   get state(): string {
-    return this.handshake.state;
-  }
-
-  // ===== STREAM（framed-binary 双向数据流；WS 不支持）=====
-
-  /**
-   * 发起建流：调用 openStream 类 RPC（如 video.openStream），server 返回 streamId，
-   * 本地建 send 方 Stream。返回的 Stream 可 send()/onChunk()。
-   * streamId 由 server 分配（spec: VideoOpenStreamResult.streamId）。
-   */
-  async openStream<K extends MethodName>(
-    method: K,
-    params: MethodRequest<K>,
-    options?: CallOptions
-  ): Promise<{ streamId: number; response: MethodResponse<K>; stream: Stream }> {
-    this.requireReady();
-    const result = await this.call(method, params, options);
-    const streamId = (result as { streamId?: number }).streamId;
-    if (typeof streamId !== "number" || streamId === 0) {
-      throw new AxtpError(ErrorCode.StreamIdInvalid, "openStream response missing streamId");
-    }
-    // 本地 send 方：用 server 分配的 streamId 建 context（adopt 语义）
-    const sendCtx = this.streams.adopt(streamId);
-    sendCtx.direction = "send";
-    const stream = this.makeStream(sendCtx);
-    return { streamId, response: result, stream };
-  }
-
-  /**
-   * 注册建流 handler（server 端）：当 client 调 openStream RPC 时触发。
-   * handler 内用返回的 response.streamId，并获得 Stream 对象用于 send/onChunk。
-   * server 端 Stream 是 receive 方（接收 client 的数据），也可 send（双向）。
-   */
-  onStream<K extends MethodName>(
-    method: K,
-    handler: (
-      ctx: CallContext,
-      params: MethodRequest<K>,
-      stream: Stream
-    ) => MethodResponse<K> | Promise<MethodResponse<K>>
-  ): () => void {
-    return this.handle(method, async (callCtx, params) => {
-      const result = await handler(callCtx, params, undefined as never);
-      const streamId = (result as { streamId?: number }).streamId;
-      if (typeof streamId !== "number" || streamId === 0) {
-        throw new AxtpError(ErrorCode.StreamIdInvalid, "onStream handler must return streamId");
-      }
-      // server 用自己分配的 streamId 建 receive context
-      const recvCtx = this.streams.adopt(streamId);
-      recvCtx.direction = "receive";
-      this.makeStream(recvCtx);
-      return result;
-    });
-  }
-
-  /** 构造 Stream 对象，绑定发送/关闭回调。 */
-  private makeStream(ctx: StreamContext): Stream {
-    return new Stream(
-      ctx,
-      (streamId, data, seqId) => this.sendStreamData(streamId, data, seqId),
-      (streamId) => this.closeStream(streamId)
-    );
-  }
-
-  /** 发送 STREAM 数据帧（framed only）。 */
-  private sendStreamData(streamId: number, data: Bytes, seqId: number): void {
-    this.conn.sendStream({ streamId, seqId, cursor: 0n, data });
-  }
-
-  /** 关闭单个流（本地状态清理）。完整关流走 video.closeStream RPC。 */
-  private closeStream(streamId: number): void {
-    this.streams.close(streamId, "local close");
+    return this.handshakeOrch.state;
   }
 
   close(): void {
     if (this.closed) return;
-    this.dispatcher.rejectAll(new AxtpError(ErrorCode.TransportDisconnected, "session closed"));
-    this.streams.abortAll("session closed");
+    this.rpc.rejectAll(new AxtpError(ErrorCode.TransportDisconnected, "session closed"));
+    this.streamMgr.abortAll("session closed");
     this.conn.close();
     this.handleClose("local close", false);
   }
 
-  // ===== typed 四件套（重载）=====
+  // ===== typed 四件套（重载，转发子组件）=====
 
-  /** call：内置 typed / vendor untyped。 */
   call<K extends MethodName>(
     method: K,
     params: MethodRequest<K>,
@@ -238,25 +195,23 @@ export class AxtpSession {
   ): Promise<MethodResponse<K>>;
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown>;
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
-    return this.doCall(method, params, options?.timeoutMs ?? this.defaultTimeoutMs);
+    this.requireReady();
+    return this.rpc.call(method, params, options?.timeoutMs ?? this.defaultTimeoutMs);
   }
 
-  /** handle：内置 typed / vendor untyped。返回 unsubscribe。 */
   handle<K extends MethodName>(method: K, handler: MethodHandler<K>): () => void;
   handle(method: string, handler: UntypedMethodHandler): () => void;
-  handle(method: string, handler: UntypedMethodHandler): () => void {
-    this.methodHandlers.set(method, handler);
-    return () => {
-      if (this.methodHandlers.get(method) === handler) this.methodHandlers.delete(method);
-    };
+  handle(
+    method: string,
+    handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
+  ): () => void {
+    return this.router.setMethod(method, handler as UntypedMethodHandler);
   }
 
-  /** 移除 handler（供 unsubscribe 闭包使用，避免捕获旧 session）。 */
   removeHandler(method: string, handler: UntypedMethodHandler): void {
-    if (this.methodHandlers.get(method) === handler) this.methodHandlers.delete(method);
+    this.router.removeMethod(method, handler);
   }
 
-  /** emit：内置 typed / vendor untyped。 */
   emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
   emit(event: string, payload: unknown): Promise<void>;
   async emit(event: string, payload: unknown): Promise<void> {
@@ -272,54 +227,40 @@ export class AxtpSession {
     this.conn.sendRpc(rpc);
   }
 
-  /** on：内置 typed / vendor untyped。返回 unsubscribe。 */
   on<K extends EventName>(event: K, handler: EventHandler<K>): () => void;
   on(event: string, handler: UntypedEventHandler): () => void;
   on(event: string, handler: UntypedEventHandler): () => void {
-    const set = this.eventHandlers.get(event) ?? new Set<UntypedEventHandler>();
-    if (!this.eventHandlers.has(event)) this.eventHandlers.set(event, set);
-    set.add(handler);
-    return () => set.delete(handler);
+    return this.router.addEventListener(event, handler);
   }
 
-  // ===== call 实现 =====
+  // ===== STREAM =====
 
-  private doCall(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+  async openStream<K extends MethodName>(
+    method: K,
+    params: MethodRequest<K>,
+    options?: CallOptions
+  ): Promise<{ streamId: number; response: MethodResponse<K>; stream: Stream }> {
     this.requireReady();
-    const methodId = registry.methodId(method as MethodName) ?? 0;
-    const { requestId, promise } = this.dispatcher.request((id) => {
-      const rpc = rpcPayload({
-        op: RpcOp.Request,
-        requestId: id,
-        methodOrEventId: methodId,
-        jsonSid: this.sid,
-        body: new TextEncoder().encode(JSON.stringify(params ?? {})),
-        meta: { jsonMethodOrEventName: method }
-      });
-      this.conn.sendRpc(rpc);
-    }, timeoutMs);
+    const { streamId, response, stream } = await this.streamMgr.openStream(
+      (m, p) => this.rpc.call(m, p, options?.timeoutMs ?? this.defaultTimeoutMs),
+      method,
+      params
+    );
+    return { streamId, response: response as MethodResponse<K>, stream };
+  }
 
-    return promise.then((payload) => {
-      if (payload.statusCode !== ErrorCode.Success) {
-        throw new AxtpError(
-          payload.statusCode as ErrorCode,
-          `call ${method} failed`,
-          undefined,
-          requestId
-        );
-      }
-      if (payload.body.length === 0) return undefined;
-      try {
-        return JSON.parse(new TextDecoder().decode(payload.body));
-      } catch {
-        throw new AxtpError(
-          ErrorCode.RpcPayloadInvalid,
-          `call ${method} response parse failed`,
-          undefined,
-          requestId
-        );
-      }
-    });
+  onStream<K extends MethodName>(
+    method: K,
+    handler: (
+      ctx: CallContext,
+      params: MethodRequest<K>
+    ) => MethodResponse<K> | Promise<MethodResponse<K>>
+  ): () => void {
+    return this.handle(method, ((ctx: unknown, params: unknown) =>
+      this.streamMgr.wrapStreamHandler(
+        async (p) => handler(ctx as CallContext, p as MethodRequest<K>),
+        () => {} // Stream 创建回调（handler 在返回 result 后才建 Stream，无法传给 handler）
+      )(ctx, params)) as UntypedMethodHandler);
   }
 
   // ===== 入站总入口 =====
@@ -327,39 +268,29 @@ export class AxtpSession {
   private ingest(payload: RpcPayload): void {
     if (this.closed) return;
 
-    // 会话握手（Handshake 消费，归 Session）
-    if (!this.ready && this.isHandshakeOp(payload.op)) {
-      const result = this.handshake.handle(payload);
-      if (result.outbound) this.conn.sendRpc(result.outbound);
-      if (result.becameReady) {
+    // 会话握手
+    if (!this.ready && HandshakeOrchestrator.isHandshakeOp(payload.op)) {
+      const becameReady = this.handshakeOrch.ingest(payload);
+      if (becameReady) {
         this.ready = true;
         this.onReadyStream.emit(undefined);
       }
       return;
     }
 
-    // 未 ready 的业务请求 -> CONTROL_OPEN_REQUIRED（conformance 对齐）
+    // 未 ready 的业务请求 -> CONTROL_OPEN_REQUIRED
     if (!this.ready) {
-      if (payload.op === RpcOp.Request) {
-        this.conn.sendRpc(
-          rpcPayload({
-            op: RpcOp.RequestResponse,
-            requestId: payload.requestId,
-            statusCode: ErrorCode.ControlOpenRequired,
-            jsonSid: this.sid
-          })
-        );
-      }
+      this.rpc.rejectNotReady(payload);
       return;
     }
 
     // APP_READY 业务分发
     switch (payload.op) {
       case RpcOp.Request:
-        this.dispatchRequest(payload);
+        this.rpc.dispatchRequest(payload);
         break;
       case RpcOp.RequestResponse:
-        this.dispatcher.resolve(payload);
+        this.rpc.resolveResponse(payload);
         break;
       case RpcOp.Event:
         this.dispatchEvent(payload);
@@ -367,93 +298,9 @@ export class AxtpSession {
     }
   }
 
-  /** 链路 ready 后：Logical Server 发 Hello（spec: Hello 永远由 Logical Server 发，与 Physical 角色正交）。 */
-  private onLinkReady(): void {
-    this.handshake.onLinkReady();
-    if (this.logicalRole === "server") {
-      // Logical Server 发 Hello
-      this.conn.sendRpc(this.handshake.startHello());
-    }
-    // Logical Client 等待 Hello 到达，ingest 里处理
-  }
-
-  private dispatchRequest(payload: RpcPayload): void {
-    const methodName = payload.meta.jsonMethodOrEventName ?? "";
-    // 先查本地 handler，miss 委托全局 registry（server 模式）
-    const handler =
-      this.methodHandlers.get(methodName) ?? this.globalHandlers?.getMethod(methodName);
-    const ctx: CallContext = {
-      requestId: payload.requestId,
-      sid: this.sid,
-      reply: (event, eventPayload) => this.emit(event, eventPayload)
-    };
-
-    if (handler === undefined) {
-      // 未注册 -> RPC_METHOD_NOT_FOUND
-      this.conn.sendRpc(
-        rpcPayload({
-          op: RpcOp.RequestResponse,
-          requestId: payload.requestId,
-          statusCode: ErrorCode.RpcMethodNotFound,
-          jsonSid: this.sid
-        })
-      );
-      return;
-    }
-
-    // 解析 params
-    let params: unknown;
-    try {
-      params = payload.body.length === 0 ? {} : JSON.parse(new TextDecoder().decode(payload.body));
-    } catch {
-      this.conn.sendRpc(
-        rpcPayload({
-          op: RpcOp.RequestResponse,
-          requestId: payload.requestId,
-          statusCode: ErrorCode.RpcPayloadInvalid,
-          jsonSid: this.sid
-        })
-      );
-      return;
-    }
-
-    // 执行 handler（异步）
-    Promise.resolve()
-      .then(() => handler(ctx, params))
-      .then(
-        (result) => {
-          this.conn.sendRpc(
-            rpcPayload({
-              op: RpcOp.RequestResponse,
-              requestId: payload.requestId,
-              statusCode: ErrorCode.Success,
-              jsonSid: this.sid,
-              body: new TextEncoder().encode(JSON.stringify(result ?? {}))
-            })
-          );
-        },
-        (err) => {
-          const code = err instanceof AxtpError ? err.code : ErrorCode.RpcExecutionFailed;
-          this.conn.sendRpc(
-            rpcPayload({
-              op: RpcOp.RequestResponse,
-              requestId: payload.requestId,
-              statusCode: code,
-              jsonSid: this.sid
-            })
-          );
-        }
-      );
-  }
-
   private dispatchEvent(payload: RpcPayload): void {
     const eventName = payload.meta.jsonMethodOrEventName ?? "";
-    // 先查本地 event handler，再委托全局 registry（server 模式，server.on 注册到此）
-    const localSet = this.eventHandlers.get(eventName);
-    const globalSet = this.globalHandlers?.getEventListeners(eventName);
-    const handlers = new Set<UntypedEventHandler>();
-    if (localSet !== undefined) for (const h of localSet) handlers.add(h);
-    if (globalSet !== undefined) for (const h of globalSet) handlers.add(h);
+    const handlers = this.router.getEventHandlers(eventName);
     if (handlers.size === 0) return;
     let data: unknown;
     try {
@@ -470,8 +317,25 @@ export class AxtpSession {
     }
   }
 
-  private isHandshakeOp(op: RpcOp): boolean {
-    return op === RpcOp.Hello || op === RpcOp.Identify || op === RpcOp.Identified;
+  private onLinkReady(): void {
+    this.handshakeOrch.onLinkReady();
+  }
+
+  /** Connection 传输重连成功后：重建会话（重置握手，重新走 Hello/Identify）。 */
+  private handleReconnect(_attempt: number): void {
+    // 重置握手状态，等 onLinkReady 重新触发握手流程
+    this.ready = false;
+    this.handshakeOrch.reset();
+    this.onReconnectStream.emit({ attempt: _attempt, totalDowntimeMs: 0 });
+    // onLinkReady 会由 Connection 的 fireLinkReady 重新触发 → handshakeOrch.onLinkReady → 发 Hello 或等 Hello
+  }
+
+  private makeCallContext(requestId: number): CallContext {
+    return {
+      requestId,
+      sid: this.sid,
+      reply: (event, payload) => this.emit(event, payload)
+    };
   }
 
   private requireReady(): void {
@@ -483,10 +347,10 @@ export class AxtpSession {
     if (this.closed) return;
     this.closed = true;
     this.ready = false;
-    this.dispatcher.rejectAll(
+    this.rpc.rejectAll(
       new AxtpError(ErrorCode.TransportDisconnected, `connection closed: ${reason}`)
     );
-    this.streams.abortAll(`connection closed: ${reason}`);
+    this.streamMgr.abortAll(`connection closed: ${reason}`);
     this.onCloseStream.emit({ reason, remote });
     this.onReadyStream.close();
   }

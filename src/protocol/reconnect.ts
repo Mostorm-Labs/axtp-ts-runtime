@@ -1,6 +1,7 @@
-// ReconnectPolicy + 退避算法。
-// Client 自动重连：全新 session（新 sid），迁移 handle/on 订阅，pending/stream 按 reject 失败。
+// ReconnectPolicy + 退避算法（连接层）。
+// Connection 层传输重连：transport.connect + 链路重建 + 心跳重启。
 // 指数退避 + 抖动，成功后归零。
+// 会话重建（握手 + 应用状态）由 Session 监听 Connection.onReconnect 处理。
 
 export interface ReconnectPolicy {
   enabled: boolean;

@@ -182,9 +182,8 @@ describe("Connection 心跳（framed）", () => {
 describe("Connection 心跳（WS unframed-json）", () => {
   it("link ready 后启动 ws ping 心跳", async () => {
     // 用真实 NodeWsTransport 回环：WS 心跳用 ws.ping()/pong（NativePingCapable），mock 无此能力。
-    const { NodeWsServerTransport, NodeWsClientTransport, hasNativePing } = await import(
-      "../../src/transport/ws/nodeWsTransport.js"
-    );
+    const { NodeWsServerTransport, NodeWsClientTransport, hasNativePing } =
+      await import("../../src/transport/ws/nodeWsTransport.js");
     const port = 19300;
 
     const serverTransport = new NodeWsServerTransport({ port });
@@ -203,7 +202,7 @@ describe("Connection 心跳（WS unframed-json）", () => {
 
     // client transport 是 NativePingCapable，spy ping() 调用
     expect(hasNativePing(clientConn)).toBe(true);
-    const pingSpy = vi.spyOn(clientConn as { ping: () => void }, "ping");
+    const pingSpy = vi.spyOn(clientConn as unknown as { ping: () => void }, "ping");
 
     // client 端 Connection 启动（WS 模式 fireLinkReady + startHeartbeat）
     const clientConnection = new Connection("client", clientConn, {

@@ -3,7 +3,13 @@
 // 按 name 索引——规避 method id 与 event id 共享空间。
 // event 全局 handler：所有 session 的事件聚合上报。
 
-import type { UntypedEventHandler, UntypedMethodHandler } from "./session.js";
+import type {
+  GlobalHandlerSource,
+  UntypedEventHandler,
+  UntypedMethodHandler
+} from "./handlerRouter.js";
+
+export type { GlobalHandlerSource, UntypedEventHandler, UntypedMethodHandler };
 
 export class HandlerRegistry {
   private readonly methodHandlers = new Map<string, UntypedMethodHandler>();

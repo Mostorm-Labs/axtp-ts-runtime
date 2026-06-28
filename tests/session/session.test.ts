@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { Connection } from "../../src/protocol/connection.js";
 import { ErrorCode } from "../../src/protocol/generated/axtp_ids_generated.js";
 import { AxtpSession } from "../../src/session/session.js";
 import { createMockTransportPair } from "../../src/transport/mock/mockTransport.js";
@@ -17,10 +16,9 @@ async function makePair(
 ): Promise<{ client: AxtpSession; server: AxtpSession }> {
   const caps = wire === "ws" ? unframedJsonCapabilities() : framedBinaryCapabilities();
   const { left, right } = createMockTransportPair(caps);
-  const clientConn = new Connection("client", left);
-  const serverConn = new Connection("server", right);
-  const server = new AxtpSession("server", serverConn);
-  const client = new AxtpSession("client", clientConn);
+  // 经典场景：server 暴露能力（Logical Server），client 消费（Logical Client）
+  const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
+  const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
   await Promise.all([client.onReady, server.onReady]);
   return { client, server };
 }
@@ -29,10 +27,10 @@ describe("AxtpSession 握手 + 双向 RPC（WS 模式）", () => {
   it("client call -> server handle -> response（typed 路径）", async () => {
     const { client, server } = await makePair("ws");
 
-    server.handle("audio.getAlgorithmConfig", (_ctx, _params) => ({
+    server.handle("audio.getAlgorithmConfig", ((_ctx: unknown, _params: unknown) => ({
       algorithm: "test",
       version: 1
-    }));
+    })) as never);
 
     const result = await client.call("audio.getAlgorithmConfig", {});
     expect(result).toEqual({ algorithm: "test", version: 1 });
@@ -108,8 +106,7 @@ describe("AxtpSession 事件（双向）", () => {
 describe("AxtpSession 未 ready 拒绝", () => {
   it("未握手时 call 抛 InvalidState", async () => {
     const { left } = createMockTransportPair(unframedJsonCapabilities());
-    const conn = new Connection("client", left);
-    const session = new AxtpSession("client", conn);
+    const session = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
     expect(() => session.call("audio.getAlgorithmConfig", {})).toThrow();
     session.close();
   });

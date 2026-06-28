@@ -87,7 +87,7 @@ describe("AxtpServer 多 client + 全局 handle", () => {
     client2.on("audio.algorithmConfigChanged", (p) => received2.push(p));
     await settle(10);
 
-    await server.emit("audio.algorithmConfigChanged", { broadcast: true });
+    await server.emit("audio.algorithmConfigChanged", { broadcast: true } as never);
     await settle(10);
     expect(received1.length).toBe(1);
     expect(received2.length).toBe(1);
@@ -108,7 +108,11 @@ describe("AxtpServer 多 client + 全局 handle", () => {
 
     // 只发给第一个 session（用 sid 区分）
     const targetSid = client.sid;
-    await server.emit("audio.algorithmConfigChanged", { x: 1 }, (s) => s.sid === targetSid);
+    await server.emit(
+      "audio.algorithmConfigChanged",
+      { x: 1 } as never,
+      (s) => s.sid === targetSid
+    );
     await settle(10);
     expect(received1.length).toBe(1);
     expect(received2.length).toBe(0);
@@ -146,19 +150,19 @@ describe("AxtpClient 重连机制", () => {
     expect(result).toEqual({ reconnected: true });
   });
 
-  it("重连中 call 抛 InvalidState", async () => {
+  it("断连后 call 抛错（不启用重连）", async () => {
     const serverTransport = new MockServerTransport(unframedJsonCapabilities());
     const server = new AxtpServer(serverTransport, { logicalRole: "server" });
     await server.listen();
     const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
     const client = new AxtpClient(clientTransport, {
-      reconnect: { enabled: true, initialDelayMs: 1000, maxDelayMs: 1000 },
       logicalRole: "client"
     });
     await client.connect();
 
     server.getSessions()[0]?.close();
-    await settle(10);
+    await settle(20);
+    // 断连后 client.call 应抛错（session not ready）
     expect(() => client.call("audio.getAlgorithmConfig", {})).toThrow();
   });
 
