@@ -30,7 +30,9 @@ import type {
 export type {
   CallContext,
   CallOptions,
-  EventHandler, GlobalHandlerSource, MethodHandler,
+  EventHandler,
+  GlobalHandlerSource,
+  MethodHandler,
   SessionOptions,
   UntypedEventHandler,
   UntypedMethodHandler
@@ -68,8 +70,10 @@ export class AxtpSession {
 
   constructor(transport: ITransport, options: SessionOptions = {}) {
     this.options = options;
-    this.logicalRole = options.logicalRole ?? "server";
-    this.physicalRole = options.physicalRole ?? "client";
+    const physicalRole = options.physicalRole ?? "client";
+    const logicalRole = options.logicalRole ?? "server";
+    this.physicalRole = physicalRole;
+    this.logicalRole = logicalRole;
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? 10000;
     this.id = nextSessionId++;
 
@@ -80,12 +84,7 @@ export class AxtpSession {
       maxFrameSize: options.maxFrameSize,
       reconnect: options.reconnect
     };
-    this.conn = new Connection(
-      this.physicalRole!,
-      transport,
-      connOptions,
-      options.transportFactory
-    );
+    this.conn = new Connection(physicalRole, transport, connOptions, options.transportFactory);
 
     // SessionIO：子组件通过此发送（转发到 Connection）
     this.io = {
@@ -95,11 +94,7 @@ export class AxtpSession {
 
     // 子组件
     this.router = new HandlerRouter(options.globalHandlers);
-    this.handshakeOrch = new HandshakeOrchestrator(
-      this.logicalRole!,
-      this.io,
-      options.handshakeSeed
-    );
+    this.handshakeOrch = new HandshakeOrchestrator(logicalRole, this.io, options.handshakeSeed);
     this.rpc = new RpcExchange(
       this.io,
       this.router,

@@ -182,7 +182,7 @@ export class Connection {
    * 构造和重连都调此方法。
    */
   private attachTransport(transport: ITransport): void {
-    if (this.capabilities.wireMode === "framed-binary") {
+    if (this.capabilities.supportsControl) {
       this.controlSession = new ControlSession(
         this.physicalRole,
         {
@@ -241,7 +241,7 @@ export class Connection {
     const buffered = this.pendingBytes.splice(0);
     for (const bytes of buffered) this.onTransportBytes(bytes);
 
-    if (this.capabilities.wireMode === "framed-binary") {
+    if (this.capabilities.supportsControl) {
       const cs = this.controlSession;
       if (this.physicalRole === "client" && cs !== undefined) cs.sendOpen();
     } else {
@@ -254,7 +254,7 @@ export class Connection {
   sendRpc(payload: RpcPayload): void {
     if (this.closed || this.reconnecting) return;
     const jsonBytes = encodeJsonRpc(payload);
-    if (this.capabilities.wireMode === "framed-binary") {
+    if (this.capabilities.supportsControl) {
       this.sendFramedMessage(PayloadType.Rpc, this.wrapRpcEncoding(jsonBytes));
     } else {
       this.transport.send(jsonBytes);
@@ -263,7 +263,7 @@ export class Connection {
 
   /** 发送 StreamPayload（framed only）。 */
   sendStream(payload: StreamPayload): void {
-    if (this.closed || this.reconnecting || this.capabilities.wireMode !== "framed-binary") return;
+    if (this.closed || this.reconnecting || !this.capabilities.supportsControl) return;
     this.sendFramedMessage(PayloadType.Stream, encodeStream(payload));
   }
 
@@ -273,7 +273,7 @@ export class Connection {
     this.closed = true;
     this.reconnectCoordinator?.stop();
     this.heartbeat?.stop();
-    if (this.capabilities.wireMode === "framed-binary" && this.controlSession?.isOpen) {
+    if (this.capabilities.supportsControl && this.controlSession?.isOpen) {
       this.controlSession.sendClose();
     }
     this.transport.close();
@@ -340,7 +340,7 @@ export class Connection {
 
   private onTransportBytes(bytes: Bytes): void {
     if (this.closed) return;
-    if (this.capabilities.wireMode === "framed-binary") {
+    if (this.capabilities.supportsControl) {
       this.frameDecoder.onBytes(bytes);
     } else {
       const payload = decodeJsonRpc(bytes);
@@ -367,7 +367,7 @@ export class Connection {
     this.linkReadyFired = true;
     this.onLinkReady.emit(undefined);
     // WS 模式：fireLinkReady 后也要标记重连成功（framed 走 onNegotiatedLinkReady）
-    if (this.reconnecting && this.capabilities.wireMode !== "framed-binary") {
+    if (this.reconnecting && !this.capabilities.supportsControl) {
       this.reconnecting = false;
       const attempt = this.reconnectCoordinator?.attemptCount ?? 0;
       this.onReconnect.emit({ attempt, totalDowntimeMs: 0 });
@@ -402,7 +402,7 @@ export class Connection {
   }
 
   private sendFramedMessage(payloadType: PayloadType, body: Uint8Array): void {
-    if (this.closed || this.reconnecting || this.capabilities.wireMode !== "framed-binary") return;
+    if (this.closed || this.reconnecting || !this.capabilities.supportsControl) return;
     const message: Message = { messageId: 0, payloadType, body };
     for (const frame of this.fragmenter.fragment(message)) {
       this.transport.send(this.frameEncoder.encode(frame));

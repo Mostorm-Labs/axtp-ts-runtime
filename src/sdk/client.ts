@@ -99,7 +99,9 @@ export class AxtpClient {
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown>;
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
     this.requireUsable();
-    return this.session!.call(method as never, params as never, options);
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
+    return session.call(method as never, params as never, options);
   }
 
   handle<K extends MethodName>(
@@ -114,20 +116,26 @@ export class AxtpClient {
     method: string,
     handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
   ): () => void {
-    return this.session!.handle(method, handler as UntypedMethodHandler);
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
+    return session.handle(method, handler as UntypedMethodHandler);
   }
 
   emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
   emit(event: string, payload: unknown): Promise<void>;
   emit(event: string, payload: unknown): Promise<void> {
     this.requireUsable();
-    return this.session!.emit(event as never, payload as never);
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
+    return session.emit(event as never, payload as never);
   }
 
   on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void;
   on(event: string, handler: UntypedEventHandler): () => void;
   on(event: string, handler: UntypedEventHandler): () => void {
-    return this.session!.on(event, handler);
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
+    return session.on(event, handler);
   }
 
   /** 主动关闭，不再重连。 */
