@@ -5,6 +5,7 @@
 
 import type { EventName, MethodName } from "../protocol/generated/registry.js";
 import { EVENT_REGISTRY, METHOD_REGISTRY } from "../protocol/generated/registry.js";
+import { hexToBytes } from "../io/bytes.js";
 
 export {
   EVENT_REGISTRY,
@@ -177,13 +178,4 @@ export function isEventSubscribed(eventName: EventName, eventMasksHex: string): 
     }
   }
   return false;
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const normalized = hex.replace(/\s+/g, "");
-  const out = new Uint8Array(Math.floor(normalized.length / 2));
-  for (let i = 0; i < out.length; i++) {
-    out[i] = Number.parseInt(normalized.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
 }

@@ -83,9 +83,8 @@ export class AxtpSession {
   /** 公开 id（仅在创建它的 server/client 内有效，非全局唯一）。 */
   readonly id: number;
 
-  constructor(transport: ITransport, config: SessionConfig = {}) {
+  constructor(transport: ITransport, config: SessionConfig) {
     const physicalRole = config.physicalRole ?? "client";
-    const logicalRole = config.logicalRole ?? "server";
     this.defaultTimeoutMs = config.defaultTimeoutMs ?? 10000;
     this.id = nextSessionId++;
 
@@ -107,7 +106,11 @@ export class AxtpSession {
 
     // 子组件
     this.router = new HandlerRouter(config.globalHandlers);
-    this.handshakeOrch = new HandshakeOrchestrator(logicalRole, this.io, config.handshakeSeed);
+    this.handshakeOrch = new HandshakeOrchestrator(
+      config.logicalRole,
+      this.io,
+      config.handshakeSeed
+    );
     this.rpc = new RpcExchange(
       this.io,
       this.router,
@@ -212,12 +215,6 @@ export class AxtpSession {
     handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
   ): () => void {
     return this.router.setMethod(method, handler as UntypedMethodHandler);
-  }
-
-  removeHandler<K extends MethodName>(method: K, handler: MethodHandler<K>): void;
-  removeHandler(method: string, handler: UntypedMethodHandler): void;
-  removeHandler(method: string, handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>): void {
-    this.router.removeMethod(method, handler as UntypedMethodHandler);
   }
 
   /** emit：内置 typed / vendor untyped */
@@ -375,6 +372,7 @@ export class AxtpSession {
     this.onReadyStream.close();
     this.onCloseStream.close();
     this.onReconnectStream.close();
+    this.onReconnectFailedStream.close();
     this.onErrorStream.close();
   }
 }

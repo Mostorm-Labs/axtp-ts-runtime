@@ -84,11 +84,9 @@ export class AxtpClient {
   async connect(): Promise<void> {
     if (this.connected) throw new AxtpError(ErrorCode.InvalidState, "client already connected");
     const transport = await this.transport.connect();
-    // Session 创建 Connection（SDK 不知 Connection）。
-    // physicalRole/transportFactory 由 SDK 注入，不从 options 暴露。
     this.session = new AxtpSession(transport, {
       physicalRole: "client",
-      logicalRole: this.options.logicalRole,
+      logicalRole: this.options.logicalRole ?? "server",
       defaultTimeoutMs: this.options.defaultTimeoutMs,
       handshakeTimeoutMs: this.options.handshakeTimeoutMs,
       reconnect: this.options.reconnect,

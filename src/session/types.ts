@@ -59,7 +59,7 @@ export interface SessionOptions {
   reconnect?: ReconnectPolicy;
 
   // === 会话语义 ===
-  logicalRole?: LogicalRole;
+  logicalRole: LogicalRole;
   defaultTimeoutMs?: number;
   /** 握手超时 ms（超时后 onReady reject + close）。 */
   handshakeTimeoutMs?: number;

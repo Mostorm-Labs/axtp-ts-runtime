@@ -83,6 +83,8 @@ export class Connection {
   private closed = false;
   private linkReadyFired = false;
   private reconnecting = false;
+  /** 心跳 controlId 自增（从 0x100 起，避开 ControlSession 的 OPEN/ACCEPT/CLOSE id 范围）。 */
+  private nextHeartbeatControlId = 0x100;
   /** start 前的消息缓冲（防止 transport 在 Connection 构造到 start 间投递的消息丢失）。 */
   private pendingBytes: Bytes[] = [];
 
@@ -234,7 +236,9 @@ export class Connection {
     if (this.reconnecting) {
       throw new AxtpError(ErrorCode.TransportDisconnected, "connection reconnecting");
     }
-    if (!this.capabilities.supportsControl) return;
+    if (!this.capabilities.supportsControl) {
+      throw new AxtpError(ErrorCode.NotSupported, "STREAM not supported on this transport");
+    }
     this.sendFramedMessage(PayloadType.Stream, encodeStream(payload));
   }
 
@@ -310,9 +314,8 @@ export class Connection {
       this.startHeartbeat(this.options.heartbeatIntervalMs ?? 30000);
     }
 
-    // 标记重连完成
+    // 标记重连完成（退避重置延迟到链路真正 ready 时，见 onNegotiatedLinkReady / fireLinkReady）
     this.reconnecting = false;
-    this.handleReconnectSuccess();
   }
 
   /** 链路重建成功。 */
@@ -324,6 +327,7 @@ export class Connection {
   private handleReconnectFailed(): void {
     this.reconnecting = false;
     this.closed = true;
+    this.transport.close();
     this.onReconnectFailed.emit(undefined);
     this.onClose.emit({ code: CloseCode.Reconnect, reason: "reconnect failed", remote: false });
     this.cleanupStreams();
@@ -346,12 +350,18 @@ export class Connection {
     this.fragmenter?.setMaxFrameSize(neg.maxFrameSize);
     this.fireLinkReady();
     this.startHeartbeat(neg.heartbeatIntervalMs);
+    // 链路真正建立后才重置退避（修复 #3：之前在 handleReconnected 过早重置）
+    this.handleReconnectSuccess();
   }
 
   private fireLinkReady(): void {
     if (this.linkReadyFired) return;
     this.linkReadyFired = true;
     this.onLinkReady.emit(undefined);
+    // WS 模式：fireLinkReady 即链路就绪，在此重置退避
+    if (!this.capabilities.supportsControl) {
+      this.handleReconnectSuccess();
+    }
   }
 
   private startHeartbeat(negotiatedIntervalMs: number): void {
@@ -363,7 +373,11 @@ export class Connection {
       this.heartbeat = new Heartbeat({
         intervalMs: interval,
         timeoutMs: timeout,
-        onTick: () => this.sendFramedMessage(PayloadType.Control, encodeHeartbeat(1)),
+        onTick: () => {
+          const cid = this.nextHeartbeatControlId;
+          this.nextHeartbeatControlId = (this.nextHeartbeatControlId + 1) & 0xffff;
+          this.sendFramedMessage(PayloadType.Control, encodeHeartbeat(cid));
+        },
         onTimeout: () => this.close(CloseCode.HeartbeatTimeout, "heartbeat timeout")
       });
     } else if (this.capabilities.supportsKeepalive) {

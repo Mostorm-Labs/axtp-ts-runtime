@@ -59,10 +59,9 @@ export class AxtpServer {
 
   /** 新连接到达：建 Session（内含 Connection，SDK 不知 Connection）。 */
   private adoptConnection(t: ITransport): void {
-    const logicalRole = this.options.logicalRole ?? "client";
     const session = new AxtpSession(t, {
       physicalRole: "server",
-      logicalRole,
+      logicalRole: this.options.logicalRole ?? "client",
       defaultTimeoutMs: this.options.defaultTimeoutMs ?? 10000,
       handshakeTimeoutMs: this.options.handshakeTimeoutMs,
       heartbeatIntervalMs: this.options.heartbeatIntervalMs,

@@ -174,6 +174,35 @@ describe("AxtpClient 重连机制", () => {
     await settle(50);
     expect(reconnected).toBe(false);
   });
+
+  it("重连失败：maxAttempts 耗尽 -> onReconnectFailed", async () => {
+    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const server = new AxtpServer(serverTransport, { logicalRole: "server" });
+    await server.listen();
+
+    const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const client = new AxtpClient(clientTransport, {
+      logicalRole: "client",
+      reconnect: { enabled: true, initialDelayMs: 10, maxDelayMs: 10, maxAttempts: 2 }
+    });
+    await client.connect();
+
+    // 使 transport 不可用，重连时 connect() 会 reject
+    clientTransport.close();
+    await server.close();
+
+    let reconnectFailed = false;
+    client.onReconnectFailed.subscribe(() => (reconnectFailed = true));
+
+    // 触发断连
+    server.getSessions()[0]?.close();
+
+    // 等待重连耗尽（transport.connect 拒绝 → 快速失败 → 退避重试 → maxAttempts）
+    await settle(500);
+
+    expect(reconnectFailed).toBe(true);
+    expect(client.isReady).toBe(false);
+  });
 });
 
 describe("AxtpClient handle unsubscribe（重连安全）", () => {
