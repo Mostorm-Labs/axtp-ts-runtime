@@ -6,7 +6,11 @@
 // onReady: EventStream<void>（每次握手成功都 emit，支持重连后再次 ready）
 // onStateChange: EventStream<SessionLifecycleState>（状态转换通知）
 
-import { Connection, type ConnectionOptions, type ConnectionState } from "../connection/connection.js";
+import {
+  Connection,
+  type ConnectionOptions,
+  type ConnectionState
+} from "../connection/connection.js";
 import { RpcOp } from "../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../protocol/model.js";
 import type { CloseReason, ITransport } from "../transport/transport.js";
@@ -46,7 +50,6 @@ export type SessionLifecycleState =
   | "reconnecting" // 传输断开，Connection 正在重连
   | "closed"; // 终态
 
-// 重新导出类型（公共 API）
 export type {
   CallContext,
   CallOptions,
@@ -55,7 +58,8 @@ export type {
   GlobalHandlerSource,
   MethodHandler,
   SessionCloseInfo,
-  SessionConfig, SessionLifecycleState as SessionState, UntypedEventHandler,
+  SessionConfig,
+  UntypedEventHandler,
   UntypedMethodHandler
 };
 

@@ -19,10 +19,6 @@ export class HandlerRouter {
     return this.local.setMethod(name, handler);
   }
 
-  removeMethod(name: string, handler: UntypedMethodHandler): void {
-    this.local.removeMethod(name, handler);
-  }
-
   getMethod(name: string): UntypedMethodHandler | undefined {
     return this.local.getMethod(name) ?? this.globalHandlers?.getMethod(name);
   }

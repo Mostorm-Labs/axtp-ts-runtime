@@ -7,7 +7,6 @@ export { AxtpClient } from "./sdk/client.js";
 export type { ClientOptions, ClientState } from "./sdk/client.js";
 export { AxtpServer } from "./sdk/server.js";
 export type { ServerOptions } from "./sdk/server.js";
-export type { SessionState } from "./session/handshake/handshake.js";
 export { AxtpSession } from "./session/session.js";
 export type {
   CallContext,
@@ -55,6 +54,10 @@ export { EventStream } from "./types/events.js";
 
 // 角色（Physical 驱动 CONTROL OPEN/ACCEPT，Logical 驱动 RPC Hello；二者正交，用于 Cloud Reverse 拓扑）
 export type { LogicalRole, PhysicalRole } from "./transport/transport.js";
+
+// 传输能力（自定义 transport 实现需要）
+export type { TransportCapabilities } from "./transport/transport.js";
+export { CloseCode } from "./transport/transport.js";
 
 // 协议常量（供高级用户，从 model.ts 中转，不直连 generated）
 export { ControlOpcode, PayloadType, RpcOp } from "./protocol/model.js";

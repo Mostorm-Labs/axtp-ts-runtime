@@ -4,9 +4,8 @@
 // call(sessionId, ...) 单播；emit(...) 广播。
 //
 // 事件语义：
-// - onConnect: 新 session 创建（握手前，物理连接到达即触发）
-// - onSessionReady: session 握手成功（ready 后触发）
-// - onSessionClose: 单个 session 断开
+// - onConnect: session 握手成功（ready 后触发）
+// - onDisconnect: 单个 session 断开
 // - onClose: Server 整体关闭
 
 import { HandlerRegistry } from "../session/handler/handlerRegistry.js";
@@ -36,8 +35,7 @@ export class AxtpServer {
   private readonly sessions = new Map<number, AxtpSession>();
   private readonly handlers = new HandlerRegistry();
   private readonly onConnectStream = new EventStream<AxtpSession>();
-  private readonly onSessionReadyStream = new EventStream<AxtpSession>();
-  private readonly onSessionCloseStream = new EventStream<AxtpSession>();
+  private readonly onDisconnectStream = new EventStream<AxtpSession>();
   private readonly onCloseStream = new EventStream<void>();
   private closed = false;
 
@@ -51,7 +49,7 @@ export class AxtpServer {
     await this.transport.listen();
   }
 
-  /** 新连接到达：建 Session（内含 Connection，SDK 不知 Connection）。 */
+  /** 新连接到达：建 Session（内含 Connection），握手成功后 onConnect 触发。 */
   private adoptConnection(t: ITransport): void {
     const session = new AxtpSession(t, {
       physicalRole: "server",
@@ -63,33 +61,27 @@ export class AxtpServer {
       maxFrameSize: this.options.maxFrameSize,
       globalHandlers: this.handlers
     });
-    this.sessions.set(session.id, session);
-
-    // session ready 后通知上层（与 onConnect 区分）
-    session.onReady.subscribe(() => this.onSessionReadyStream.emit(session));
 
     session.onClose.subscribe(() => {
       this.sessions.delete(session.id);
-      this.onSessionCloseStream.emit(session);
+      this.onDisconnectStream.emit(session);
     });
 
-    // onConnect：物理连接到达即触发（session 尚未 ready）
-    this.onConnectStream.emit(session);
+    // 握手成功后才注册到 sessions 表 + 触发 onConnect
+    session.onReady.subscribe(() => {
+      this.sessions.set(session.id, session);
+      this.onConnectStream.emit(session);
+    });
   }
 
-  /** 新 session 创建（握手前）。 */
+  /** session 握手成功（ready 后触发）。 */
   get onConnect(): EventStream<AxtpSession> {
     return this.onConnectStream;
   }
 
-  /** session 握手成功（ready 后）。 */
-  get onSessionReady(): EventStream<AxtpSession> {
-    return this.onSessionReadyStream;
-  }
-
   /** 单个 client session 断开时触发。 */
-  get onSessionClose(): EventStream<AxtpSession> {
-    return this.onSessionCloseStream;
+  get onDisconnect(): EventStream<AxtpSession> {
+    return this.onDisconnectStream;
   }
 
   /** Server 整体关闭时触发。 */
@@ -160,11 +152,6 @@ export class AxtpServer {
     return [...this.sessions.values()];
   }
 
-  /** 仅返回 ready 的 session。 */
-  getReadySessions(): AxtpSession[] {
-    return [...this.sessions.values()].filter((s) => s.isReady);
-  }
-
   getSession(id: number): AxtpSession | undefined {
     return this.sessions.get(id);
   }
@@ -176,7 +163,7 @@ export class AxtpServer {
     await this.transport.close();
     this.onCloseStream.emit(undefined);
     this.onConnectStream.close();
-    this.onSessionReadyStream.close();
+    this.onDisconnectStream.close();
   }
 
   get isClosed(): boolean {

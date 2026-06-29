@@ -77,8 +77,7 @@ export interface CommonOptions {
 
 /**
  * Session 选项——用户可见部分（不含 SDK 内部注入字段）。
- * ReconnectPolicy 从 types/error.js 取（ErrorCode 所在地），而非 connection/reconnect/reconnect.js，
- * 避免 session 层反向依赖 connection 层。
+ * ReconnectPolicy 类型从 connection/reconnect 取（session 层依赖 connection 层是合理的上层→下层依赖）。
  */
 export interface SessionOptions extends CommonOptions {
   /** 传输重连策略（透传给 Connection）。类型来自 connection/reconnect/reconnect.js，但只在此处声明。 */

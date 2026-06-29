@@ -250,15 +250,10 @@ export class Connection {
     this.heartbeat = undefined;
 
     if (this.reconnectCoordinator !== undefined) {
-      // 有重连策略：通知断连 + 进入重连
+      // 有重连策略：通知断连 + 进入重连（start 幂等，内部有 active 守卫防重复）
       this.onDisconnect.emit(reason);
       this.setState("reconnecting");
-      if (this.reconnectCoordinator.attemptCount === 0) {
-        this.reconnectCoordinator.start();
-      } else {
-        this.reconnectCoordinator.reset();
-        this.reconnectCoordinator.start();
-      }
+      this.reconnectCoordinator.start();
       return;
     }
 
