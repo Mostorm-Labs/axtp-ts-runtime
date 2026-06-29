@@ -29,8 +29,7 @@ export class RpcDispatcher {
    */
   request(
     send: (requestId: number) => void,
-    timeoutMs: number,
-    onTimeout?: () => void
+    timeoutMs: number
   ): RequestResult {
     const requestId = this.allocateRequestId();
     let entry: PendingEntry;
@@ -46,7 +45,6 @@ export class RpcDispatcher {
               requestId
             )
           );
-          onTimeout?.();
         }
       }, timeoutMs);
       entry = { resolve, reject, timer };

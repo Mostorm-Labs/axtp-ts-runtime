@@ -29,7 +29,7 @@ import type {
 /** SDK Client 生命周期状态机。 */
 export type ClientState =
   | "idle" // 构造后未 connect
-  | "connecting" // connect() 调用中（含首次和重连后）
+  | "connecting" // 正在建立连接+握手（含首次和重连后）
   | "ready" // session ready
   | "reconnecting" // 传输断开，重连中
   | "closed"; // 终态

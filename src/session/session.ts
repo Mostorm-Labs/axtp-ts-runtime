@@ -11,8 +11,8 @@ import {
   type ConnectionOptions,
   type ConnectionState
 } from "../connection/connection.js";
-import { RpcOp } from "../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../protocol/model.js";
+import { RpcOp } from "../protocol/model.js";
 import type { CloseReason, ITransport } from "../transport/transport.js";
 import { CloseCode } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
@@ -45,7 +45,7 @@ import type {
 
 /** Session 生命周期状态机。 */
 export type SessionLifecycleState =
-  | "connecting" // 构造后/重连后正在握手
+  | "connecting" // 正在建立连接+握手（含首次和重连后）
   | "ready" // APP_READY
   | "reconnecting" // 传输断开，Connection 正在重连
   | "closed"; // 终态

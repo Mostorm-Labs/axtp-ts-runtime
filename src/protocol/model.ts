@@ -3,14 +3,14 @@
 
 import {
   ControlOpcode,
+  ErrorCode,
   PayloadType,
   RpcBodyEncoding,
   RpcEncoding,
   RpcOp
 } from "../protocol/generated/axtp_ids_generated.js";
-import { ErrorCode } from "../types/error.js";
 
-export { ControlOpcode, PayloadType, RpcBodyEncoding, RpcEncoding, RpcOp };
+export { ControlOpcode, ErrorCode, PayloadType, RpcBodyEncoding, RpcEncoding, RpcOp };
 
 /** 标准 Frame header（12B）。 */
 export interface FrameHeader {
