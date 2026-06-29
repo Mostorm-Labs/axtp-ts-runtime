@@ -102,6 +102,8 @@ export class Handshake {
   reset(): void {
     this.stateValue = "LINK_CONNECTED";
     this.sidValue = "";
+    // eventMasksValue 不重置：重连后应携带与之前相同的订阅意图（handler 表未变）。
+    // 若用户重连前改了订阅，需通过 setEventMasks 更新后再重连。
   }
 
   /** 期望的 eventMasks（client 在 Identify 携带；server 从 Identify 读取）。 */

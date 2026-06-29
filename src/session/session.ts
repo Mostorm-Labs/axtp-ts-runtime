@@ -42,6 +42,7 @@ import type {
 export type {
   CallContext,
   CallOptions,
+  CommonOptions,
   EventHandler,
   GlobalHandlerSource,
   MethodHandler,
@@ -106,8 +107,9 @@ export class AxtpSession {
 
     // 子组件
     this.router = new HandlerRouter(config.globalHandlers);
+    const logicalRole = config.logicalRole ?? "server";
     this.handshakeOrch = new HandshakeOrchestrator(
-      config.logicalRole,
+      logicalRole,
       this.io,
       config.handshakeSeed
     );

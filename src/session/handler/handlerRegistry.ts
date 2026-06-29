@@ -1,11 +1,10 @@
-// HandlerRegistry：全局 handler 表（server 端）。
-// server.handle 注册到此，所有 session 共享查询（委托，不复制到每 session）。
-// 按 name 索引——规避 method id 与 event id 共享空间。
-// event 全局 handler：所有 session 的事件聚合上报。
+// HandlerRegistry：handler 表存储原语（method + event）。
+// 既作为 server 端全局共享表（实现 GlobalHandlerSource），也作为 HandlerRouter 的本地存储。
+// 类型定义在 types.ts（消除 handlerRouter ↔ handlerRegistry 的循环 type-import）。
 
-import type { UntypedEventHandler, UntypedMethodHandler } from "./handlerRouter.js";
+import type { GlobalHandlerSource, UntypedEventHandler, UntypedMethodHandler } from "../types.js";
 
-export class HandlerRegistry {
+export class HandlerRegistry implements GlobalHandlerSource {
   private readonly methodHandlers = new Map<string, UntypedMethodHandler>();
   private readonly eventHandlers = new Map<string, Set<UntypedEventHandler>>();
 

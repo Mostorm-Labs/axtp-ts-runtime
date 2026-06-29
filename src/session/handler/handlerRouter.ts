@@ -3,15 +3,7 @@
 // 按 name 索引——规避 method id 与 event id 共享同一数字空间。
 
 import { HandlerRegistry } from "./handlerRegistry.js";
-
-export type UntypedMethodHandler = (ctx: unknown, params: unknown) => unknown | Promise<unknown>;
-export type UntypedEventHandler = (payload: unknown) => void;
-
-/** 全局 handler registry 接口（server 多 session 共享）。 */
-export interface GlobalHandlerSource {
-  getMethod: (name: string) => UntypedMethodHandler | undefined;
-  getEventListeners: (name: string) => Set<UntypedEventHandler> | undefined;
-}
+import type { GlobalHandlerSource, UntypedEventHandler, UntypedMethodHandler } from "../types.js";
 
 export class HandlerRouter {
   private readonly local = new HandlerRegistry();

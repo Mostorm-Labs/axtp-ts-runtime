@@ -8,10 +8,11 @@ import {
   AxtpSession,
   type CallContext,
   type CallOptions,
+  type CommonOptions,
   type UntypedEventHandler,
   type UntypedMethodHandler
 } from "../session/session.js";
-import type { IServerTransport, ITransport, LogicalRole } from "../transport/transport.js";
+import type { IServerTransport, ITransport } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {
@@ -22,28 +23,14 @@ import type {
   MethodResponse
 } from "../types/registry.js";
 
-/**
- * Server 选项（独立定义，不继承 SessionOptions）。
- */
-export interface ServerOptions {
-  /** Logical 角色：默认 "client"（收 Hello、发 Identify，Cloud Reverse 主场景）。 */
-  logicalRole?: LogicalRole;
-  /** call 默认超时 ms。 */
-  defaultTimeoutMs?: number;
-  /** 握手超时 ms。 */
-  handshakeTimeoutMs?: number;
-  /** 心跳间隔 ms（透传给每个 session 的 Connection）。 */
-  heartbeatIntervalMs?: number;
-  /** 心跳超时 ms。 */
-  heartbeatTimeoutMs?: number;
-  /** 最大帧大小。 */
-  maxFrameSize?: number;
-}
+/** Server 选项（当前与 CommonOptions 相同，预留扩展点）。 */
+export type ServerOptions = CommonOptions;
 
 export class AxtpServer {
   private readonly sessions = new Map<number, AxtpSession>();
   private readonly handlers = new HandlerRegistry();
   private readonly onConnectStream = new EventStream<AxtpSession>();
+  private readonly onSessionCloseStream = new EventStream<AxtpSession>();
   private readonly onCloseStream = new EventStream<void>();
   private closed = false;
 
@@ -70,7 +57,10 @@ export class AxtpServer {
       globalHandlers: this.handlers
     });
     this.sessions.set(session.id, session);
-    session.onClose.subscribe(() => this.sessions.delete(session.id));
+    session.onClose.subscribe(() => {
+      this.sessions.delete(session.id);
+      this.onSessionCloseStream.emit(session);
+    });
     this.onConnectStream.emit(session);
   }
 
@@ -78,6 +68,12 @@ export class AxtpServer {
     return this.onConnectStream;
   }
 
+  /** 单个 client session 断开时触发（携带断开的 session）。 */
+  get onSessionClose(): EventStream<AxtpSession> {
+    return this.onSessionCloseStream;
+  }
+
+  /** Server 整体关闭时触发。 */
   get onClose(): EventStream<void> {
     return this.onCloseStream;
   }

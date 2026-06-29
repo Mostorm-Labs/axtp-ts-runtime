@@ -7,11 +7,13 @@ import {
   AxtpSession,
   type CallContext,
   type CallOptions,
+  type CommonOptions,
   type SessionCloseInfo,
   type UntypedEventHandler,
   type UntypedMethodHandler
 } from "../session/session.js";
-import type { IClientTransport, LogicalRole } from "../transport/transport.js";
+import type { Stream } from "../session/stream/stream.js";
+import type { IClientTransport } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {
@@ -23,24 +25,11 @@ import type {
 } from "../types/registry.js";
 
 /**
- * Client 选项（独立定义，不继承 SessionOptions，避免暴露内部参数）。
- * 只包含用户该配置的参数；physicalRole/transportFactory/globalHandlers 等由 SDK 内部注入。
+ * Client 选项（继承 CommonOptions，增加 client 特有的 reconnect）。
+ * physicalRole/transportFactory/globalHandlers 等由 SDK 内部注入。
  */
-export interface ClientOptions {
-  /** Logical 角色：默认 "server"（Cloud Reverse 主场景：发起连接方=能力提供方）。 */
-  logicalRole?: LogicalRole;
-  /** call 默认超时 ms。 */
-  defaultTimeoutMs?: number;
-  /** 握手超时 ms（超时后 connect reject）。 */
-  handshakeTimeoutMs?: number;
-  /** 传输重连策略。 */
+export interface ClientOptions extends CommonOptions {
   reconnect?: ReconnectPolicy;
-  /** 心跳间隔 ms。 */
-  heartbeatIntervalMs?: number;
-  /** 心跳超时 ms。 */
-  heartbeatTimeoutMs?: number;
-  /** 最大帧大小。 */
-  maxFrameSize?: number;
 }
 
 export class AxtpClient {
@@ -143,6 +132,7 @@ export class AxtpClient {
     method: string,
     handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
   ): () => void {
+    if (!this.connected) throw new AxtpError(ErrorCode.TransportDisconnected, "client closed");
     const session = this.session;
     if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
     return session.handle(method, handler as UntypedMethodHandler);
@@ -160,9 +150,33 @@ export class AxtpClient {
   on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void;
   on(event: string, handler: UntypedEventHandler): () => void;
   on(event: string, handler: UntypedEventHandler): () => void {
+    if (!this.connected) throw new AxtpError(ErrorCode.TransportDisconnected, "client closed");
     const session = this.session;
     if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
     return session.on(event, handler);
+  }
+
+  // ===== Stream =====
+
+  openStream(
+    method: string,
+    params: unknown,
+    options?: CallOptions
+  ): Promise<{ streamId: number; response: unknown; stream: Stream }> {
+    this.requireUsable();
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
+    return session.openStream(method, params, options);
+  }
+
+  onStream(
+    method: string,
+    handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
+  ): () => void {
+    if (!this.connected) throw new AxtpError(ErrorCode.TransportDisconnected, "client closed");
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
+    return session.onStream(method, handler);
   }
 
   /** 主动关闭，不再重连。 */

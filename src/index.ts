@@ -11,6 +11,7 @@ export { AxtpSession } from "./session/session.js";
 export type {
   CallContext,
   CallOptions,
+  CommonOptions,
   EventHandler,
   MethodHandler,
   SessionCloseInfo,
