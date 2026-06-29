@@ -12,7 +12,7 @@ import type { CallContext, SessionIO } from "../types.js";
 import { RpcDispatcher } from "./rpcDispatcher.js";
 
 export class RpcExchange {
-  readonly dispatcher = new RpcDispatcher();
+  private readonly dispatcher = new RpcDispatcher();
 
   constructor(
     private readonly io: SessionIO,

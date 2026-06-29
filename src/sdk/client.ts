@@ -25,6 +25,7 @@ import type {
   MethodRequest,
   MethodResponse
 } from "../types/registry.js";
+import { computeEventMasks } from "../types/registry.js";
 
 /** SDK Client 生命周期状态机。 */
 export type ClientState =
@@ -46,6 +47,8 @@ export class AxtpClient {
   private clientState: ClientState = "idle";
   /** 首次 onReady 是否已收到（用于区分 onConnect vs onReconnect）。 */
   private firstReady = true;
+  /** 已注册的事件名（用于计算 eventMasks 订阅意图，在 connect/重连时注入 Identify）。 */
+  private readonly subscribedEvents = new Set<string>();
 
   // 事件流
   readonly onStateChange = new EventStream<ClientState>();
@@ -109,7 +112,8 @@ export class AxtpClient {
         heartbeatIntervalMs: this.options.heartbeatIntervalMs,
         heartbeatTimeoutMs: this.options.heartbeatTimeoutMs,
         maxFrameSize: this.options.maxFrameSize,
-        transportFactory: () => this.transport.connect()
+        transportFactory: () => this.transport.connect(),
+        eventMasks: this.computeEventMasks()
       });
 
       // 订阅 session 事件
@@ -230,7 +234,18 @@ export class AxtpClient {
     this.requireConnected();
     const session = this.session;
     if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
-    return session.on(event, handler);
+    this.subscribedEvents.add(event);
+    const unsub = session.on(event, handler);
+    return () => {
+      this.subscribedEvents.delete(event);
+      unsub();
+    };
+  }
+
+  /** 从已注册事件名计算 eventMasks（hex 编码，供 Identify 携带）。 */
+  private computeEventMasks(): string | undefined {
+    if (this.subscribedEvents.size === 0) return undefined;
+    return computeEventMasks([...this.subscribedEvents] as never[]);
   }
 
   // ===== Stream =====

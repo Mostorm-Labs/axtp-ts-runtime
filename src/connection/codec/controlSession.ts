@@ -134,6 +134,12 @@ export class ControlSession {
       return;
     }
 
+    // 校验 maxFrameSize 合理性（12B header + 2B CRC + 至少 1B payload = 15B 最小帧）
+    if ((tlv.maxFrameSize ?? 0) < 15) {
+      this.callbacks.onSendBytes?.(encodeReject(controlId, ErrorCode.ControlNegotiationFailed));
+      return;
+    }
+
     // 校验对端是否支持 JSON（本期 JSON-only）
     const peerSupportsJson = (tlv.supportedRpcEncodings ?? 0) & RpcEncoding.Json;
     if (!peerSupportsJson) {

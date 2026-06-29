@@ -231,10 +231,6 @@ export class MessageFragmenter {
     this.maxFrameSize = size;
   }
 
-  getMaxFrameSize(): number {
-    return this.maxFrameSize;
-  }
-
   fragment(message: Message): Frame[] {
     const capacity = this.payloadCapacity();
     const messageId = this.takeMessageId();

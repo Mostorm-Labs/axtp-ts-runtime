@@ -76,9 +76,10 @@ export class CodecPipeline {
       onRpc: (p) => callbacks.onRpc(p),
       onStream: (s) => callbacks.onStream(s)
     });
-    const reassembler = new MessageReassembler({
-      onMessage: (m) => payloadDecoder.onMessage(m.payloadType, m.body)
-    });
+    const reassembler = new MessageReassembler(
+      { onMessage: (m) => payloadDecoder.onMessage(m.payloadType, m.body) },
+      options.maxFrameSize * 256
+    );
     this.frameDecoder = new FrameDecoder(reassembler, options.maxFrameSize);
     this.fragmenter = new MessageFragmenter(options.maxFrameSize);
   }
