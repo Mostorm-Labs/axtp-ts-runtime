@@ -107,9 +107,6 @@ export class MockTransport implements ITransport {
     this.onError.close();
   }
 
-  isConnected(): boolean {
-    return this.connected;
-  }
 }
 
 /** Mock server：可手动 accept 多个连接，每连接产出 MockTransport。 */
@@ -137,9 +134,6 @@ export class MockServerTransport implements IServerTransport {
     this.onConnection.emit(serverSide);
   }
 
-  isListening(): boolean {
-    return this.listening;
-  }
 
   close(): Promise<void> {
     this.listening = false;
@@ -173,9 +167,6 @@ export class MockClientTransport implements IClientTransport {
     return Promise.resolve(client);
   }
 
-  isAvailable(): boolean {
-    return this.available;
-  }
 
   close(): void {
     this.available = false;

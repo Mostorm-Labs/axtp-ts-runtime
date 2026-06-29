@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Bytes } from "../../src/io/bytes.js";
+import type { ITransport } from "../../src/transport/transport.js";
 import {
   createMockTransportPair,
   MockClientTransport,
@@ -71,8 +72,6 @@ describe("MockTransport", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(closed).toBe(true);
     expect(remote).toBe(true);
-    expect(left.isConnected()).toBe(false);
-    expect(right.isConnected()).toBe(false);
   });
 
   it("pause/resume 控制投递时序", async () => {
@@ -93,21 +92,19 @@ describe("MockTransport", () => {
 describe("MockServerTransport 多连接", () => {
   it("accept 多个 client，每个产出独立 ITransport", async () => {
     const server = new MockServerTransport();
-    const connections: number[] = [];
-    server.onConnection.subscribe((t) => connections.push(t.isConnected() ? 1 : 0));
+    const connections: ITransport[] = [];
+    server.onConnection.subscribe((t) => connections.push(t));
     await server.listen();
     const client1 = new MockClientTransport(server.capabilities, server);
     const client2 = new MockClientTransport(server.capabilities, server);
-    const [c1, c2] = await Promise.all([client1.connect(), client2.connect()]);
+    await Promise.all([client1.connect(), client2.connect()]);
     // connect 异步 accept，需等 macrotask
     await new Promise((r) => setTimeout(r, 10));
     expect(connections.length).toBe(2);
-    expect(c1.isConnected()).toBe(true);
-    expect(c2.isConnected()).toBe(true);
     // 两条连接独立：c1 发不影响 c2
     let c2Received = 0;
-    c2.onMessage.subscribe(() => c2Received++);
-    c1.send(new Uint8Array([1]));
+    connections[1].onMessage.subscribe(() => c2Received++);
+    connections[0].send(new Uint8Array([1]));
     await new Promise((r) => setTimeout(r, 0));
     expect(c2Received).toBe(0);
   });

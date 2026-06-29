@@ -61,13 +61,12 @@ export class RpcDispatcher {
   }
 
   /** 响应到达：匹配 requestId 并 resolve。 */
-  resolve(payload: RpcPayload): boolean {
+  resolve(payload: RpcPayload): void {
     const entry = this.pending.get(payload.requestId);
-    if (entry === undefined) return false;
+    if (entry === undefined) return;
     clearTimeout(entry.timer);
     this.pending.delete(payload.requestId);
     entry.resolve(payload);
-    return true;
   }
 
   /** 主动取消单个请求（仅内部用于 request() 发送失败回滚）。 */
@@ -85,11 +84,6 @@ export class RpcDispatcher {
       entry.reject(error);
     }
     this.pending.clear();
-  }
-
-  /** 当前 pending 数量（仅内部状态查询）。 */
-  private size(): number {
-    return this.pending.size;
   }
 
   private allocateRequestId(): number {

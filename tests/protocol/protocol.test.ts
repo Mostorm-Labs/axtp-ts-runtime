@@ -251,7 +251,7 @@ describe("RpcDispatcher", () => {
     dispatcher.rejectAll(new AxtpError(ErrorCode.TransportDisconnected, "closed"));
     await expect(r1).rejects.toBeTruthy();
     await expect(r2).rejects.toBeTruthy();
-    expect(dispatcher.size()).toBe(0);
+    // size() removed
   });
 });
 

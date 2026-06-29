@@ -27,7 +27,6 @@ export type LogicalRole = "client" | "server";
 
 /** 传输能力声明。 */
 export interface TransportCapabilities {
-  readonly messageOriented: boolean;
   /** framed=true（存在 CONTROL OPEN/ACCEPT/HEARTBEAT），WS=false。 */
   readonly supportsControl: boolean;
   /** 是否支持原生保活探测（WS=true 用 sendKeepalive/onKeepaliveAck；framed=false 走 CONTROL Heartbeat）。 */
@@ -47,7 +46,6 @@ export const CloseCode = {
   TransportError: 1,
   HeartbeatTimeout: 2,
   HandshakeFailed: 3,
-  ProtocolError: 4,
   Reconnect: 5
 } as const;
 
@@ -64,8 +62,6 @@ export interface ITransport {
   readonly onError: EventStream<AxtpError>;
   /** 关闭连接。 */
   close(): void;
-  /** 是否仍处于连接态。 */
-  isConnected(): boolean;
   /** Connection 接管：停止内部缓冲，flush 已缓冲消息（真实 transport 实现，mock 可选）。 */
   attach?(): void;
   /** 发送保活探测（supportsKeepalive=true 时实现）。 */
@@ -82,8 +78,6 @@ export interface IServerTransport {
   readonly onConnection: EventStream<ITransport>;
   readonly onClose: EventStream<void>;
   close(): Promise<void>;
-  /** 是否正在监听。 */
-  isListening(): boolean;
 }
 
 /** client 侧：发起单连接。 */
@@ -92,8 +86,6 @@ export interface IClientTransport {
   /** 发起连接，成功后返回一条已建立的 ITransport。 */
   connect(): Promise<ITransport>;
   readonly onClose: EventStream<void>;
-  /** 是否仍可重连（transport 未被销毁）。 */
-  isAvailable(): boolean;
 }
 
 /** transport 工厂：返回一条已建立的传输连接。供 Connection 重连使用。 */
@@ -102,7 +94,6 @@ export type TransportFactory = () => Promise<ITransport>;
 /** 默认能力工厂，供具体 transport 复用。 */
 export function framedBinaryCapabilities(): TransportCapabilities {
   return {
-    messageOriented: false,
     supportsControl: true,
     supportsKeepalive: false
   };
@@ -110,7 +101,6 @@ export function framedBinaryCapabilities(): TransportCapabilities {
 
 export function unframedJsonCapabilities(): TransportCapabilities {
   return {
-    messageOriented: true,
     supportsControl: false,
     supportsKeepalive: true
   };

@@ -88,14 +88,8 @@ export class Connection {
           onError: (err) => this.onError.emit(err)
         }
       );
-    } else if (policy.enabled && transportFactory === undefined) {
-      this.onError.emit(
-        new AxtpError(
-          ErrorCode.InvalidState,
-          "reconnect enabled but no transportFactory provided; reconnect disabled"
-        )
-      );
     }
+    // reconnect enabled but no transportFactory: 延迟到 start() 检查（此时订阅者已就绪）
 
     this.capabilities = transport.capabilities;
     this.transport = transport;
@@ -192,6 +186,18 @@ export class Connection {
   start(): void {
     if (this.started) return;
     this.started = true;
+
+    // 延迟检查：reconnect enabled 但无 transportFactory（构造期无法 emit，此时订阅者已就绪）
+    const policy = resolvePolicy(this.options.reconnect);
+    if (policy.enabled && this.reconnectCoordinator === undefined) {
+      this.onError.emit(
+        new AxtpError(
+          ErrorCode.InvalidState,
+          "reconnect enabled but no transportFactory provided; reconnect disabled"
+        )
+      );
+    }
+
     this.setState("link_connecting");
     this.flushPendingAndStartLink();
   }
@@ -261,9 +267,11 @@ export class Connection {
     this.heartbeat?.stop();
     this.heartbeat = undefined;
 
+    // 任何断连都通知上层（Session 据此 reject pending calls + abort streams）
+    this.onDisconnect.emit(reason);
+
     if (this.reconnectCoordinator !== undefined) {
-      // 有重连策略：通知断连 + 进入重连（start 幂等，内部有 active 守卫防重复）
-      this.onDisconnect.emit(reason);
+      // 有重连策略：进入重连（start 幂等，内部有 active 守卫防重复）
       this.setState("reconnecting");
       this.reconnectCoordinator.start();
       return;

@@ -68,9 +68,6 @@ class TcpTransport implements ITransport {
     this.onError.close();
   }
 
-  isConnected(): boolean {
-    return this.connected;
-  }
 
   /** Connection 接管：停止缓冲，flush 已缓冲消息到 onMessage。 */
   attach(): void {
@@ -106,9 +103,6 @@ export class NodeTcpServerTransport implements IServerTransport {
     });
   }
 
-  isListening(): boolean {
-    return this.listening;
-  }
 
   async close(): Promise<void> {
     this.listening = false;
@@ -152,7 +146,4 @@ export class NodeTcpClientTransport implements IClientTransport {
     });
   }
 
-  isAvailable(): boolean {
-    return this.available;
-  }
 }

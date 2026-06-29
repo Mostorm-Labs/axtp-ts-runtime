@@ -6,11 +6,7 @@
 // onReady: EventStream<void>（每次握手成功都 emit，支持重连后再次 ready）
 // onStateChange: EventStream<SessionLifecycleState>（状态转换通知）
 
-import {
-  Connection,
-  type ConnectionOptions,
-  type ConnectionState
-} from "../connection/connection.js";
+import { Connection, type ConnectionOptions } from "../connection/connection.js";
 import type { RpcPayload } from "../protocol/model.js";
 import { RpcOp } from "../protocol/model.js";
 import type { CloseReason, ITransport } from "../transport/transport.js";
@@ -157,15 +153,6 @@ export class AxtpSession {
 
   get state(): SessionLifecycleState {
     return this.sessionState;
-  }
-
-  /** 握手子状态（LINK_CONNECTED/FRAMING_READY/APP_READY/CLOSING），从 HandshakeOrchestrator 委托。 */
-  get handshakeState(): string {
-    return this.handshakeOrch.state;
-  }
-
-  get connectionState(): ConnectionState {
-    return this.conn.state;
   }
 
   get isReady(): boolean {

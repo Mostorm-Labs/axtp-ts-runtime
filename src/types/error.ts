@@ -1,7 +1,7 @@
 // AxtpError: 统一的错误对象，携带 spec 的 ErrorCode。
 // 所有 call/handle 失败一律 reject AxtpError。
 
-import { ErrorCode } from "../protocol/model.js";
+import { ErrorCode } from "../protocol/generated/axtp_ids_generated.js";
 
 export { ErrorCode };
 

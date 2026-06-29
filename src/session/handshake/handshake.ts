@@ -105,18 +105,6 @@ export class Handshake {
     // 若用户重连前改了订阅，需通过 setEventMasks 更新后再重连。
   }
 
-  /** 期望的 eventMasks（client 在 Identify 携带；server 从 Identify 读取）。 */
-  get eventMasks(): string | undefined {
-    return this.eventMasksValue;
-  }
-
-  private eventMasksValue: string | undefined;
-
-  /** client: 设置要在 Identify 携带的 eventMasks。 */
-  setEventMasks(eventMasks: string): void {
-    this.eventMasksValue = eventMasks;
-  }
-
   private handleHello(payload: RpcPayload): HandshakeResult {
     // Logical Client 收 Hello 回 Identify；Logical Server 不应收到 Hello（自己是发送方）
     if (this.logicalRole !== "client") {
@@ -143,15 +131,13 @@ export class Handshake {
         )
       };
     }
-    // client 回 Identify（带 randomSeed + eventMasks）
+    // client 回 Identify（带 randomSeed）
     const randomSeed = (Math.floor(Math.random() * 0x7fffffff) + 1) >>> 0;
-    const body: Record<string, unknown> = { randomSeed };
-    if (this.eventMasksValue) body.eventMasks = this.eventMasksValue;
     const identify = rpcPayload({
       op: RpcOp.Identify,
       jsonSid: "",
-      body: encodeJsonBody(body),
-      meta: { randomSeed, jsonEventMasks: this.eventMasksValue }
+      body: encodeJsonBody({ randomSeed }),
+      meta: { randomSeed }
     });
     return { outbound: identify, becameReady: false };
   }
@@ -174,7 +160,6 @@ export class Handshake {
       };
     }
     const randomSeed = typeof d.randomSeed === "number" ? d.randomSeed >>> 0 : 0;
-    this.eventMasksValue = typeof d.eventMasks === "string" ? d.eventMasks : "";
     this.sidValue = this.generateSid(randomSeed);
     const identified = rpcPayload({
       op: RpcOp.Identified,

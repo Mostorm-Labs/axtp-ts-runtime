@@ -21,16 +21,9 @@ export class HandshakeOrchestrator {
   constructor(
     logicalRole: LogicalRole,
     private readonly io: SessionIO,
-    seed?: number,
-    eventMasks?: string
+    seed?: number
   ) {
     this.handshake = new Handshake(logicalRole, seed);
-    if (eventMasks) this.handshake.setEventMasks(eventMasks);
-  }
-
-  /** 更新 eventMasks（重连后重新携带订阅意图）。 */
-  setEventMasks(eventMasks: string): void {
-    this.handshake.setEventMasks(eventMasks);
   }
 
   /** 链路 ready 后：Logical Server 发 Hello。 */

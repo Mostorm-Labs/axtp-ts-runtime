@@ -8,7 +8,6 @@ import {
   defaultOpenParams,
   encodeHeartbeat,
   encodeHeartbeatAck,
-  type NegotiationParams
 } from "../../protocol/codec/control.js";
 import {
   FrameDecoder,
@@ -53,7 +52,6 @@ export class CodecPipeline {
     options: {
       maxFrameSize: number;
       heartbeatIntervalMs: number;
-      negotiationParams?: NegotiationParams;
     },
     callbacks: CodecPipelineCallbacks
   ) {
@@ -70,8 +68,7 @@ export class CodecPipeline {
         onClosing: () => callbacks.onControlClosing(),
         onRejected: (statusCode) => callbacks.onControlRejected(statusCode)
       },
-      options.negotiationParams ??
-        defaultOpenParams(options.maxFrameSize, options.heartbeatIntervalMs)
+      defaultOpenParams(options.maxFrameSize, options.heartbeatIntervalMs)
     );
 
     const payloadDecoder = new PayloadDecoder({

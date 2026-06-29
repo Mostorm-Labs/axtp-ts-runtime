@@ -52,18 +52,6 @@ export class EventStream<T> {
     }
   }
 
-  get listenerCount(): number {
-    return this.listeners.size;
-  }
-
-  hasListeners(): boolean {
-    return this.listeners.size > 0;
-  }
-
-  get isClosed(): boolean {
-    return this.closed;
-  }
-
   /** 关闭流：进入终态，清除所有订阅者和缓冲。不可逆——后续 subscribe/emit 为 no-op。 */
   close(): void {
     this.closed = true;

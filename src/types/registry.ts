@@ -21,30 +21,12 @@ export {
   type MethodStatus
 } from "../protocol/generated/registry.js";
 
-/** Registry 条目：方法。运行时只读视图。 */
-export interface MethodEntry {
-  readonly id: number;
-  readonly name: MethodName;
-  readonly status: string;
-  readonly bitOffset: number;
-}
-
-/** Registry 条目：事件。运行时只读视图。 */
-export interface EventEntry {
-  readonly id: number;
-  readonly name: EventName;
-  readonly status: string;
-  readonly bitOffset: number;
-}
-
 /** 运行时 name<->id 双向查找表（O(1)）。 */
 class RegistryIndex {
   private readonly methodNameToId = new Map<MethodName, number>();
   private readonly methodIdToName = new Map<number, MethodName>();
   private readonly eventNameToId = new Map<EventName, number>();
   private readonly eventIdToName = new Map<number, EventName>();
-  private readonly eventBitByDomain = new Map<number, Map<number, EventName>>();
-  private readonly domainByEventName = new Map<EventName, number>();
 
   constructor() {
     for (const name of Object.keys(METHOD_REGISTRY) as MethodName[]) {
@@ -56,14 +38,6 @@ class RegistryIndex {
       const entry = EVENT_REGISTRY[name];
       this.eventNameToId.set(name, entry.id);
       this.eventIdToName.set(entry.id, name);
-      const domainId = (entry.id >> 8) & 0xff;
-      this.domainByEventName.set(name, domainId);
-      let bitMap = this.eventBitByDomain.get(domainId);
-      if (bitMap === undefined) {
-        bitMap = new Map();
-        this.eventBitByDomain.set(domainId, bitMap);
-      }
-      bitMap.set(entry.bitOffset, name);
     }
   }
 
@@ -81,38 +55,6 @@ class RegistryIndex {
 
   eventName(id: number): EventName | undefined {
     return this.eventIdToName.get(id);
-  }
-
-  methodExists(name: string): boolean {
-    return this.methodNameToId.has(name as MethodName);
-  }
-
-  eventExists(name: string): boolean {
-    return this.eventNameToId.has(name as EventName);
-  }
-
-  /** 事件所属 domain 的 high byte（用于 eventMasks 编码）。 */
-  domainIdOfEvent(name: EventName): number {
-    return (EVENT_REGISTRY[name].id >> 8) & 0xff;
-  }
-
-  /** 该 domain 内某 bitOffset 对应的事件名（用于 eventMasks 解码）。 */
-  eventAtBit(domainId: number, bitOffset: number): EventName | undefined {
-    return this.eventBitByDomain.get(domainId)?.get(bitOffset);
-  }
-
-  allMethods(): readonly MethodEntry[] {
-    return (Object.keys(METHOD_REGISTRY) as MethodName[]).map((name) => {
-      const e = METHOD_REGISTRY[name];
-      return { id: e.id, name, status: e.status, bitOffset: e.bitOffset };
-    });
-  }
-
-  allEvents(): readonly EventEntry[] {
-    return (Object.keys(EVENT_REGISTRY) as EventName[]).map((name) => {
-      const e = EVENT_REGISTRY[name];
-      return { id: e.id, name, status: e.status, bitOffset: e.bitOffset };
-    });
   }
 }
 
