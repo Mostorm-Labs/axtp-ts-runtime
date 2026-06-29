@@ -112,7 +112,6 @@ export class Connection {
         transportFactory,
         {
           onReconnected: (newTransport) => this.handleReconnected(newTransport),
-          onSuccess: () => this.handleReconnectSuccess(),
           onFailed: () => this.handleReconnectFailed(),
           onError: (err) => this.onError.emit(err)
         }
@@ -283,19 +282,25 @@ export class Connection {
     this.heartbeat = undefined;
     this.linkReadyFired = false;
 
-    // 若启用重连，触发重连编排（不 emit onClose，等重连结果）
+    // 若启用重连且当前未在重连中，触发重连编排（不 emit onClose，等重连结果）
     if (this.reconnectCoordinator !== undefined && !this.reconnecting) {
       this.reconnecting = true;
       this.reconnectCoordinator.start();
       return;
     }
 
-    // 不重连：直接 emit onClose
-    if (!this.reconnecting) {
-      this.closed = true;
-      this.onClose.emit(reason);
-      this.cleanupStreams();
+    // 重连中再次断连（新 transport 建好后又断了）：重新触发重连
+    if (this.reconnectCoordinator !== undefined && this.reconnecting) {
+      // coordinator.reset() 后重新 start()，开始下一轮退避重连
+      this.reconnectCoordinator.reset();
+      this.reconnectCoordinator.start();
+      return;
     }
+
+    // 不重连：直接 emit onClose
+    this.closed = true;
+    this.onClose.emit(reason);
+    this.cleanupStreams();
   }
 
   /**
@@ -325,12 +330,14 @@ export class Connection {
     }
 
     // 标记重连完成（退避重置延迟到链路真正 ready 时，见 onNegotiatedLinkReady / fireLinkReady）
+    // #4b 修复：重置 coordinator 的 active 标志，使下次断连的 start() 能生效
     this.reconnecting = false;
   }
 
-  /** 链路重建成功。 */
+  /** 链路重建成功：重置退避 + 重置 coordinator active 状态（#4a/#4b 修复）。 */
   private handleReconnectSuccess(): void {
     this.reconnectCoordinator?.notifySuccess();
+    this.reconnectCoordinator?.reset();
   }
 
   /** 重连耗尽：emit onReconnectFailed + onClose。 */

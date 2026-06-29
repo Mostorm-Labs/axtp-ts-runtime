@@ -42,13 +42,18 @@ export class HandlerRouter {
   }
 
   getEventHandlers(event: string): Set<UntypedEventHandler> {
-    // 每次 new Set 合并 local + global：保证调用方拿到的是快照副本（不会因后续注册/注销影响正在遍历的集合）。
-    // 事件频率低（spec: Event 是低频投递），无需缓存。
-    const handlers = new Set<UntypedEventHandler>();
-    const localSet = this.local.getEventListeners(event);
-    if (localSet !== undefined) for (const h of localSet) handlers.add(h);
-    const globalSet = this.globalHandlers?.getEventListeners(event);
-    if (globalSet !== undefined) for (const h of globalSet) handlers.add(h);
-    return handlers;
+    return mergeSets(
+      this.local.getEventListeners(event),
+      this.globalHandlers?.getEventListeners(event)
+    );
   }
+}
+
+/** 合并多个 Set 为一个新的快照副本（调用方遍历安全）。 */
+function mergeSets<T>(...sets: (Set<T> | undefined)[]): Set<T> {
+  const result = new Set<T>();
+  for (const set of sets) {
+    if (set !== undefined) for (const item of set) result.add(item);
+  }
+  return result;
 }

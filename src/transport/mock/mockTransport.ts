@@ -163,6 +163,8 @@ export class MockClientTransport implements IClientTransport {
   connect(): Promise<ITransport> {
     if (!this.available) return Promise.reject(new AxtpError(ErrorCode.Unavailable, "transport unavailable"));
     const client = new MockTransport(this.capabilities);
+    // 级联：client transport 断开时通知 MockClientTransport.onClose（#6b 修复）
+    client.onClose.subscribe(() => this.onClose.emit(undefined));
     // 异步 accept：让调用方（establishSession）先建好 client Connection 再触发 server 发 Hello，
     // 避免 Hello 在 client Connection 订阅前到达而丢失。
     setTimeout(() => {
