@@ -15,7 +15,7 @@ import {
   encodeReject,
   type NegotiationParams
 } from "../../protocol/codec/control.js";
-import { ControlOpcode } from "../../protocol/model.js";
+import { ControlOpcode, RpcEncoding } from "../../protocol/model.js";
 import type { PhysicalRole } from "../../transport/transport.js";
 import { ErrorCode } from "../../types/error.js";
 
@@ -120,31 +120,47 @@ export class ControlSession {
   private handleOpen(controlId: number, tlv: Partial<NegotiationParams>): void {
     // Physical Server 处理 OPEN 回 ACCEPT
     if (this.physicalRole !== "server") return;
-    // 协商：取双方较小 maxFrameSize，heartbeat 取对方值，selectedRpcEncoding = JSON。
-    const maxFrameSize = Math.min(
-      this.localParams.maxFrameSize,
-      tlv.maxFrameSize ?? this.localParams.maxFrameSize
-    );
-    const heartbeatIntervalMs = tlv.heartbeatIntervalMs ?? this.localParams.heartbeatIntervalMs;
-    const acceptParams: NegotiationParams = {
-      ...this.localParams,
-      maxFrameSize,
-      heartbeatIntervalMs,
-      selectedRpcEncoding: 0x01 // JSON only
-    };
-    // 校验对端是否支持 JSON（本期 JSON-only）
-    const peerSupportsJson = (tlv.supportedRpcEncodings ?? 0) & 0x01;
-    if (!peerSupportsJson) {
-      // 拒绝（带非零 statusCode 的 ACCEPT）
+
+    // spec:127-134 + spec:123: 校验 OPEN 必需 TLV 存在性（缺失/异常 → CONTROL_NEGOTIATION_FAILED）
+    const requiredFields = [
+      tlv.maxFrameSize,
+      tlv.heartbeatIntervalMs,
+      tlv.supportedPayloadTypes,
+      tlv.supportedRpcEncodings,
+      tlv.ackMode
+    ];
+    if (requiredFields.some((v) => v === undefined)) {
       this.callbacks.onSendBytes?.(encodeReject(controlId, ErrorCode.ControlNegotiationFailed));
       return;
     }
+
+    // 校验对端是否支持 JSON（本期 JSON-only）
+    const peerSupportsJson = (tlv.supportedRpcEncodings ?? 0) & RpcEncoding.Json;
+    if (!peerSupportsJson) {
+      this.callbacks.onSendBytes?.(encodeReject(controlId, ErrorCode.ControlNegotiationFailed));
+      return;
+    }
+
+    // 协商：取双方较小 maxFrameSize，heartbeat 取对方值，selectedRpcEncoding = JSON。
+    // 上方 requiredFields 校验已确保非 undefined，但 TS 无法跨行收窄，用局部变量避免 !。
+    const negotiatedMaxFrame = tlv.maxFrameSize ?? this.localParams.maxFrameSize;
+    const negotiatedHeartbeat = tlv.heartbeatIntervalMs ?? this.localParams.heartbeatIntervalMs;
+    const maxFrameSize = Math.min(this.localParams.maxFrameSize, negotiatedMaxFrame);
+    const heartbeatIntervalMs = negotiatedHeartbeat;
+    // spec:127-134 ACCEPT 必需字段（不含 OPEN 专用的 supportedRpcEncodings/supportedPayloadTypes）
+    const acceptParams: NegotiationParams = {
+      maxFrameSize,
+      supportedPayloadTypes: this.localParams.supportedPayloadTypes,
+      heartbeatIntervalMs,
+      ackMode: this.localParams.ackMode,
+      selectedRpcEncoding: RpcEncoding.Json // JSON only
+    };
     const bytes = encodeAccept(controlId, acceptParams);
     this.open = true;
     this.negotiated = {
       maxFrameSize,
       heartbeatIntervalMs,
-      selectedRpcEncoding: 0x01,
+      selectedRpcEncoding: RpcEncoding.Json,
       accepted: true
     };
     this.callbacks.onSendBytes?.(bytes);
@@ -175,7 +191,7 @@ export class ControlSession {
     this.negotiated = {
       maxFrameSize: tlv.maxFrameSize ?? this.localParams.maxFrameSize,
       heartbeatIntervalMs: tlv.heartbeatIntervalMs ?? this.localParams.heartbeatIntervalMs,
-      selectedRpcEncoding: tlv.selectedRpcEncoding ?? 0x01,
+      selectedRpcEncoding: tlv.selectedRpcEncoding ?? RpcEncoding.Json,
       accepted: true
     };
     this.callbacks.onLinkReady?.(this.negotiated);

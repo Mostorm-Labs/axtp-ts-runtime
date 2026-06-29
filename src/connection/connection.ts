@@ -39,7 +39,7 @@ export type ConnectionState =
   | "reconnecting" // 传输断开，重连退避/尝试中
   | "closed"; // 终态
 
-const DEFAULT_HEARTBEAT_INTERVAL_MS = 30000;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
 const DEFAULT_MAX_FRAME_SIZE = 4096;
 
 export class Connection {

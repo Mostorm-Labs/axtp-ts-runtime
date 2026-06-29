@@ -4,7 +4,7 @@
 //   0x04 maxFrameSize（OPEN+ACCEPT 必需，uint16，总帧含 header+CRC）
 //   0x07 supportedPayloadTypes（OPEN+ACCEPT 必需，bitmap uint8）
 //   0x08 supportedRpcEncodings（OPEN 必需，bitmap uint8）
-//   0x0A heartbeatIntervalMs（OPEN+ACCEPT 必需，uint32）
+//   0x0A heartbeatIntervalMs（OPEN+ACCEPT 必需，uint16，spec 示例:0a 02 03 e8）
 //   0x0B ackMode（OPEN+ACCEPT 必需，uint8，Phase1=NONE=0x00）
 //   0x1E selectedRpcEncoding（成功 ACCEPT 必需，uint8）
 // 对 OPEN/HEARTBEAT/CLOSE 的 response MUST 回显 controlId（spec:123）。

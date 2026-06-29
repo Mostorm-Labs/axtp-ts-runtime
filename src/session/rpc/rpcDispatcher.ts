@@ -32,24 +32,30 @@ export class RpcDispatcher {
     timeoutMs: number
   ): RequestResult {
     const requestId = this.allocateRequestId();
-    let entry: PendingEntry;
+    // 先创建 resolver 容器（避免依赖 Promise executor 同步执行的隐式契约）
+    const resolver: { resolve: (p: RpcPayload) => void; reject: (e: AxtpError) => void } = {
+      resolve: () => {},
+      reject: () => {}
+    };
     const promise = new Promise<RpcPayload>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (this.pending.has(requestId)) {
-          this.pending.delete(requestId);
-          reject(
-            new AxtpError(
-              ErrorCode.RpcResponseTimeout,
-              `request ${requestId} timed out`,
-              undefined,
-              requestId
-            )
-          );
-        }
-      }, timeoutMs);
-      entry = { resolve, reject, timer };
-      this.pending.set(requestId, entry);
+      resolver.resolve = resolve;
+      resolver.reject = reject;
     });
+    const timer = setTimeout(() => {
+      if (this.pending.has(requestId)) {
+        this.pending.delete(requestId);
+        resolver.reject(
+          new AxtpError(
+            ErrorCode.RpcResponseTimeout,
+            `request ${requestId} timed out`,
+            undefined,
+            requestId
+          )
+        );
+      }
+    }, timeoutMs);
+    const entry: PendingEntry = { resolve: resolver.resolve, reject: resolver.reject, timer };
+    this.pending.set(requestId, entry);
     // 发送必须在建表之后（避免响应早于建表到达）。
     try {
       send(requestId);

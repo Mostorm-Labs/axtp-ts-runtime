@@ -70,9 +70,7 @@ export function decodeJsonRpc(text: Bytes | string): RpcPayload | undefined {
           op,
           jsonSid: sid,
           body: toBytes(JSON.stringify(d)),
-          meta: {
-            jsonEventMasks: typeof d.eventMasks === "string" ? d.eventMasks : undefined
-          }
+          meta: {}
         });
       case RpcOp.Identify: {
         const randomSeed = typeof d.randomSeed === "number" ? d.randomSeed >>> 0 : 0;

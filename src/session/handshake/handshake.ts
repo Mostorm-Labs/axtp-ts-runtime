@@ -118,12 +118,25 @@ export class Handshake {
       // WS 模式下 Hello 可能在 LINK_CONNECTED 到达（无 CONTROL），直接推进。
       this.stateValue = "FRAMING_READY";
     }
-    // 解析 Hello body（不校验 axtpVersion，接受任意版本）
+    // 解析 Hello body，校验 axtpVersion（spec:205: axtpVersion 是 spec compatibility authority）
     const d = decodeJsonBody(payload.body);
     if (d === undefined) {
       return {
         becameReady: false,
         error: new AxtpError(ErrorCode.RpcPayloadInvalid, "invalid Hello body")
+      };
+    }
+    const helloObj = d as { axtpVersion?: string } | undefined;
+    if (
+      typeof helloObj?.axtpVersion === "string" &&
+      !helloObj.axtpVersion.startsWith("1.")
+    ) {
+      return {
+        becameReady: false,
+        error: new AxtpError(
+          ErrorCode.ControlNegotiationFailed,
+          `unsupported axtpVersion: ${helloObj.axtpVersion}`
+        )
       };
     }
     // client 回 Identify（带 randomSeed + eventMasks）

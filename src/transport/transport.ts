@@ -46,6 +46,7 @@ export const CloseCode = {
   TransportError: 1,
   HeartbeatTimeout: 2,
   HandshakeFailed: 3,
+  // 4 (ProtocolError) 已移除——使用 HandshakeFailed 替代
   Reconnect: 5
 } as const;
 

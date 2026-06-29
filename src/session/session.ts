@@ -272,9 +272,10 @@ export class AxtpSession {
       return;
     }
 
-    // APP_READY 后校验 sid（spec:211: malformed/empty/non-hex/zero/缺失的 sid MUST 拒绝）
+    // APP_READY 后校验 sid（spec:211: malformed/empty/non-hex/zero/缺失的 sid MUST 被拒绝）
     const payloadSid = payload.jsonSid ?? "";
-    if (payloadSid !== this.handshakeOrch.sid) {
+    if (!/^[0-9a-fA-F]{8}$/.test(payloadSid) || payloadSid !== this.handshakeOrch.sid) {
+      this.conn.close(CloseCode.HandshakeFailed, `invalid sid: ${payloadSid}`);
       return;
     }
 
