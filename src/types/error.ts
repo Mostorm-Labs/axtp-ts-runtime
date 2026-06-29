@@ -17,12 +17,12 @@ export class AxtpError extends Error {
   }
 }
 
-/** 便捷工厂：连接已断开。 */
+/** 便捷工厂：连接已断开。公共 API（index.ts 导出），供用户在 catch 后构造同类错误。 */
 export function connectionClosedError(reason: string): AxtpError {
   return new AxtpError(ErrorCode.TransportDisconnected, `connection closed: ${reason}`);
 }
 
-/** 便捷工厂：尚未就绪。 */
+/** 便捷工厂：尚未就绪。公共 API（index.ts 导出），供用户在调用前预检查。 */
 export function notReadyError(reason: string): AxtpError {
   return new AxtpError(ErrorCode.InvalidState, `session not ready: ${reason}`);
 }

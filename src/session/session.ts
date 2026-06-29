@@ -77,6 +77,7 @@ export class AxtpSession {
   private ready = false;
   private closed = false;
   private readonly defaultTimeoutMs: number;
+  private handshakeTimeoutMs: number;
   private handshakeTimer: ReturnType<typeof setTimeout> | undefined;
   /** 公开 id（仅在创建它的 server/client 内有效，非全局唯一）。 */
   readonly id: number;
@@ -123,17 +124,11 @@ export class AxtpSession {
     this.conn.onReconnectFailed.subscribe(() => this.onReconnectFailedStream.emit(undefined));
     this.conn.onError.subscribe((err) => this.onErrorStream.emit(err));
 
-    // H3：握手超时（防止 onReady 永不 resolve）
-    const timeoutMs = config.handshakeTimeoutMs ?? 15000;
-    this.handshakeTimer = setTimeout(() => {
-      if (!this.ready && !this.closed) {
-        this.handleClose({
-          code: 3, // CloseCode.HandshakeFailed
-          reason: "handshake timeout",
-          remote: false
-        });
-      }
-    }, timeoutMs);
+    // 握手超时配置（重连时复用）
+    this.handshakeTimeoutMs = config.handshakeTimeoutMs ?? 15000;
+
+    // arm 首次握手超时
+    this.armHandshakeTimer();
 
     // onReady Promise：握手完成 resolve；close 前 reject（若有人 await）。
     // noop catch 防止 unhandled rejection（测试中 session close 但无人 await onReady）。
@@ -218,8 +213,10 @@ export class AxtpSession {
     return this.router.setMethod(method, handler as UntypedMethodHandler);
   }
 
-  removeHandler(method: string, handler: UntypedMethodHandler): void {
-    this.router.removeMethod(method, handler);
+  removeHandler<K extends MethodName>(method: K, handler: MethodHandler<K>): void;
+  removeHandler(method: string, handler: UntypedMethodHandler): void;
+  removeHandler(method: string, handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>): void {
+    this.router.removeMethod(method, handler as UntypedMethodHandler);
   }
 
   /** emit：内置 typed / vendor untyped */
@@ -313,7 +310,23 @@ export class AxtpSession {
   private handleReconnect(_attempt: number): void {
     this.ready = false;
     this.handshakeOrch.reset();
+    // 重新 arm 握手超时定时器（首次的 timer 已在握手完成时清除）
+    this.armHandshakeTimer();
     this.onReconnectStream.emit({ attempt: _attempt });
+  }
+
+  /** Arm 握手超时定时器：超时后 close session（防止握手卡住永久 hang）。 */
+  private armHandshakeTimer(): void {
+    if (this.handshakeTimer !== undefined) clearTimeout(this.handshakeTimer);
+    this.handshakeTimer = setTimeout(() => {
+      if (!this.ready && !this.closed) {
+        this.handleClose({
+          code: 3, // CloseCode.HandshakeFailed
+          reason: "handshake timeout",
+          remote: false
+        });
+      }
+    }, this.handshakeTimeoutMs);
   }
 
   private makeCallContext(requestId: number): CallContext {

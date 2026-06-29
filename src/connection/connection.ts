@@ -62,7 +62,7 @@ export class Connection {
   readonly onReconnectFailed = new EventStream<void>();
 
   private transport: ITransport;
-  private readonly capabilities: TransportCapabilities;
+  private capabilities: TransportCapabilities;
   private readonly physicalRole: PhysicalRole;
   private readonly options: ConnectionOptions;
   private readonly transportFactory: TransportFactory | undefined;
@@ -73,7 +73,7 @@ export class Connection {
 
   // framed-binary 编解码流水线（WS 模式不使用）。重连时重建。
   private frameDecoder?: FrameDecoder;
-  private fragmenter: MessageFragmenter;
+  private fragmenter?: MessageFragmenter;
   private readonly frameEncoder = new FrameEncoder();
 
   /** transport 事件订阅句柄（detach 时取消） */
@@ -95,7 +95,6 @@ export class Connection {
     this.physicalRole = physicalRole;
     this.options = options;
     this.transportFactory = transportFactory;
-    this.fragmenter = new MessageFragmenter(options.maxFrameSize ?? 4096);
 
     // 重连协调器（仅当有 transportFactory 且 policy.enabled）
     const policy = resolvePolicy(options.reconnect);
@@ -126,36 +125,14 @@ export class Connection {
     for (const unsub of this.transportUnsubs) unsub();
     this.transportUnsubs = [];
 
-    if (this.capabilities.supportsControl) {
-      this.controlSession = new ControlSession(
-        this.physicalRole,
-        {
-          onSendBytes: (body) => this.sendFramedMessage(PayloadType.Control, body),
-          onLinkReady: (neg) => this.onNegotiatedLinkReady(neg),
-          onHeartbeat: (controlId) =>
-            this.sendFramedMessage(PayloadType.Control, encodeHeartbeatAck(controlId)),
-          onHeartbeatAck: () => this.heartbeat?.reset(),
-          onClosing: () => this.close(CloseCode.Normal, "remote close")
-        },
-        this.options.negotiationParams ??
-          defaultOpenParams(
-            this.options.maxFrameSize ?? 4096,
-            this.options.heartbeatIntervalMs ?? 1000
-          )
-      );
+    // 刷新 capabilities（重连换 transport 时新 transport 的能力可能不同）
+    this.capabilities = transport.capabilities;
 
-      const payloadDecoder = new PayloadDecoder({
-        onControl: (body) => {
-          const cs = this.controlSession;
-          if (cs !== undefined) cs.handleControlBody(body);
-        },
-        onRpc: (p) => this.onPayload.emit(p),
-        onStream: (s) => this.onStream.emit(s)
-      });
-      const reassembler = new MessageReassembler({
-        onMessage: (m) => payloadDecoder.onMessage(m.payloadType, m.body)
-      });
-      this.frameDecoder = new FrameDecoder(reassembler, this.options.maxFrameSize ?? 4096);
+    // 重建 fragmenter（确保重连完全重置状态）
+    this.fragmenter = new MessageFragmenter(this.options.maxFrameSize ?? 4096);
+
+    if (this.capabilities.supportsControl) {
+      this.buildFramedPipeline();
     }
 
     // 订阅 transport 事件（start 前缓冲）。
@@ -175,6 +152,39 @@ export class Connection {
     this.transportUnsubs.push(transport.onError.subscribe((err) => this.onError.emit(err)));
 
     transport.attach?.();
+  }
+
+  /** 组装 framed-binary codec pipeline（ControlSession + PayloadDecoder + Reassembler + FrameDecoder）。 */
+  private buildFramedPipeline(): void {
+    this.controlSession = new ControlSession(
+      this.physicalRole,
+      {
+        onSendBytes: (body) => this.sendFramedMessage(PayloadType.Control, body),
+        onLinkReady: (neg) => this.onNegotiatedLinkReady(neg),
+        onHeartbeat: (controlId) =>
+          this.sendFramedMessage(PayloadType.Control, encodeHeartbeatAck(controlId)),
+        onHeartbeatAck: () => this.heartbeat?.reset(),
+        onClosing: () => this.close(CloseCode.Normal, "remote close")
+      },
+      this.options.negotiationParams ??
+        defaultOpenParams(
+          this.options.maxFrameSize ?? 4096,
+          this.options.heartbeatIntervalMs ?? 1000
+        )
+    );
+
+    const payloadDecoder = new PayloadDecoder({
+      onControl: (body) => {
+        const cs = this.controlSession;
+        if (cs !== undefined) cs.handleControlBody(body);
+      },
+      onRpc: (p) => this.onPayload.emit(p),
+      onStream: (s) => this.onStream.emit(s)
+    });
+    const reassembler = new MessageReassembler({
+      onMessage: (m) => payloadDecoder.onMessage(m.payloadType, m.body)
+    });
+    this.frameDecoder = new FrameDecoder(reassembler, this.options.maxFrameSize ?? 4096);
   }
 
   /** 启动处理（Session 在回调赋值后调用）。framed client 同时发 OPEN。flush 缓冲消息。 */
@@ -333,7 +343,7 @@ export class Connection {
 
   private onNegotiatedLinkReady(neg: NegotiatedLink): void {
     if (!neg.accepted) return;
-    this.fragmenter.setMaxFrameSize(neg.maxFrameSize);
+    this.fragmenter?.setMaxFrameSize(neg.maxFrameSize);
     this.fireLinkReady();
     this.startHeartbeat(neg.heartbeatIntervalMs);
   }
@@ -381,7 +391,9 @@ export class Connection {
   private sendFramedMessage(payloadType: PayloadType, body: Uint8Array): void {
     if (this.closed || this.reconnecting || !this.capabilities.supportsControl) return;
     const message: Message = { messageId: 0, payloadType, body };
-    for (const frame of this.fragmenter.fragment(message)) {
+    const fragmenter = this.fragmenter;
+    if (fragmenter === undefined) return;
+    for (const frame of fragmenter.fragment(message)) {
       this.transport.send(this.frameEncoder.encode(frame));
     }
   }

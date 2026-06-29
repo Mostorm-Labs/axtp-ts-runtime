@@ -6,7 +6,7 @@
 // 通过 ITransport.sendKeepalive/onKeepaliveAck 暴露（capabilities.supportsKeepalive=true）。
 
 import { WebSocket, WebSocketServer } from "ws";
-import type { Bytes } from "../../io/bytes.js";
+import { bytesToText, type Bytes } from "../../io/bytes.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
 import { EventStream } from "../../types/events.js";
 import {
@@ -33,8 +33,6 @@ class WsTransport implements ITransport {
   readonly onError = new EventStream<AxtpError>();
   readonly capabilities = unframedJsonCapabilities();
   private connected = true;
-  /** WS-JSON 以文本帧传输 JSON，发送前需 bytes→string。 */
-  private readonly textDecoder = new TextDecoder();
   /** attach 前的消息缓冲（防止 ws message 在 Connection 订阅前到达丢失）。 */
   private attached = false;
   private readonly buffered: Bytes[] = [];
@@ -80,7 +78,7 @@ class WsTransport implements ITransport {
   send(bytes: Bytes): void {
     if (!this.connected) return;
     // WS-JSON profile 是文本 JSON：必须以文本帧（opcode 0x1）发送，而非二进制帧。
-    this.ws.send(this.textDecoder.decode(bytes), { binary: false });
+    this.ws.send(bytesToText(bytes), { binary: false });
   }
 
   /** 保活探测：WS 映射到 ws.ping()。 */

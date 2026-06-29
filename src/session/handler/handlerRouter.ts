@@ -42,6 +42,8 @@ export class HandlerRouter {
   }
 
   getEventHandlers(event: string): Set<UntypedEventHandler> {
+    // 每次 new Set 合并 local + global：保证调用方拿到的是快照副本（不会因后续注册/注销影响正在遍历的集合）。
+    // 事件频率低（spec: Event 是低频投递），无需缓存。
     const handlers = new Set<UntypedEventHandler>();
     const localSet = this.local.getEventListeners(event);
     if (localSet !== undefined) for (const h of localSet) handlers.add(h);

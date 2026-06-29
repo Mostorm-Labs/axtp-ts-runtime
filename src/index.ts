@@ -13,10 +13,12 @@ export type {
   CallOptions,
   EventHandler,
   MethodHandler,
+  SessionCloseInfo,
   SessionOptions,
   UntypedEventHandler,
   UntypedMethodHandler
 } from "./session/session.js";
+export type { SessionState } from "./session/handshake/handshake.js";
 
 // Stream
 export { Stream } from "./session/stream/stream.js";

@@ -86,27 +86,13 @@ export class RpcExchange {
     const ctx = this.makeCallContext(payload.requestId);
 
     if (handler === undefined) {
-      this.io.sendRpc(
-        rpcPayload({
-          op: RpcOp.RequestResponse,
-          requestId: payload.requestId,
-          statusCode: ErrorCode.RpcMethodNotFound,
-          jsonSid: this.getSid()
-        })
-      );
+      this.sendResponse(payload.requestId, ErrorCode.RpcMethodNotFound);
       return;
     }
 
     const params = decodeJsonBody(payload.body);
     if (params === undefined) {
-      this.io.sendRpc(
-        rpcPayload({
-          op: RpcOp.RequestResponse,
-          requestId: payload.requestId,
-          statusCode: ErrorCode.RpcPayloadInvalid,
-          jsonSid: this.getSid()
-        })
-      );
+      this.sendResponse(payload.requestId, ErrorCode.RpcPayloadInvalid);
       return;
     }
 
@@ -114,26 +100,11 @@ export class RpcExchange {
       .then(() => handler(ctx, params))
       .then(
         (result) => {
-          this.io.sendRpc(
-            rpcPayload({
-              op: RpcOp.RequestResponse,
-              requestId: payload.requestId,
-              statusCode: ErrorCode.Success,
-              jsonSid: this.getSid(),
-              body: encodeJsonBody(result)
-            })
-          );
+          this.sendResponse(payload.requestId, ErrorCode.Success, encodeJsonBody(result));
         },
         (err) => {
           const code = err instanceof AxtpError ? err.code : ErrorCode.RpcExecutionFailed;
-          this.io.sendRpc(
-            rpcPayload({
-              op: RpcOp.RequestResponse,
-              requestId: payload.requestId,
-              statusCode: code,
-              jsonSid: this.getSid()
-            })
-          );
+          this.sendResponse(payload.requestId, code);
         }
       );
   }
@@ -162,14 +133,20 @@ export class RpcExchange {
   /** 未 ready 的业务请求 -> CONTROL_OPEN_REQUIRED。 */
   rejectNotReady(payload: RpcPayload): void {
     if (payload.op === RpcOp.Request) {
-      this.io.sendRpc(
-        rpcPayload({
-          op: RpcOp.RequestResponse,
-          requestId: payload.requestId,
-          statusCode: ErrorCode.ControlOpenRequired,
-          jsonSid: this.getSid()
-        })
-      );
+      this.sendResponse(payload.requestId, ErrorCode.ControlOpenRequired);
     }
+  }
+
+  /** 统一构造 + 发送 RequestResponse（消除重复的 rpcPayload 样板）。 */
+  private sendResponse(requestId: number, statusCode: ErrorCode, body?: Uint8Array): void {
+    this.io.sendRpc(
+      rpcPayload({
+        op: RpcOp.RequestResponse,
+        requestId,
+        statusCode,
+        jsonSid: this.getSid(),
+        body
+      })
+    );
   }
 }
