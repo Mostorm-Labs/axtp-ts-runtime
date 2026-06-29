@@ -11,8 +11,7 @@
 
 import type { Bytes } from "../../io/bytes.js";
 import { ByteReader, ByteWriter } from "../../io/io.js";
-import { ControlOpcode, RpcEncoding } from "../../protocol/generated/axtp_ids_generated.js";
-import { controlPayload, type ControlPayload } from "../model.js";
+import { ControlOpcode, controlPayload, RpcEncoding, type ControlPayload } from "../model.js";
 
 export const kControlPayloadHeaderSize = 5;
 

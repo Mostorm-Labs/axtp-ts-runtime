@@ -10,11 +10,16 @@ import {
   encodeHeartbeatAck,
   type NegotiationParams
 } from "../../protocol/codec/control.js";
-import { FrameDecoder, FrameEncoder, MessageFragmenter, MessageReassembler } from "../../protocol/codec/frame.js";
+import {
+  FrameDecoder,
+  FrameEncoder,
+  MessageFragmenter,
+  MessageReassembler
+} from "../../protocol/codec/frame.js";
 import { PayloadDecoder } from "../../protocol/codec/payload.js";
 import { encodeStream } from "../../protocol/codec/stream.js";
-import { PayloadType } from "../../protocol/generated/axtp_ids_generated.js";
 import type { Message, RpcPayload, StreamPayload } from "../../protocol/model.js";
+import { PayloadType } from "../../protocol/model.js";
 import type { ITransport, PhysicalRole } from "../../transport/transport.js";
 import { ControlSession, type NegotiatedLink } from "./controlSession.js";
 
@@ -38,14 +43,18 @@ export class CodecPipeline {
   readonly controlSession: ControlSession;
   private readonly frameDecoder: FrameDecoder;
   private readonly fragmenter: MessageFragmenter;
-  private readonly frameEncoder = new FrameEncoder;
+  private readonly frameEncoder = new FrameEncoder();
   private readonly transport: ITransport;
   private readonly callbacks: CodecPipelineCallbacks;
 
   constructor(
     physicalRole: PhysicalRole,
     transport: ITransport,
-    options: { maxFrameSize: number; heartbeatIntervalMs: number; negotiationParams?: NegotiationParams },
+    options: {
+      maxFrameSize: number;
+      heartbeatIntervalMs: number;
+      negotiationParams?: NegotiationParams;
+    },
     callbacks: CodecPipelineCallbacks
   ) {
     this.transport = transport;

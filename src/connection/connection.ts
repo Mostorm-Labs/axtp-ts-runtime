@@ -51,7 +51,6 @@ export class Connection {
   readonly onLinkReady = new EventStream<void>();
   readonly onReconnect = new EventStream<ReconnectInfo>();
   readonly onReconnectFailed = new EventStream<void>();
-  readonly onStateChange = new EventStream<ConnectionState>();
 
   private transport: ITransport;
   private capabilities: TransportCapabilities;
@@ -108,7 +107,6 @@ export class Connection {
     if (this.connState === newState) return;
     if (this.connState === "closed") return;
     this.connState = newState;
-    this.onStateChange.emit(newState);
   }
 
   get state(): ConnectionState {
@@ -239,14 +237,20 @@ export class Connection {
 
   close(code: CloseCode = CloseCode.Normal, reason = "local close"): void {
     if (this.connState === "closed") return;
-    this.setState("closed");
     this.reconnectCoordinator?.stop();
     this.heartbeat?.stop();
     if (this.capabilities.supportsControl && this.pipeline?.controlSessionIsOpen) {
       this.pipeline.sendClose();
     }
     this.transport.close();
-    this.onClose.emit({ code, reason, remote: false });
+    this.terminate({ code, reason, remote: false });
+  }
+
+  /** 统一收尾：setState(closed) + emit onClose (+可选 onReconnectFailed) + cleanupStreams。 */
+  private terminate(reason: CloseReason, emitReconnectFailed = false): void {
+    this.setState("closed");
+    if (emitReconnectFailed) this.onReconnectFailed.emit(undefined);
+    this.onClose.emit(reason);
     this.cleanupStreams();
   }
 
@@ -266,9 +270,7 @@ export class Connection {
     }
 
     // 无重连策略：直接关闭
-    this.setState("closed");
-    this.onClose.emit(reason);
-    this.cleanupStreams();
+    this.terminate(reason);
   }
 
   private handleReconnected(newTransport: ITransport): void {
@@ -288,16 +290,12 @@ export class Connection {
     this.startLinkHandshake();
   }
 
-  private handleReconnectSuccess(): void {
-    this.reconnectCoordinator?.onSuccess();
-  }
-
   private handleReconnectFailed(): void {
-    this.setState("closed");
     this.transport.close();
-    this.onReconnectFailed.emit(undefined);
-    this.onClose.emit({ code: CloseCode.Reconnect, reason: "reconnect failed", remote: false });
-    this.cleanupStreams();
+    this.terminate(
+      { code: CloseCode.Reconnect, reason: "reconnect failed", remote: false },
+      true
+    );
   }
 
   // ===== 内部 =====
@@ -317,7 +315,7 @@ export class Connection {
     this.pipeline?.setMaxFrameSize(neg.maxFrameSize);
     this.fireLinkReady();
     this.startHeartbeat(neg.heartbeatIntervalMs);
-    this.handleReconnectSuccess();
+    this.reconnectCoordinator?.onSuccess();
   }
 
   private fireLinkReady(): void {
@@ -325,7 +323,7 @@ export class Connection {
     this.setState("link_ready");
     this.onLinkReady.emit(undefined);
     if (!this.capabilities.supportsControl) {
-      this.handleReconnectSuccess();
+      this.reconnectCoordinator?.onSuccess();
     }
   }
 
@@ -377,7 +375,6 @@ export class Connection {
     this.onReconnect.close();
     this.onReconnectFailed.close();
     this.onDisconnect.close();
-    this.onStateChange.close();
     this.onClose.close();
   }
 }

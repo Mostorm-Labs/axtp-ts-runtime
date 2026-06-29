@@ -70,8 +70,8 @@ export class RpcDispatcher {
     return true;
   }
 
-  /** 主动取消单个请求。 */
-  cancel(requestId: number): void {
+  /** 主动取消单个请求（仅内部用于 request() 发送失败回滚）。 */
+  private cancel(requestId: number): void {
     const entry = this.pending.get(requestId);
     if (entry === undefined) return;
     clearTimeout(entry.timer);
@@ -87,8 +87,8 @@ export class RpcDispatcher {
     this.pending.clear();
   }
 
-  /** 当前 pending 数量。 */
-  size(): number {
+  /** 当前 pending 数量（仅内部状态查询）。 */
+  private size(): number {
     return this.pending.size;
   }
 

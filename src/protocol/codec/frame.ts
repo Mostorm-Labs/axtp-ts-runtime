@@ -9,8 +9,8 @@
 
 import { concatBytes, type Bytes } from "../../io/bytes.js";
 import { ByteReader, ByteWriter, crc16CcittFalse } from "../../io/io.js";
-import { PayloadType } from "../../protocol/generated/axtp_ids_generated.js";
 import type { Frame, Message } from "../model.js";
+import { PayloadType } from "../model.js";
 
 export const kMagic0 = 0x41;
 export const kMagic1 = 0x58;

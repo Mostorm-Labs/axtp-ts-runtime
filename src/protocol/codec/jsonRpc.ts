@@ -12,10 +12,9 @@
 // 注意：method/event 在 JSON 恒为字符串名（数字 id 仅 JSON_BINARY，本期不实现）。
 
 import { bytesToText, toBytes, type Bytes } from "../../io/bytes.js";
-import { RpcEncoding, RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
 import { ErrorCode } from "../../types/error.js";
 import { registry } from "../../types/registry.js";
-import { rpcPayload, type RpcPayload } from "../model.js";
+import { RpcEncoding, RpcOp, rpcPayload, type RpcPayload } from "../model.js";
 
 type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
 interface JsonObject {

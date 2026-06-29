@@ -15,7 +15,7 @@ import {
   encodeReject,
   type NegotiationParams
 } from "../../protocol/codec/control.js";
-import { ControlOpcode } from "../../protocol/generated/axtp_ids_generated.js";
+import { ControlOpcode } from "../../protocol/model.js";
 import type { PhysicalRole } from "../../transport/transport.js";
 import { ErrorCode } from "../../types/error.js";
 

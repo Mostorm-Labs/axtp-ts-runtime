@@ -4,8 +4,8 @@
 // CONTROL payload 用 control.ts 的 5B header + TLV。
 // STREAM payload 用 stream.ts 的 16B header。
 
-import { PayloadType, RpcEncoding } from "../../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload, StreamPayload } from "../model.js";
+import { PayloadType, RpcEncoding } from "../model.js";
 import { decodeJsonRpc } from "./jsonRpc.js";
 import { decodeStream } from "./stream.js";
 

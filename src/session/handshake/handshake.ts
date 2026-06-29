@@ -9,9 +9,8 @@
 // Identified.d = {}（对齐 conformance；sid 在 envelope 外层）。
 
 import { decodeJsonBody, encodeJsonBody } from "../../protocol/codec/jsonRpc.js";
-import { RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../../protocol/model.js";
-import { rpcPayload } from "../../protocol/model.js";
+import { RpcOp, rpcPayload } from "../../protocol/model.js";
 import type { LogicalRole } from "../../transport/transport.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
 

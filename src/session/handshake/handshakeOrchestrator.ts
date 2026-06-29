@@ -2,8 +2,8 @@
 // 持有 Handshake，onLinkReady 时 Logical Server 发 Hello，ingest 握手消息推进状态。
 // 通过 SessionIO 发送 outbound（不直接持有 Connection）。
 
-import { RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../../protocol/model.js";
+import { RpcOp } from "../../protocol/model.js";
 import type { LogicalRole } from "../../transport/transport.js";
 import type { AxtpError } from "../../types/error.js";
 import type { SessionIO } from "../types.js";

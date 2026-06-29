@@ -3,9 +3,8 @@
 // 通过 SessionIO 发送，通过 HandlerRouter 路由入站。
 
 import { decodeJsonBody, encodeJsonBody } from "../../protocol/codec/jsonRpc.js";
-import { RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../../protocol/model.js";
-import { rpcPayload } from "../../protocol/model.js";
+import { RpcOp, rpcPayload } from "../../protocol/model.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
 import { registry } from "../../types/registry.js";
 import type { HandlerRouter } from "../handler/handlerRouter.js";
