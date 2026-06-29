@@ -58,7 +58,7 @@ describe("MockTransport", () => {
     expect([...received[0]]).toEqual([1, 2, 3]);
   });
 
-  it("close 触发对端 onClose（remote=true）", () => {
+  it("close 触发对端 onClose（remote=true）", async () => {
     const { left, right } = createMockTransportPair();
     let closed = false;
     let remote = false;
@@ -67,6 +67,8 @@ describe("MockTransport", () => {
       remote = r.remote;
     });
     left.close(CloseCode.Normal, "bye");
+    // 对端关闭是异步传播的（模拟真实网络），需 await microtask
+    await new Promise((r) => setTimeout(r, 0));
     expect(closed).toBe(true);
     expect(remote).toBe(true);
     expect(left.isConnected()).toBe(false);

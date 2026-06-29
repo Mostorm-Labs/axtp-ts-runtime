@@ -99,7 +99,9 @@ export class MockTransport implements ITransport {
     this.connected = false;
     this.onClose.emit({ code, reason, remote });
     if (this.peer !== undefined && this.peer.connected) {
-      this.peer.close(code, reason, true);
+      // 异步传播：模拟真实网络（对端感知断连是异步的），避免同步递归。
+      const peer = this.peer;
+      queueMicrotask(() => peer.close(code, reason, true));
     }
     this.onMessage.close();
     this.onError.close();

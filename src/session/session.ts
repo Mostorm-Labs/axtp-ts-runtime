@@ -325,8 +325,17 @@ export class AxtpSession {
   private armHandshakeTimer(): void {
     if (this.handshakeTimer !== undefined) clearTimeout(this.handshakeTimer);
     this.handshakeTimer = setTimeout(() => {
-      if (!this.ready && !this.closed) {
-        this.close(CloseCode.HandshakeFailed, "handshake timeout");
+      try {
+        if (!this.ready && !this.closed) {
+          this.close(CloseCode.HandshakeFailed, "handshake timeout");
+        }
+      } catch (err) {
+        // timer 回调里的异常不能冒泡到 Node 进程，转发到 onError
+        this.onErrorStream.emit(
+          err instanceof AxtpError
+            ? err
+            : new AxtpError(ErrorCode.InternalError, "handshake timer error", err)
+        );
       }
     }, this.handshakeTimeoutMs);
   }
