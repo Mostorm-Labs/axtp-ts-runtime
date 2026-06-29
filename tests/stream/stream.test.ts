@@ -16,7 +16,7 @@ describe("STREAM P0 端到端（framed-binary）", () => {
     const { left, right } = createMockTransportPair(framedBinaryCapabilities());
     const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
     const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
-    await Promise.all([client.onReady, server.onReady]);
+    await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
 
     server.onStream("video.openStream", () => ({ streamId: 42, streamProfile: "media.video", state: "open" } as never));
 
@@ -34,7 +34,7 @@ describe("STREAM P0 端到端（framed-binary）", () => {
     const { left, right } = createMockTransportPair(framedBinaryCapabilities());
     const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
     const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
-    await Promise.all([client.onReady, server.onReady]);
+    await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
 
     server.onStream("video.openStream", () => ({ streamId: 7, streamProfile: "media.video", state: "open" } as never));
 
@@ -53,7 +53,7 @@ describe("STREAM P0 端到端（framed-binary）", () => {
     const { left, right } = createMockTransportPair(framedBinaryCapabilities());
     const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
     const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
-    await Promise.all([client.onReady, server.onReady]);
+    await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
 
     // server 端通过 onStreamReady 拿到 server-side Stream
     let serverStream: { onChunk: (cb: (data: Bytes, cursor: bigint) => void) => () => void } | undefined;
@@ -85,7 +85,7 @@ describe("STREAM 在 WS 模式下拒绝", () => {
     const { left, right } = createMockTransportPair(unframedJsonCapabilities());
     const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
     const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
-    await Promise.all([client.onReady, server.onReady]);
+    await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
 
     server.onStream("video.openStream", () => ({ streamId: 1, streamProfile: "media.video", state: "open" } as never));
 

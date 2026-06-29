@@ -1,14 +1,16 @@
 // AxtpClient：单 Session 封装（SDK 层，不知 Connection）。
-// connect() 建立 transport + Session。自动重连由 Session+Connection 协作（SDK 只转发事件）。
-// handler/event 注册到 Session，重连不换 Session 实例，表自然保留——无需快照迁移。
+// 显式状态机：idle → connecting → ready → reconnecting → connecting/ready/closed
+// connect() 带超时保护，避免握手卡住永久 hang。
+// 订阅 session.onStateChange 驱动 client 状态 + emit 对应事件。
 
-import type { ReconnectPolicy } from "../connection/reconnect.js";
+import type { ReconnectPolicy } from "../connection/reconnect/reconnect.js";
 import {
   AxtpSession,
   type CallContext,
   type CallOptions,
   type CommonOptions,
   type SessionCloseInfo,
+  type SessionLifecycleState,
   type UntypedEventHandler,
   type UntypedMethodHandler
 } from "../session/session.js";
@@ -24,85 +26,163 @@ import type {
   MethodResponse
 } from "../types/registry.js";
 
-/**
- * Client 选项（继承 CommonOptions，增加 client 特有的 reconnect）。
- * physicalRole/transportFactory/globalHandlers 等由 SDK 内部注入。
- */
+/** SDK Client 生命周期状态机。 */
+export type ClientState =
+  | "idle" // 构造后未 connect
+  | "connecting" // connect() 调用中（含首次和重连后）
+  | "ready" // session ready
+  | "reconnecting" // 传输断开，重连中
+  | "closed"; // 终态
+
 export interface ClientOptions extends CommonOptions {
   reconnect?: ReconnectPolicy;
 }
 
+/** connect() 默认超时 ms（覆盖 transport 连接 + 握手全过程）。 */
+const DEFAULT_CONNECT_TIMEOUT_MS = 30000;
+
 export class AxtpClient {
   private session: AxtpSession | undefined;
-  private connected = false;
+  private clientState: ClientState = "idle";
+  /** 首次 onReady 是否已收到（用于区分 onConnect vs onReconnect）。 */
+  private firstReady = true;
 
-  private readonly onConnectStream = new EventStream<void>();
-  private readonly onDisconnectStream = new EventStream<SessionCloseInfo>();
-  private readonly onReconnectStream = new EventStream<{ attempt: number }>();
-  private readonly onReconnectFailedStream = new EventStream<void>();
-  private readonly onErrorStream = new EventStream<AxtpError>();
+  // 事件流
+  readonly onStateChange = new EventStream<ClientState>();
+  readonly onConnect = new EventStream<void>();
+  readonly onDisconnect = new EventStream<SessionCloseInfo>();
+  readonly onReconnect = new EventStream<{ attempt: number }>();
+  readonly onReconnectFailed = new EventStream<void>();
+  readonly onError = new EventStream<AxtpError>();
 
   constructor(
     private readonly transport: IClientTransport,
     private readonly options: ClientOptions = {}
   ) {}
 
-  // ===== 生命周期事件 =====
+  // ===== 状态 =====
 
-  get onConnect(): EventStream<void> {
-    return this.onConnectStream;
-  }
-  get onDisconnect(): EventStream<SessionCloseInfo> {
-    return this.onDisconnectStream;
-  }
-  get onReconnect(): EventStream<{ attempt: number }> {
-    return this.onReconnectStream;
-  }
-  get onReconnectFailed(): EventStream<void> {
-    return this.onReconnectFailedStream;
-  }
-  /** D5: 转发 session 的异步错误（如 transport 不支持心跳等） */
-  get onError(): EventStream<AxtpError> {
-    return this.onErrorStream;
+  get state(): ClientState {
+    return this.clientState;
   }
 
   get isReady(): boolean {
-    return this.session?.isReady ?? false;
+    return this.clientState === "ready";
+  }
+
+  get isReconnecting(): boolean {
+    return this.clientState === "reconnecting";
+  }
+
+  get isClosed(): boolean {
+    return this.clientState === "closed";
   }
 
   get sid(): string {
     return this.session?.sid ?? "";
   }
 
-  /** 首次连接。 */
-  async connect(): Promise<void> {
-    if (this.connected) throw new AxtpError(ErrorCode.InvalidState, "client already connected");
-    const transport = await this.transport.connect();
-    this.session = new AxtpSession(transport, {
-      physicalRole: "client",
-      logicalRole: this.options.logicalRole ?? "server",
-      defaultTimeoutMs: this.options.defaultTimeoutMs,
-      handshakeTimeoutMs: this.options.handshakeTimeoutMs,
-      reconnect: this.options.reconnect,
-      heartbeatIntervalMs: this.options.heartbeatIntervalMs,
-      heartbeatTimeoutMs: this.options.heartbeatTimeoutMs,
-      maxFrameSize: this.options.maxFrameSize,
-      transportFactory: () => this.transport.connect()
+  private setState(newState: ClientState): void {
+    if (this.clientState === newState) return;
+    if (this.clientState === "closed") return;
+    this.clientState = newState;
+    this.onStateChange.emit(newState);
+  }
+
+  // ===== 连接 =====
+
+  /** 首次连接。带超时保护——transport 连接 + 握手超时后 reject。 */
+  async connect(timeoutMs: number = DEFAULT_CONNECT_TIMEOUT_MS): Promise<void> {
+    if (this.clientState !== "idle") {
+      throw new AxtpError(ErrorCode.InvalidState, `cannot connect from state ${this.clientState}`);
+    }
+    this.setState("connecting");
+
+    try {
+      const transport = await this.transport.connect();
+      this.session = new AxtpSession(transport, {
+        physicalRole: "client",
+        logicalRole: this.options.logicalRole ?? "server",
+        defaultTimeoutMs: this.options.defaultTimeoutMs,
+        handshakeTimeoutMs: this.options.handshakeTimeoutMs,
+        reconnect: this.options.reconnect,
+        heartbeatIntervalMs: this.options.heartbeatIntervalMs,
+        heartbeatTimeoutMs: this.options.heartbeatTimeoutMs,
+        maxFrameSize: this.options.maxFrameSize,
+        transportFactory: () => this.transport.connect()
+      });
+
+      // 订阅 session 事件
+      this.session.onStateChange.subscribe((s) => this.onSessionStateChange(s));
+      this.session.onClose.subscribe((info) => this.onDisconnect.emit(info));
+      this.session.onReconnect.subscribe((info) => this.onReconnect.emit(info));
+      this.session.onReconnectFailed.subscribe(() => this.onReconnectFailed.emit(undefined));
+      this.session.onError.subscribe((err) => this.onError.emit(err));
+
+      // 等待首次 ready（带超时）
+      await this.waitForReady(timeoutMs);
+      this.setState("ready");
+      this.onConnect.emit(undefined);
+    } catch (err) {
+      this.setState("closed");
+      throw err instanceof AxtpError
+        ? err
+        : new AxtpError(ErrorCode.TransportDisconnected, "connect failed", err);
+    }
+  }
+
+  /** 等待 session 首次 ready，带超时。 */
+  private waitForReady(timeoutMs: number): Promise<void> {
+    const session = this.session;
+    if (session === undefined) {
+      return Promise.reject(new AxtpError(ErrorCode.InvalidState, "session not created"));
+    }
+    if (session.isReady) return Promise.resolve();
+
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        unsub();
+        reject(new AxtpError(ErrorCode.Timeout, `connect timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      const unsub = session.onReady.subscribe(() => {
+        clearTimeout(timer);
+        unsub();
+        resolve();
+      });
+
+      // 如果 session 在等待期间关闭，reject
+      const closeUnsub = session.onClose.subscribe(() => {
+        clearTimeout(timer);
+        unsub();
+        closeUnsub();
+        reject(new AxtpError(ErrorCode.TransportDisconnected, "session closed before ready"));
+      });
     });
-    this.session.onClose.subscribe((info) => {
-      this.connected = false;
-      this.onDisconnectStream.emit(info);
-    });
-    this.session.onError.subscribe((err) => this.onErrorStream.emit(err));
-    this.session.onReconnect.subscribe((info) => {
-      this.onReconnectStream.emit(info);
-    });
-    this.session.onReconnectFailed.subscribe(() => {
-      this.onReconnectFailedStream.emit(undefined);
-    });
-    await this.session.onReady;
-    this.connected = true;
-    this.onConnectStream.emit(undefined);
+  }
+
+  /** Session 状态变化 → 更新 Client 状态 + emit 事件。 */
+  private onSessionStateChange(sessionState: SessionLifecycleState): void {
+    switch (sessionState) {
+      case "ready":
+        if (this.firstReady) {
+          this.firstReady = false;
+        }
+        this.setState("ready");
+        break;
+      case "reconnecting":
+        this.setState("reconnecting");
+        break;
+      case "connecting":
+        // 重连后重新握手（非首次）
+        if (!this.firstReady) {
+          this.setState("connecting");
+        }
+        break;
+      case "closed":
+        this.setState("closed");
+        break;
+    }
   }
 
   // ===== 四件套（转发 Session）=====
@@ -115,45 +195,34 @@ export class AxtpClient {
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown>;
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
     this.requireUsable();
-    const session = this.session;
-    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
-    return session.call(method, params, options);
+    return this.session!.call(method, params, options);
   }
 
   handle<K extends MethodName>(
     method: K,
-    handler: (
-      ctx: CallContext,
-      params: MethodRequest<K>
-    ) => MethodResponse<K> | Promise<MethodResponse<K>>
+    handler: (ctx: CallContext, params: MethodRequest<K>) => MethodResponse<K> | Promise<MethodResponse<K>>
   ): () => void;
   handle(method: string, handler: UntypedMethodHandler): () => void;
   handle(
     method: string,
     handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
   ): () => void {
-    if (!this.connected) throw new AxtpError(ErrorCode.TransportDisconnected, "client closed");
-    const session = this.session;
-    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
-    return session.handle(method, handler as UntypedMethodHandler);
+    this.requireConnected();
+    return this.session!.handle(method, handler as UntypedMethodHandler);
   }
 
   emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
   emit(event: string, payload: unknown): Promise<void>;
   emit(event: string, payload: unknown): Promise<void> {
     this.requireUsable();
-    const session = this.session;
-    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
-    return session.emit(event, payload);
+    return this.session!.emit(event, payload);
   }
 
   on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void;
   on(event: string, handler: UntypedEventHandler): () => void;
   on(event: string, handler: UntypedEventHandler): () => void {
-    if (!this.connected) throw new AxtpError(ErrorCode.TransportDisconnected, "client closed");
-    const session = this.session;
-    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
-    return session.on(event, handler);
+    this.requireConnected();
+    return this.session!.on(event, handler);
   }
 
   // ===== Stream =====
@@ -164,30 +233,38 @@ export class AxtpClient {
     options?: CallOptions
   ): Promise<{ streamId: number; response: unknown; stream: Stream }> {
     this.requireUsable();
-    const session = this.session;
-    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
-    return session.openStream(method, params, options);
+    return this.session!.openStream(method, params, options);
   }
 
   onStream(
     method: string,
     handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
   ): () => void {
-    if (!this.connected) throw new AxtpError(ErrorCode.TransportDisconnected, "client closed");
-    const session = this.session;
-    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
-    return session.onStream(method, handler);
+    this.requireConnected();
+    return this.session!.onStream(method, handler);
   }
 
   /** 主动关闭，不再重连。 */
   close(): void {
     this.session?.close();
-    this.connected = false;
+    this.setState("closed");
   }
 
   private requireUsable(): void {
-    if (!this.connected || !this.session?.isReady) {
+    if (this.clientState === "closed")
+      throw new AxtpError(ErrorCode.TransportDisconnected, "client closed");
+    if (this.clientState === "reconnecting")
+      throw new AxtpError(ErrorCode.TransportDisconnected, "client reconnecting");
+    if (this.clientState !== "ready")
       throw new AxtpError(ErrorCode.InvalidState, "client not ready");
-    }
+    if (this.session === undefined)
+      throw new AxtpError(ErrorCode.InvalidState, "client not ready");
+  }
+
+  private requireConnected(): void {
+    if (this.clientState === "closed")
+      throw new AxtpError(ErrorCode.TransportDisconnected, "client closed");
+    if (this.session === undefined)
+      throw new AxtpError(ErrorCode.InvalidState, "client not connected");
   }
 }

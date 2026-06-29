@@ -19,7 +19,11 @@ async function makePair(
   // 经典场景：server 暴露能力（Logical Server），client 消费（Logical Client）
   const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
   const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
-  await Promise.all([client.onReady, server.onReady]);
+  // onReady 现在是 EventStream，await 首次 emit
+  await Promise.all([
+    new Promise<void>((r) => client.onReady.subscribe(() => r())),
+    new Promise<void>((r) => server.onReady.subscribe(() => r()))
+  ]);
   return { client, server };
 }
 

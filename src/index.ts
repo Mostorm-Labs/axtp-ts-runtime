@@ -4,29 +4,32 @@
 
 // SDK
 export { AxtpClient } from "./sdk/client.js";
-export type { ClientOptions } from "./sdk/client.js";
+export type { ClientOptions, ClientState } from "./sdk/client.js";
 export { AxtpServer } from "./sdk/server.js";
 export type { ServerOptions } from "./sdk/server.js";
+export type { SessionState } from "./session/handshake/handshake.js";
 export { AxtpSession } from "./session/session.js";
 export type {
   CallContext,
   CallOptions,
   CommonOptions,
   EventHandler,
+  GlobalHandlerSource,
   MethodHandler,
   SessionCloseInfo,
-  SessionOptions,
+  SessionConfig,
+  SessionLifecycleState,
   UntypedEventHandler,
   UntypedMethodHandler
 } from "./session/session.js";
-export type { SessionState } from "./session/handshake/handshake.js";
 
 // Stream
 export { Stream } from "./session/stream/stream.js";
 export type { StreamStats } from "./session/stream/stream.js";
 
-// 重连
-export type { ReconnectInfo, ReconnectPolicy } from "./connection/reconnect.js";
+// 重连 + 连接状态
+export type { ConnectionState } from "./connection/connection.js";
+export type { ReconnectInfo, ReconnectPolicy } from "./connection/reconnect/reconnect.js";
 
 // 类型（单一事实源）
 export {

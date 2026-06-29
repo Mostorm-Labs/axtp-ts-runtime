@@ -22,7 +22,7 @@ async function makePair(): Promise<{ client: AxtpSession; server: AxtpSession }>
   // 经典场景：server=Logical Server, client=Logical Client
   const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
   const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
-  await Promise.all([client.onReady, server.onReady]);
+  await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
   return { client, server };
 }
 

@@ -3,19 +3,19 @@
 // 负责：FrameDecoder → MessageReassembler → PayloadDecoder 分发链。
 // 重连时由 Connection 重新创建实例（确保完全重置内部状态）。
 
-import type { Bytes } from "../io/bytes.js";
+import type { Bytes } from "../../io/bytes.js";
 import {
   defaultOpenParams,
   encodeHeartbeat,
   encodeHeartbeatAck,
   type NegotiationParams
-} from "../protocol/codec/control.js";
-import { FrameDecoder, FrameEncoder, MessageFragmenter, MessageReassembler } from "../protocol/codec/frame.js";
-import { PayloadDecoder } from "../protocol/codec/payload.js";
-import { encodeStream } from "../protocol/codec/stream.js";
-import { PayloadType } from "../protocol/generated/axtp_ids_generated.js";
-import type { Message, RpcPayload, StreamPayload } from "../protocol/model.js";
-import type { ITransport, PhysicalRole } from "../transport/transport.js";
+} from "../../protocol/codec/control.js";
+import { FrameDecoder, FrameEncoder, MessageFragmenter, MessageReassembler } from "../../protocol/codec/frame.js";
+import { PayloadDecoder } from "../../protocol/codec/payload.js";
+import { encodeStream } from "../../protocol/codec/stream.js";
+import { PayloadType } from "../../protocol/generated/axtp_ids_generated.js";
+import type { Message, RpcPayload, StreamPayload } from "../../protocol/model.js";
+import type { ITransport, PhysicalRole } from "../../transport/transport.js";
 import { ControlSession, type NegotiatedLink } from "./controlSession.js";
 
 /** CodecPipeline 事件回调（上交给 Connection）。 */

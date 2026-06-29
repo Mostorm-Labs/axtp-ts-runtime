@@ -19,11 +19,11 @@ import type {
 import { CloseCode } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
-import { CodecPipeline } from "./codecPipeline.js";
-import { type NegotiatedLink } from "./controlSession.js";
+import { CodecPipeline } from "./codec/codecPipeline.js";
+import { type NegotiatedLink } from "./codec/controlSession.js";
 import { Heartbeat } from "./heartbeat.js";
-import { resolvePolicy, type ReconnectInfo, type ReconnectPolicy } from "./reconnect.js";
-import { ReconnectCoordinator } from "./reconnectCoordinator.js";
+import { resolvePolicy, type ReconnectInfo, type ReconnectPolicy } from "./reconnect/reconnect.js";
+import { ReconnectCoordinator } from "./reconnect/reconnectCoordinator.js";
 
 export interface ConnectionOptions {
   heartbeatIntervalMs?: number;
@@ -34,23 +34,32 @@ export interface ConnectionOptions {
   reconnect?: ReconnectPolicy;
 }
 
+/** Connection 生命周期状态机。 */
+export type ConnectionState =
+  | "idle" // 构造后未 start
+  | "link_connecting" // start() 后，等链路 ready
+  | "link_ready" // 链路 ready
+  | "reconnecting" // 传输断开，重连退避/尝试中
+  | "closed"; // 终态
+
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30000;
 const DEFAULT_MAX_FRAME_SIZE = 4096;
 
 export class Connection {
   readonly onClose = new EventStream<CloseReason>();
+  readonly onDisconnect = new EventStream<CloseReason>();
   readonly onError = new EventStream<AxtpError>();
   readonly onPayload = new EventStream<RpcPayload>();
   readonly onStream = new EventStream<StreamPayload>();
   readonly onLinkReady = new EventStream<void>();
   readonly onReconnect = new EventStream<ReconnectInfo>();
   readonly onReconnectFailed = new EventStream<void>();
+  readonly onStateChange = new EventStream<ConnectionState>();
 
   private transport: ITransport;
   private capabilities: TransportCapabilities;
   private readonly physicalRole: PhysicalRole;
   private readonly options: ConnectionOptions;
-  private readonly transportFactory: TransportFactory | undefined;
 
   private pipeline: CodecPipeline | undefined;
   private heartbeat: Heartbeat | undefined;
@@ -58,12 +67,10 @@ export class Connection {
   private keepaliveUnsub: (() => void) | undefined;
   private transportUnsubs: Array<() => void> = [];
 
+  private connState: ConnectionState = "idle";
   private started = false;
-  private closed = false;
-  private linkReadyFired = false;
-  private reconnecting = false;
-  private nextHeartbeatControlId = 0x100;
   private pendingBytes: Bytes[] = [];
+  private nextHeartbeatControlId = 0x100;
 
   constructor(
     physicalRole: PhysicalRole,
@@ -73,7 +80,6 @@ export class Connection {
   ) {
     this.physicalRole = physicalRole;
     this.options = options;
-    this.transportFactory = transportFactory;
 
     const policy = resolvePolicy(options.reconnect);
     if (policy.enabled && transportFactory !== undefined) {
@@ -93,6 +99,26 @@ export class Connection {
     this.attachTransport(transport);
   }
 
+  /** 统一状态转换入口。 */
+  private setState(newState: ConnectionState): void {
+    if (this.connState === newState) return;
+    if (this.connState === "closed") return;
+    this.connState = newState;
+    this.onStateChange.emit(newState);
+  }
+
+  get state(): ConnectionState {
+    return this.connState;
+  }
+
+  get isClosed(): boolean {
+    return this.connState === "closed";
+  }
+
+  get isReconnecting(): boolean {
+    return this.connState === "reconnecting";
+  }
+
   /**
    * 绑定一条 transport：统一重置所有 transport 相关可变状态 + 订阅事件。
    * 构造和重连都调此方法。确保重连时 pipeline/heartbeat/controlId 完全重置。
@@ -110,8 +136,7 @@ export class Connection {
     this.heartbeat?.stop();
     this.heartbeat = undefined;
 
-    // 4. 重置链路状态
-    this.linkReadyFired = false;
+    // 4. 重置链路状态（linkReadyFired 改为状态机驱动，无需 boolean）
     this.nextHeartbeatControlId = 0x100;
 
     // 5. 刷新 capabilities
@@ -147,7 +172,7 @@ export class Connection {
     // 7. 订阅 transport 事件
     this.transportUnsubs.push(
       transport.onMessage.subscribe((bytes) => {
-        if (this.closed) return;
+        if (this.connState === "closed") return;
         if (!this.started) {
           this.pendingBytes.push(bytes);
           return;
@@ -166,6 +191,7 @@ export class Connection {
   start(): void {
     if (this.started) return;
     this.started = true;
+    this.setState("link_connecting");
     this.flushPendingAndStartLink();
   }
 
@@ -182,8 +208,8 @@ export class Connection {
   }
 
   sendRpc(payload: RpcPayload): void {
-    if (this.closed) return;
-    if (this.reconnecting)
+    if (this.connState === "closed") return;
+    if (this.connState === "reconnecting")
       throw new AxtpError(ErrorCode.TransportDisconnected, "connection reconnecting");
     const jsonBytes = encodeJsonRpc(payload);
     if (this.capabilities.supportsControl) {
@@ -194,8 +220,8 @@ export class Connection {
   }
 
   sendStream(payload: StreamPayload): void {
-    if (this.closed) return;
-    if (this.reconnecting)
+    if (this.connState === "closed") return;
+    if (this.connState === "reconnecting")
       throw new AxtpError(ErrorCode.TransportDisconnected, "connection reconnecting");
     if (!this.capabilities.supportsControl) {
       throw new AxtpError(ErrorCode.NotSupported, "STREAM not supported on this transport");
@@ -204,8 +230,8 @@ export class Connection {
   }
 
   close(code: CloseCode = CloseCode.Normal, reason = "local close"): void {
-    if (this.closed) return;
-    this.closed = true;
+    if (this.connState === "closed") return;
+    this.setState("closed");
     this.reconnectCoordinator?.stop();
     this.heartbeat?.stop();
     if (this.capabilities.supportsControl && this.pipeline?.controlSessionIsOpen) {
@@ -216,25 +242,18 @@ export class Connection {
     this.cleanupStreams();
   }
 
-  get isClosed(): boolean {
-    return this.closed;
-  }
-
-  get isReconnecting(): boolean {
-    return this.reconnecting;
-  }
-
   // ===== 重连 =====
 
   private handleTransportClose(reason: CloseReason): void {
-    if (this.closed) return;
+    if (this.connState === "closed") return;
     this.heartbeat?.stop();
     this.heartbeat = undefined;
-    this.linkReadyFired = false;
 
     if (this.reconnectCoordinator !== undefined) {
-      if (!this.reconnecting) {
-        this.reconnecting = true;
+      // 有重连策略：通知断连 + 进入重连
+      this.onDisconnect.emit(reason);
+      this.setState("reconnecting");
+      if (this.reconnectCoordinator.attemptCount === 0) {
         this.reconnectCoordinator.start();
       } else {
         this.reconnectCoordinator.reset();
@@ -243,7 +262,8 @@ export class Connection {
       return;
     }
 
-    this.closed = true;
+    // 无重连策略：直接关闭
+    this.setState("closed");
     this.onClose.emit(reason);
     this.cleanupStreams();
   }
@@ -256,6 +276,7 @@ export class Connection {
     this.onReconnect.emit({ attempt });
 
     this.attachTransport(newTransport);
+    this.setState("link_connecting");
 
     if (this.capabilities.supportsControl) {
       if (this.physicalRole === "client") this.pipeline?.sendOpen();
@@ -263,8 +284,6 @@ export class Connection {
       this.fireLinkReady();
       this.startHeartbeat(this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
     }
-
-    this.reconnecting = false;
   }
 
   private handleReconnectSuccess(): void {
@@ -273,8 +292,7 @@ export class Connection {
   }
 
   private handleReconnectFailed(): void {
-    this.reconnecting = false;
-    this.closed = true;
+    this.setState("closed");
     this.transport.close();
     this.onReconnectFailed.emit(undefined);
     this.onClose.emit({ code: CloseCode.Reconnect, reason: "reconnect failed", remote: false });
@@ -284,7 +302,7 @@ export class Connection {
   // ===== 内部 =====
 
   private onTransportBytes(bytes: Bytes): void {
-    if (this.closed) return;
+    if (this.connState === "closed") return;
     if (this.capabilities.supportsControl) {
       this.pipeline?.onBytes(bytes);
     } else {
@@ -302,8 +320,8 @@ export class Connection {
   }
 
   private fireLinkReady(): void {
-    if (this.linkReadyFired) return;
-    this.linkReadyFired = true;
+    if (this.connState === "link_ready") return;
+    this.setState("link_ready");
     this.onLinkReady.emit(undefined);
     if (!this.capabilities.supportsControl) {
       this.handleReconnectSuccess();
@@ -357,6 +375,8 @@ export class Connection {
     this.onError.close();
     this.onReconnect.close();
     this.onReconnectFailed.close();
+    this.onDisconnect.close();
+    this.onStateChange.close();
     this.onClose.close();
   }
 }

@@ -2,11 +2,11 @@
 // 组合子组件（HandshakeOrchestrator/RpcExchange/StreamManager/HandlerRouter），
 // 创建+持有 Connection，订阅其事件。
 //
-// 单一职责：Session 只做"组合编排 + 生命周期 + 会话重建"。
-// 重连会话重建：Connection 管传输重连（onReconnect），Session 监听后重建握手（HandshakeOrchestrator.reset）。
-// handler 表在 Session 里，重连不换 Session 实例，表自然保留——无需快照迁移。
+// 显式状态机：connecting → ready → reconnecting → connecting → ready / → closed
+// onReady: EventStream<void>（每次握手成功都 emit，支持重连后再次 ready）
+// onStateChange: EventStream<SessionLifecycleState>（状态转换通知）
 
-import { Connection, type ConnectionOptions } from "../connection/connection.js";
+import { Connection, type ConnectionOptions, type ConnectionState } from "../connection/connection.js";
 import { RpcOp } from "../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../protocol/model.js";
 import type { CloseReason, ITransport } from "../transport/transport.js";
@@ -21,7 +21,6 @@ import type {
   MethodResponse
 } from "../types/registry.js";
 import { HandlerRouter } from "./handler/handlerRouter.js";
-import type { SessionState } from "./handshake/handshake.js";
 import { HandshakeOrchestrator } from "./handshake/handshakeOrchestrator.js";
 import { RpcExchange } from "./rpc/rpcExchange.js";
 import type { Stream } from "./stream/stream.js";
@@ -29,7 +28,9 @@ import { StreamManager } from "./stream/streamManager.js";
 import type {
   CallContext,
   CallOptions,
+  CommonOptions,
   EventHandler,
+  GlobalHandlerSource,
   MethodHandler,
   SessionCloseInfo,
   SessionConfig,
@@ -37,6 +38,13 @@ import type {
   UntypedEventHandler,
   UntypedMethodHandler
 } from "./types.js";
+
+/** Session 生命周期状态机。 */
+export type SessionLifecycleState =
+  | "connecting" // 构造后/重连后正在握手
+  | "ready" // APP_READY
+  | "reconnecting" // 传输断开，Connection 正在重连
+  | "closed"; // 终态
 
 // 重新导出类型（公共 API）
 export type {
@@ -47,12 +55,9 @@ export type {
   GlobalHandlerSource,
   MethodHandler,
   SessionCloseInfo,
-  SessionConfig,
-  SessionInternalConfig,
-  SessionOptions,
-  UntypedEventHandler,
+  SessionConfig, SessionLifecycleState as SessionState, UntypedEventHandler,
   UntypedMethodHandler
-} from "./types.js";
+};
 
 let nextSessionId = 1;
 
@@ -68,28 +73,28 @@ export class AxtpSession {
   // SessionIO：子组件通过此发送（转发到 Connection）
   private readonly io: SessionIO;
 
-  private readonly onReadyStream = new EventStream<void>();
-  private readonly onCloseStream = new EventStream<SessionCloseInfo>();
-  private readonly onReconnectStream = new EventStream<{
-    attempt: number;
-  }>();
-  private readonly onReconnectFailedStream = new EventStream<void>();
-  private readonly onErrorStream = new EventStream<AxtpError>();
+  // 事件流
+  readonly onReady = new EventStream<void>();
+  readonly onStateChange = new EventStream<SessionLifecycleState>();
+  readonly onClose = new EventStream<SessionCloseInfo>();
+  readonly onReconnect = new EventStream<{ attempt: number }>();
+  readonly onReconnectFailed = new EventStream<void>();
+  readonly onError = new EventStream<AxtpError>();
 
-  private ready = false;
-  private closed = false;
+  // 状态
+  private sessionState: SessionLifecycleState = "connecting";
   private readonly defaultTimeoutMs: number;
   private handshakeTimeoutMs: number;
   private handshakeTimer: ReturnType<typeof setTimeout> | undefined;
-  /** 公开 id（简短随机字符串，仅在创建它的 server/client 内有效，非全局唯一）。 */
+  /** 公开 id */
   readonly id: number;
 
   constructor(transport: ITransport, config: SessionConfig) {
     const physicalRole = config.physicalRole ?? "client";
     this.defaultTimeoutMs = config.defaultTimeoutMs ?? 10000;
-    this.id = nextSessionId++; // B6: 自增计数器，避免随机碰撞
+    this.id = nextSessionId++;
 
-    // 构造 ConnectionOptions（不暴露 negotiationParams 等链路细节给用户）
+    // 构造 ConnectionOptions
     const connOptions: ConnectionOptions = {
       heartbeatIntervalMs: config.heartbeatIntervalMs,
       heartbeatTimeoutMs: config.heartbeatTimeoutMs,
@@ -98,7 +103,7 @@ export class AxtpSession {
     };
     this.conn = new Connection(physicalRole, transport, connOptions, config.transportFactory);
 
-    // SessionIO：子组件通过此发送（转发到 Connection）
+    // SessionIO
     this.io = {
       sendRpc: (p) => this.conn.sendRpc(p),
       sendStream: (streamId, data, seqId) =>
@@ -108,11 +113,7 @@ export class AxtpSession {
     // 子组件
     this.router = new HandlerRouter(config.globalHandlers);
     const logicalRole = config.logicalRole ?? "server";
-    this.handshakeOrch = new HandshakeOrchestrator(
-      logicalRole,
-      this.io,
-      config.handshakeSeed
-    );
+    this.handshakeOrch = new HandshakeOrchestrator(logicalRole, this.io, config.handshakeSeed);
     this.rpc = new RpcExchange(
       this.io,
       this.router,
@@ -125,78 +126,66 @@ export class AxtpSession {
     this.conn.onPayload.subscribe((p) => this.ingest(p));
     this.conn.onStream.subscribe((s) => this.streamMgr.onData(s));
     this.conn.onLinkReady.subscribe(() => this.onLinkReady());
+    this.conn.onDisconnect.subscribe((r) => this.handleDisconnect(r));
     this.conn.onClose.subscribe((r) => this.handleClose(r));
     this.conn.onReconnect.subscribe((info) => this.handleReconnect(info.attempt));
-    this.conn.onReconnectFailed.subscribe(() => this.onReconnectFailedStream.emit(undefined));
-    this.conn.onError.subscribe((err) => this.onErrorStream.emit(err));
+    this.conn.onReconnectFailed.subscribe(() => this.onReconnectFailed.emit(undefined));
+    this.conn.onError.subscribe((err) => this.onError.emit(err));
 
-    // 握手超时配置（重连时复用）
+    // 握手超时
     this.handshakeTimeoutMs = config.handshakeTimeoutMs ?? 15000;
-
-    // arm 首次握手超时
     this.armHandshakeTimer();
 
-    // onReady Promise：握手完成 resolve。
-    // 生命周期通过 onClose 事件传达。
-    this.onReady = new Promise<void>((resolve) => {
-      this.onReadyResolve = resolve;
-      this.onReadyStream.subscribe(() => {
-        if (this.handshakeTimer !== undefined) {
-          clearTimeout(this.handshakeTimer);
-          this.handshakeTimer = undefined;
-        }
-        resolve();
-      });
-    });
+    // 初始状态
+    this.setState("connecting");
 
     this.conn.start();
   }
 
-  // ===== 生命周期 =====
+  // ===== 状态机 =====
 
-  private onReadyResolve?: () => void;
-  readonly onReady: Promise<void>;
-
-  get onClose(): EventStream<SessionCloseInfo> {
-    return this.onCloseStream;
+  private setState(newState: SessionLifecycleState): void {
+    if (this.sessionState === newState) return;
+    if (this.sessionState === "closed") return;
+    this.sessionState = newState;
+    this.onStateChange.emit(newState);
   }
 
-  get onError(): EventStream<AxtpError> {
-    return this.onErrorStream;
+  get state(): SessionLifecycleState {
+    return this.sessionState;
   }
 
-  get onReconnect(): EventStream<{ attempt: number }> {
-    return this.onReconnectStream;
+  /** 握手子状态（LINK_CONNECTED/FRAMING_READY/APP_READY/CLOSING），从 HandshakeOrchestrator 委托。 */
+  get handshakeState(): string {
+    return this.handshakeOrch.state;
   }
 
-  get onReconnectFailed(): EventStream<void> {
-    return this.onReconnectFailedStream;
+  get connectionState(): ConnectionState {
+    return this.conn.state;
   }
 
   get isReady(): boolean {
-    return this.ready;
+    return this.sessionState === "ready";
   }
 
   get isClosed(): boolean {
-    return this.closed;
+    return this.sessionState === "closed";
+  }
+
+  get isReconnecting(): boolean {
+    return this.sessionState === "reconnecting";
   }
 
   get sid(): string {
     return this.handshakeOrch.sid;
   }
 
-  get state(): SessionState {
-    return this.handshakeOrch.state;
-  }
-
   close(code: CloseCode = CloseCode.Normal, reason = "local close"): void {
-    // 通过 Connection.close() 关闭底层 socket，再由 conn.onClose → handleClose 统一清理
     this.conn.close(code, reason);
   }
 
-  // ===== typed 四件套（重载）=====
+  // ===== 四件套 =====
 
-  /** call：内置 typed / vendor untyped */
   call<K extends MethodName>(
     method: K,
     params: MethodRequest<K>,
@@ -208,7 +197,6 @@ export class AxtpSession {
     return this.rpc.call(method, params, options?.timeoutMs ?? this.defaultTimeoutMs);
   }
 
-  /** handle：内置 typed / vendor untyped */
   handle<K extends MethodName>(method: K, handler: MethodHandler<K>): () => void;
   handle(method: string, handler: UntypedMethodHandler): () => void;
   handle(
@@ -218,7 +206,6 @@ export class AxtpSession {
     return this.router.setMethod(method, handler as UntypedMethodHandler);
   }
 
-  /** emit：内置 typed / vendor untyped */
   emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
   emit(event: string, payload: unknown): Promise<void>;
   emit(event: string, payload: unknown): Promise<void> {
@@ -226,7 +213,6 @@ export class AxtpSession {
     return this.rpc.emitEvent(event, payload);
   }
 
-  /** on：内置 typed / vendor untyped */
   on<K extends EventName>(event: K, handler: EventHandler<K>): () => void;
   on(event: string, handler: UntypedEventHandler): () => void;
   on(event: string, handler: UntypedEventHandler): () => void {
@@ -248,10 +234,6 @@ export class AxtpSession {
     );
   }
 
-  /**
-   * 注册建流 handler（server 端）。handler 返回含 streamId 的 result，
-   * StreamManager 自动创建 receive Stream，通过 onStreamReady 回调交给调用方。
-   */
   onStream(
     method: string,
     handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>,
@@ -269,25 +251,28 @@ export class AxtpSession {
   // ===== 入站总入口 =====
 
   private ingest(payload: RpcPayload): void {
-    if (this.closed) return;
+    if (this.sessionState === "closed") return;
 
     // 会话握手
-    if (!this.ready && HandshakeOrchestrator.isHandshakeOp(payload.op)) {
+    if (
+      (this.sessionState === "connecting" || this.sessionState === "reconnecting") &&
+      HandshakeOrchestrator.isHandshakeOp(payload.op)
+    ) {
       const result = this.handshakeOrch.ingest(payload);
       if (result.error) {
-        // 握手错误（如 axtpVersion 不兼容、畸形 body）→ 关闭连接
         this.conn.close(CloseCode.HandshakeFailed, result.error.message);
         return;
       }
       if (result.becameReady) {
-        this.ready = true;
-        this.onReadyStream.emit(undefined);
+        this.setState("ready");
+        this.clearHandshakeTimer();
+        this.onReady.emit(undefined);
       }
       return;
     }
 
     // 未 ready 的业务请求 -> CONTROL_OPEN_REQUIRED
-    if (!this.ready) {
+    if (this.sessionState !== "ready") {
       this.rpc.rejectNotReady(payload);
       return;
     }
@@ -310,29 +295,37 @@ export class AxtpSession {
     this.handshakeOrch.onLinkReady();
   }
 
-  /** Connection 传输重连成功后：重建会话（重置握手，重新走 Hello/Identify）。 */
-  private handleReconnect(_attempt: number): void {
-    this.ready = false;
-    // B2: 重连后旧 sid 已失效，pending call/stream 必须全部失败
-    this.rpc.rejectAll(new AxtpError(ErrorCode.TransportDisconnected, "connection reconnecting"));
-    this.streamMgr.abortAll("connection reconnecting");
-    this.handshakeOrch.reset();
-    // 重新 arm 握手超时定时器（首次的 timer 已在握手完成时清除）
-    this.armHandshakeTimer();
-    this.onReconnectStream.emit({ attempt: _attempt });
+  /** Connection 断连通知（有/无重连策略都触发）。 */
+  private handleDisconnect(reason: CloseReason): void {
+    // 进入 reconnecting 状态
+    this.setState("reconnecting");
+    // pending call/stream 全部失败
+    this.rpc.rejectAll(
+      new AxtpError(ErrorCode.TransportDisconnected, `connection disconnected: ${reason.reason}`)
+    );
+    this.streamMgr.abortAll(`connection disconnected: ${reason.reason}`);
   }
 
-  /** Arm 握手超时定时器：超时后 close session（防止握手卡住永久 hang）。 */
+  /** Connection 传输重连成功后：重建会话。 */
+  private handleReconnect(attempt: number): void {
+    // 进入 connecting（重新握手）
+    this.setState("connecting");
+    this.handshakeOrch.reset();
+    this.armHandshakeTimer();
+    this.onReconnect.emit({ attempt });
+  }
+
+  // ===== 握手超时 =====
+
   private armHandshakeTimer(): void {
-    if (this.handshakeTimer !== undefined) clearTimeout(this.handshakeTimer);
+    this.clearHandshakeTimer();
     this.handshakeTimer = setTimeout(() => {
       try {
-        if (!this.ready && !this.closed) {
+        if (this.sessionState === "connecting" || this.sessionState === "reconnecting") {
           this.close(CloseCode.HandshakeFailed, "handshake timeout");
         }
       } catch (err) {
-        // timer 回调里的异常不能冒泡到 Node 进程，转发到 onError
-        this.onErrorStream.emit(
+        this.onError.emit(
           err instanceof AxtpError
             ? err
             : new AxtpError(ErrorCode.InternalError, "handshake timer error", err)
@@ -340,6 +333,15 @@ export class AxtpSession {
       }
     }, this.handshakeTimeoutMs);
   }
+
+  private clearHandshakeTimer(): void {
+    if (this.handshakeTimer !== undefined) {
+      clearTimeout(this.handshakeTimer);
+      this.handshakeTimer = undefined;
+    }
+  }
+
+  // ===== 内部 =====
 
   private makeCallContext(requestId: number): CallContext {
     return {
@@ -350,40 +352,37 @@ export class AxtpSession {
   }
 
   private requireReady(): void {
-    if (this.closed) throw new AxtpError(ErrorCode.TransportDisconnected, "session closed");
-    if (!this.ready) throw new AxtpError(ErrorCode.InvalidState, "session not ready");
+    if (this.sessionState === "closed")
+      throw new AxtpError(ErrorCode.TransportDisconnected, "session closed");
+    if (this.sessionState === "reconnecting")
+      throw new AxtpError(ErrorCode.TransportDisconnected, "session reconnecting");
+    if (this.sessionState !== "ready")
+      throw new AxtpError(ErrorCode.InvalidState, "session not ready");
   }
 
-  /** M4+M5：接收完整 CloseReason，统一清理所有资源 */
   private handleClose(reason: CloseReason): void {
-    if (this.closed) return;
-    this.closed = true;
-    this.ready = false;
+    if (this.sessionState === "closed") return;
+    this.setState("closed");
 
-    // 清理握手超时 timer
-    if (this.handshakeTimer !== undefined) {
-      clearTimeout(this.handshakeTimer);
-      this.handshakeTimer = undefined;
-    }
+    this.clearHandshakeTimer();
 
-    // 清理 pending + stream
     this.rpc.rejectAll(
       new AxtpError(ErrorCode.TransportDisconnected, `connection closed: ${reason.reason}`)
     );
     this.streamMgr.abortAll(`connection closed: ${reason.reason}`);
 
-    // M4：保留完整 CloseCode
-    this.onCloseStream.emit({
+    this.onClose.emit({
       code: reason.code,
       reason: reason.reason,
       remote: reason.remote
     });
 
-    // M5：统一关闭所有 EventStream
-    this.onReadyStream.close();
-    this.onCloseStream.close();
-    this.onReconnectStream.close();
-    this.onReconnectFailedStream.close();
-    this.onErrorStream.close();
+    // 关闭所有 EventStream
+    this.onReady.close();
+    this.onStateChange.close();
+    this.onClose.close();
+    this.onReconnect.close();
+    this.onReconnectFailed.close();
+    this.onError.close();
   }
 }

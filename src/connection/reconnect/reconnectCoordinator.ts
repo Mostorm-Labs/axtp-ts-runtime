@@ -4,8 +4,8 @@
 // 生命周期：start() → schedule() → attempt() → onReconnected(reset) → [链路ready] → notifySuccess()
 //   重连成功后必须调 reset()（把 active 设回 false），否则下次断连 start() 不生效（#4b 修复）。
 
-import type { ITransport, TransportFactory } from "../transport/transport.js";
-import { AxtpError, ErrorCode } from "../types/error.js";
+import type { ITransport, TransportFactory } from "../../transport/transport.js";
+import { AxtpError, ErrorCode } from "../../types/error.js";
 import { nextDelay, resolvePolicy, type ReconnectPolicy } from "./reconnect.js";
 
 export class ReconnectCoordinator {
