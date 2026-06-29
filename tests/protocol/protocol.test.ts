@@ -23,6 +23,7 @@ import {
   PayloadType,
   RpcOp
 } from "../../src/protocol/generated/axtp_ids_generated.js";
+import { AXTP_SPEC_VERSION } from "../../src/protocol/generated/axtpVersion.js";
 import type { Frame, Message } from "../../src/protocol/model.js";
 import { rpcPayload } from "../../src/protocol/model.js";
 import { Handshake } from "../../src/session/handshake/handshake.js";
@@ -171,7 +172,7 @@ describe("JSON-RPC codec", () => {
     expect(p).toBeDefined();
     if (p === undefined) return;
     expect(p.op).toBe(RpcOp.Hello);
-    expect(JSON.parse(new TextDecoder().decode(p.body)).axtpVersion).toBe("1.0.0");
+    expect(JSON.parse(new TextDecoder().decode(p.body)).axtpVersion).toBe(AXTP_SPEC_VERSION);
   });
 
   it("Identify 含 randomSeed + eventMasks", () => {

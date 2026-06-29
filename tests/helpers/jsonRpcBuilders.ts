@@ -1,12 +1,13 @@
 // 测试专用：构造 JSON-RPC envelope 字节的便捷函数（生产代码用 encodeJsonRpc）。
 
+import type { Bytes } from "../../src/io/bytes.js";
 import { toBytes } from "../../src/io/bytes.js";
-import { ErrorCode } from "../../src/types/error.js";
+import { encodeJsonRpc } from "../../src/protocol/codec/jsonRpc.js";
+import { AXTP_SPEC_VERSION } from "../../src/protocol/generated/axtpVersion.js";
 import { RpcOp } from "../../src/protocol/generated/axtp_ids_generated.js";
 import { rpcPayload } from "../../src/protocol/model.js";
-import { encodeJsonRpc } from "../../src/protocol/codec/jsonRpc.js";
+import { ErrorCode } from "../../src/types/error.js";
 import { registry } from "../../src/types/registry.js";
-import type { Bytes } from "../../src/io/bytes.js";
 
 export function buildRequestJson(
   requestId: number,
@@ -50,7 +51,9 @@ export function buildErrorResponseJson(requestId: number, code: ErrorCode, sid: 
 }
 
 export function buildHelloJson(): Bytes {
-  return toBytes(JSON.stringify({ sid: "", op: RpcOp.Hello, d: { axtpVersion: "1.0.0" } }));
+  return toBytes(
+    JSON.stringify({ sid: "", op: RpcOp.Hello, d: { axtpVersion: AXTP_SPEC_VERSION } })
+  );
 }
 
 export function buildIdentifyJson(randomSeed: number, eventMasks: string): Bytes {

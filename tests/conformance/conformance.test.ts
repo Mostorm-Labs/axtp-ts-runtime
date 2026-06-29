@@ -1,4 +1,5 @@
 // Conformance 必测 case 验证（spec/v0.11.0 的 core + websocket-jsonrpc level）。
+import { AXTP_SPEC_VERSION } from "../../src/protocol/generated/axtpVersion.js";
 // 逐个验证 runtime 的 wire 行为符合 conformance 期望。
 // 依据：conformance/manifest.yaml 的 required_cases + 各 case yaml 的 assertions。
 
@@ -131,7 +132,7 @@ describe("conformance: envelope 结构", () => {
     const obj = JSON.parse(new TextDecoder().decode(buildHelloJson()));
     expect(obj.sid).toBe("");
     expect(obj.op).toBe(0);
-    expect(obj.d.axtpVersion).toBe("1.0.0");
+    expect(obj.d.axtpVersion).toBe(AXTP_SPEC_VERSION);
   });
 
   it("Identify envelope: {sid:'', op:2, d:{randomSeed, eventMasks}}", () => {

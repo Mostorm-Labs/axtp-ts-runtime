@@ -1,4 +1,5 @@
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import type { CommonRegistryItem, Field, SpecModel } from "../models.js";
 import { cppName, hex, sortById, writeTextFile } from "../util.js";
 
@@ -155,6 +156,21 @@ export type EventId = (typeof EVENT_REGISTRY)[EventName]["id"];
 `;
 }
 
+// emitVersion: 产出 SDK 版本常量（从 package.json 的 version 字段生成）。
+// axtpVersion = SDK 版本（如 0.11.0），不是 spec 的 version.yaml 里的 spec.version（1.0.0）。
+function emitVersion(): string {
+  // 从 runtime package.json 读取版本（生成器位于 devtools/generators，runtime package.json 在上两级）
+  const runtimePkgPath = path.resolve(import.meta.dirname ?? __dirname, "../../../../package.json");
+  let version = "0.0.0";
+  try {
+    const pkg = JSON.parse(readFileSync(runtimePkgPath, "utf-8"));
+    version = pkg.version ?? version;
+  } catch {
+    // fallback：无法读取 package.json
+  }
+  return `${banner}// SDK 版本（从 package.json 的 version 生成，勿手改）\nexport const AXTP_SPEC_VERSION = "${version}";\n`;
+}
+
 export async function emitTs(spec: SpecModel, outDir: string): Promise<void> {
   await emitTsFiles(spec, path.join(outDir, "ts"));
 }
@@ -165,6 +181,7 @@ export async function emitTsFiles(spec: SpecModel, tsDir: string): Promise<void>
   await Promise.all([
     writeTextFile(path.join(tsDir, "axtp_ids_generated.ts"), emitIds(spec)),
     writeTextFile(path.join(tsDir, "schemas_generated.ts"), emitSchemas(spec)),
-    writeTextFile(path.join(tsDir, "registry.ts"), emitRegistryMap(spec))
+    writeTextFile(path.join(tsDir, "registry.ts"), emitRegistryMap(spec)),
+    writeTextFile(path.join(tsDir, "axtpVersion.ts"), emitVersion())
   ]);
 }

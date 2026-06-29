@@ -14,6 +14,7 @@
 import { bytesToText, toBytes, type Bytes } from "../../io/bytes.js";
 import { ErrorCode } from "../../types/error.js";
 import { registry } from "../../types/registry.js";
+import { AXTP_SPEC_VERSION } from "../generated/axtpVersion.js";
 import { RpcEncoding, RpcOp, rpcPayload, type RpcPayload } from "../model.js";
 
 type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
@@ -143,7 +144,7 @@ export function encodeJsonRpc(payload: RpcPayload): Bytes {
   switch (payload.op) {
     case RpcOp.Hello: {
       const body = safeParseObject(payload.body);
-      if (body.axtpVersion === undefined) body.axtpVersion = "1.0.0";
+      if (body.axtpVersion === undefined) body.axtpVersion = AXTP_SPEC_VERSION;
       return toBytes(JSON.stringify({ sid, op: payload.op, d: body }));
     }
     case RpcOp.Identify: {

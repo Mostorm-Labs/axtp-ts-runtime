@@ -9,6 +9,7 @@
 // Identified.d = {}（对齐 conformance；sid 在 envelope 外层）。
 
 import { decodeJsonBody, encodeJsonBody } from "../../protocol/codec/jsonRpc.js";
+import { AXTP_SPEC_VERSION } from "../../protocol/generated/axtpVersion.js";
 import type { RpcPayload } from "../../protocol/model.js";
 import { RpcOp, rpcPayload } from "../../protocol/model.js";
 import type { LogicalRole } from "../../transport/transport.js";
@@ -53,7 +54,7 @@ export class Handshake {
     return rpcPayload({
       op: RpcOp.Hello,
       jsonSid: "",
-      body: encodeJsonBody({ axtpVersion: "1.0.0" }),
+      body: encodeJsonBody({ axtpVersion: AXTP_SPEC_VERSION }),
       meta: {}
     });
   }
@@ -114,21 +115,12 @@ export class Handshake {
       // WS 模式下 Hello 可能在 LINK_CONNECTED 到达（无 CONTROL），直接推进。
       this.stateValue = "FRAMING_READY";
     }
-    // 校验 axtpVersion（spec:205 Hello.axtpVersion 是 spec compatibility authority）
-    const d = decodeJsonBody(payload.body) as { axtpVersion?: string } | undefined;
+    // 解析 Hello body（不校验 axtpVersion，接受任意版本）
+    const d = decodeJsonBody(payload.body);
     if (d === undefined) {
       return {
         becameReady: false,
         error: new AxtpError(ErrorCode.RpcPayloadInvalid, "invalid Hello body")
-      };
-    }
-    if (typeof d.axtpVersion === "string" && !d.axtpVersion.startsWith("1.")) {
-      return {
-        becameReady: false,
-        error: new AxtpError(
-          ErrorCode.ControlNegotiationFailed,
-          `unsupported axtpVersion: ${d.axtpVersion}`
-        )
       };
     }
     // client 回 Identify（带 randomSeed）
