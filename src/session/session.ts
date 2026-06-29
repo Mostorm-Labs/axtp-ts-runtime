@@ -53,8 +53,6 @@ export type {
   UntypedMethodHandler
 } from "./types.js";
 
-let nextSessionId = 1;
-
 export class AxtpSession {
   private conn: Connection;
 
@@ -80,13 +78,13 @@ export class AxtpSession {
   private readonly defaultTimeoutMs: number;
   private handshakeTimeoutMs: number;
   private handshakeTimer: ReturnType<typeof setTimeout> | undefined;
-  /** 公开 id（仅在创建它的 server/client 内有效，非全局唯一）。 */
-  readonly id: number;
+  /** 公开 id（简短随机字符串，仅在创建它的 server/client 内有效，非全局唯一）。 */
+  readonly id: string;
 
   constructor(transport: ITransport, config: SessionConfig) {
     const physicalRole = config.physicalRole ?? "client";
     this.defaultTimeoutMs = config.defaultTimeoutMs ?? 10000;
-    this.id = nextSessionId++;
+    this.id = Math.random().toString(36).slice(2, 10);
 
     // 构造 ConnectionOptions（不暴露 negotiationParams 等链路细节给用户）
     const connOptions: ConnectionOptions = {

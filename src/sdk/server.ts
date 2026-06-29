@@ -41,7 +41,7 @@ export interface ServerOptions {
 }
 
 export class AxtpServer {
-  private readonly sessions = new Map<number, AxtpSession>();
+  private readonly sessions = new Map<string, AxtpSession>();
   private readonly handlers = new HandlerRegistry();
   private readonly onConnectStream = new EventStream<AxtpSession>();
   private readonly onCloseStream = new EventStream<void>();
@@ -83,14 +83,14 @@ export class AxtpServer {
   }
 
   call<K extends MethodName>(
-    sessionId: number,
+    sessionId: string,
     method: K,
     params: MethodRequest<K>,
     options?: CallOptions
   ): Promise<MethodResponse<K>>;
-  call(sessionId: number, method: string, params: unknown, options?: CallOptions): Promise<unknown>;
+  call(sessionId: string, method: string, params: unknown, options?: CallOptions): Promise<unknown>;
   call(
-    sessionId: number,
+    sessionId: string,
     method: string,
     params: unknown,
     options?: CallOptions
@@ -146,7 +146,7 @@ export class AxtpServer {
     return [...this.sessions.values()];
   }
 
-  getSession(id: number): AxtpSession | undefined {
+  getSession(id: string): AxtpSession | undefined {
     return this.sessions.get(id);
   }
 
