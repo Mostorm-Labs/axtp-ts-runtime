@@ -13,12 +13,10 @@ export {
   type EventId,
   type EventName,
   type EventPayload,
-  type EventStatus,
   type MethodId,
   type MethodName,
   type MethodRequest,
-  type MethodResponse,
-  type MethodStatus
+  type MethodResponse
 } from "../protocol/generated/registry.js";
 
 /** 运行时 name<->id 双向查找表（O(1)）。 */

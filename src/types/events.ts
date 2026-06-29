@@ -7,7 +7,7 @@
 //
 // close() 后进入终态：后续 subscribe/emit 为 no-op，不可逆。
 
-export type Listener<T> = (value: T) => void;
+type Listener<T> = (value: T) => void;
 
 export class EventStream<T> {
   private readonly listeners = new Set<Listener<T>>();

@@ -127,15 +127,16 @@ export class Handshake {
       };
     }
     const helloObj = d as { axtpVersion?: string } | undefined;
+    // spec:205: axtpVersion 是 spec compatibility authority。缺失或非 string 或主版本非 1 都拒绝。
     if (
-      typeof helloObj?.axtpVersion === "string" &&
+      typeof helloObj?.axtpVersion !== "string" ||
       !helloObj.axtpVersion.startsWith("1.")
     ) {
       return {
         becameReady: false,
         error: new AxtpError(
           ErrorCode.ControlNegotiationFailed,
-          `unsupported axtpVersion: ${helloObj.axtpVersion}`
+          `unsupported or missing axtpVersion: ${helloObj?.axtpVersion ?? "(absent)"}`
         )
       };
     }

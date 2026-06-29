@@ -19,7 +19,7 @@ export interface ReconnectPolicy {
   resetBackoffOnSuccess?: boolean;
 }
 
-export const defaultReconnectPolicy: Required<ReconnectPolicy> = {
+const defaultReconnectPolicy: Required<ReconnectPolicy> = {
   enabled: false,
   initialDelayMs: 1000,
   maxDelayMs: 30000,

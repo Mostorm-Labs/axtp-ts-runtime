@@ -13,8 +13,6 @@ import type { Bytes } from "../../io/bytes.js";
 import { ByteReader, ByteWriter } from "../../io/io.js";
 import { ControlOpcode, controlPayload, RpcEncoding, type ControlPayload } from "../model.js";
 
-export const kControlPayloadHeaderSize = 5;
-
 /** ACK 模式常量。Phase1 固定 NONE=0。 */
 export const AckMode = { None: 0x00 } as const;
 
