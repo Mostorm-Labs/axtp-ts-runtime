@@ -134,10 +134,10 @@ export class AxtpSession {
     // arm 首次握手超时
     this.armHandshakeTimer();
 
-    // onReady Promise：握手完成 resolve；close 前 reject（若有人 await）。
-    // noop catch 防止 unhandled rejection（测试中 session close 但无人 await onReady）。
-    this.onReady = new Promise<void>((resolve, reject) => {
-      this.onReadyReject = reject;
+    // onReady Promise：握手完成 resolve。
+    // 生命周期通过 onClose 事件传达。
+    this.onReady = new Promise<void>((resolve) => {
+      this.onReadyResolve = resolve;
       this.onReadyStream.subscribe(() => {
         if (this.handshakeTimer !== undefined) {
           clearTimeout(this.handshakeTimer);
@@ -146,14 +146,13 @@ export class AxtpSession {
         resolve();
       });
     });
-    this.onReady.catch(() => {});
 
     this.conn.start();
   }
 
   // ===== 生命周期 =====
 
-  private onReadyReject?: (err: AxtpError) => void;
+  private onReadyResolve?: () => void;
   readonly onReady: Promise<void>;
 
   get onClose(): EventStream<SessionCloseInfo> {
@@ -356,7 +355,6 @@ export class AxtpSession {
   /** M4+M5：接收完整 CloseReason，统一清理所有资源 */
   private handleClose(reason: CloseReason): void {
     if (this.closed) return;
-    const wasReady = this.ready; // D6: 在置 false 前快照
     this.closed = true;
     this.ready = false;
 
@@ -371,13 +369,6 @@ export class AxtpSession {
       new AxtpError(ErrorCode.TransportDisconnected, `connection closed: ${reason.reason}`)
     );
     this.streamMgr.abortAll(`connection closed: ${reason.reason}`);
-
-    // D6: 仅在握手未完成时 reject onReady（用快照判断）
-    if (!wasReady && this.onReadyReject !== undefined) {
-      this.onReadyReject(
-        new AxtpError(ErrorCode.TransportDisconnected, "session closed before ready")
-      );
-    }
 
     // M4：保留完整 CloseCode
     this.onCloseStream.emit({

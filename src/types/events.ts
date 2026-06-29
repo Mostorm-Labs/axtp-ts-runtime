@@ -45,8 +45,13 @@ export class EventStream<T> {
     }
   }
 
-  /** 关闭流：清除所有订阅者。 */
+  /** 关闭流：清除所有订阅者。在 emit 期间延迟清除（与 unsubscribe 一致）。 */
   close(): void {
+    if (this.emitting) {
+      // 延迟到 emit 结束（避免 for...of 迭代 Set 时 clear() 导致迭代器失效崩溃）
+      for (const listener of this.listeners) this.pendingRemovals.push(listener);
+      return;
+    }
     this.listeners.clear();
     this.pendingRemovals.length = 0;
   }
