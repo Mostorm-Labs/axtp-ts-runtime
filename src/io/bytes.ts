@@ -24,14 +24,6 @@ export function concatBytes(chunks: readonly Bytes[]): Bytes {
   return out;
 }
 
-export function bytesEqual(lhs: Bytes, rhs: Bytes): boolean {
-  if (lhs.length !== rhs.length) return false;
-  for (let index = 0; index < lhs.length; index += 1) {
-    if (lhs[index] !== rhs[index]) return false;
-  }
-  return true;
-}
-
 export function hexToBytes(hex: string): Bytes {
   const normalized = hex.replace(/\s+/g, "");
   if (normalized.length % 2 !== 0) {

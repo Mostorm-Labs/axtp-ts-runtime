@@ -3,9 +3,8 @@
 // 断连/超时：rejectAll 让所有 pending call 失败（ConnectionClosed）。
 // requestId 为 uint32，从 1 递增、回绕。
 
-import { ErrorCode } from "../../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../../protocol/model.js";
-import { AxtpError } from "../../types/error.js";
+import { AxtpError, ErrorCode } from "../../types/error.js";
 
 interface PendingEntry {
   readonly resolve: (payload: RpcPayload) => void;

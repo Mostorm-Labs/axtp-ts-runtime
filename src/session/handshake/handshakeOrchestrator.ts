@@ -58,11 +58,6 @@ export class HandshakeOrchestrator {
     return this.handshake.state;
   }
 
-  /** 当前订阅的 eventMasks（重连时重新携带）。 */
-  getEventMasks(): string | undefined {
-    return this.handshake.eventMasks;
-  }
-
   static isHandshakeOp(op: RpcOp): boolean {
     return op === RpcOp.Hello || op === RpcOp.Identify || op === RpcOp.Identified;
   }

@@ -284,9 +284,3 @@ export class FrameEncoder {
     return writer.takeBytes();
   }
 }
-
-/** 便捷：把一个完整 message 编码为单个 frame 的字节（未分片）。 */
-export function encodeSingleFrame(message: Message): Bytes {
-  const fragmenter = new MessageFragmenter();
-  return new FrameEncoder().encode(fragmenter.fragment(message)[0]);
-}

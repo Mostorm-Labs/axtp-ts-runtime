@@ -3,14 +3,14 @@
 
 import {
   ControlOpcode,
-  ErrorCode,
   PayloadType,
   RpcBodyEncoding,
   RpcEncoding,
   RpcOp
 } from "../protocol/generated/axtp_ids_generated.js";
+import { ErrorCode } from "../types/error.js";
 
-export { ControlOpcode, ErrorCode, PayloadType, RpcBodyEncoding, RpcEncoding, RpcOp };
+export { ControlOpcode, PayloadType, RpcBodyEncoding, RpcEncoding, RpcOp };
 
 /** 标准 Frame header（12B）。 */
 export interface FrameHeader {
@@ -105,26 +105,7 @@ export function controlPayload(init: {
   return {
     opcode: init.opcode,
     controlId: init.controlId,
-    statusCode: init.statusCode ?? ErrorCode.Success,
+    statusCode: init.statusCode ?? 0,
     body: init.body ?? new Uint8Array()
   };
-}
-
-export function streamPayload(init: {
-  streamId: number;
-  seqId: number;
-  cursor: bigint;
-  data: Uint8Array;
-}): StreamPayload {
-  return {
-    streamId: init.streamId,
-    seqId: init.seqId,
-    cursor: init.cursor,
-    data: init.data
-  };
-}
-
-/** 空 meta。 */
-export function defaultPayloadMeta(): PayloadMeta {
-  return {};
 }

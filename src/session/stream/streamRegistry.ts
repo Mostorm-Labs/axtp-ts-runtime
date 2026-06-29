@@ -11,7 +11,6 @@ import { AxtpError, ErrorCode } from "../../types/error.js";
 export interface StreamChunkHandler {
   onChunk(data: Bytes, cursor: bigint): void;
   onClose(reason?: string): void;
-  onError(error: AxtpError): void;
 }
 
 export interface StreamContext {
@@ -29,38 +28,14 @@ export interface StreamContext {
   closed: boolean;
 }
 
-/** streamId 分配器：非零 uint32，避免与已知 streamId 冲突。 */
-export class StreamIdAllocator {
-  private next = 1;
-  private readonly inUse = new Set<number>();
-
-  allocate(): number {
-    while (this.inUse.has(this.next) || this.next === 0) {
-      this.next = this.next >= 0xffffffff ? 1 : this.next + 1;
-    }
-    const id = this.next;
-    this.inUse.add(id);
-    this.next = this.next >= 0xffffffff ? 1 : this.next + 1;
-    return id;
-  }
-
-  release(id: number): void {
-    this.inUse.delete(id);
-  }
-
-  markInUse(id: number): void {
-    if (id !== 0) this.inUse.add(id);
-  }
-}
-
 export class StreamRegistry {
   private readonly streams = new Map<number, StreamContext>();
-  private readonly allocator = new StreamIdAllocator();
+  private readonly inUse = new Set<number>();
 
   /** 对端分配的 streamId，本地 adopt 建收流 context（receive 方）。 */
   adopt(streamId: number): StreamContext {
     if (streamId === 0) throw new AxtpError(ErrorCode.StreamIdInvalid, "streamId must be non-zero");
-    this.allocator.markInUse(streamId);
+    this.inUse.add(streamId);
     const ctx: StreamContext = {
       streamId,
       direction: "receive",
@@ -101,7 +76,7 @@ export class StreamRegistry {
     ctx.closed = true;
     ctx.handler?.onClose(reason);
     this.streams.delete(streamId);
-    this.allocator.release(streamId);
+    this.inUse.delete(streamId);
   }
 
   /** teardown：释放所有 StreamContext（spec:253 MUST，断连/重连时）。 */

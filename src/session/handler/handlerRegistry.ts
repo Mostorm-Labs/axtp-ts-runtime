@@ -11,9 +11,11 @@ export class HandlerRegistry {
 
   setMethod(name: string, handler: UntypedMethodHandler): () => void {
     this.methodHandlers.set(name, handler);
-    return () => {
-      if (this.methodHandlers.get(name) === handler) this.methodHandlers.delete(name);
-    };
+    return () => this.removeMethod(name, handler);
+  }
+
+  removeMethod(name: string, handler: UntypedMethodHandler): void {
+    if (this.methodHandlers.get(name) === handler) this.methodHandlers.delete(name);
   }
 
   getMethod(name: string): UntypedMethodHandler | undefined {

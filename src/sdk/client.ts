@@ -49,10 +49,7 @@ export class AxtpClient {
 
   private readonly onConnectStream = new EventStream<void>();
   private readonly onDisconnectStream = new EventStream<SessionCloseInfo>();
-  private readonly onReconnectStream = new EventStream<{
-    attempt: number;
-    totalDowntimeMs: number;
-  }>();
+  private readonly onReconnectStream = new EventStream<{ attempt: number }>();
   private readonly onReconnectFailedStream = new EventStream<void>();
 
   constructor(
@@ -68,7 +65,7 @@ export class AxtpClient {
   get onDisconnect(): EventStream<SessionCloseInfo> {
     return this.onDisconnectStream;
   }
-  get onReconnect(): EventStream<{ attempt: number; totalDowntimeMs: number }> {
+  get onReconnect(): EventStream<{ attempt: number }> {
     return this.onReconnectStream;
   }
   get onReconnectFailed(): EventStream<void> {
@@ -85,7 +82,7 @@ export class AxtpClient {
 
   /** 首次连接。 */
   async connect(): Promise<void> {
-    if (this.connected) throw new Error("client already connected");
+    if (this.connected) throw new AxtpError(ErrorCode.InvalidState, "client already connected");
     const transport = await this.transport.connect();
     // Session 创建 Connection（SDK 不知 Connection）。
     // physicalRole/transportFactory 由 SDK 注入，不从 options 暴露。

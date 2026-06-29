@@ -8,12 +8,12 @@
 // sid = 8 位 hex，混合 randomSeed（禁直接当 sid，spec:207）。
 // Identified.d = {}（对齐 conformance；sid 在 envelope 外层）。
 
-import { bytesToText, toBytes } from "../../io/bytes.js";
-import { ErrorCode, RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
+import { decodeJsonBody, encodeJsonBody } from "../../protocol/codec/jsonRpc.js";
+import { RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../../protocol/model.js";
 import { rpcPayload } from "../../protocol/model.js";
 import type { LogicalRole } from "../../transport/transport.js";
-import { AxtpError } from "../../types/error.js";
+import { AxtpError, ErrorCode } from "../../types/error.js";
 
 export type SessionState = "LINK_CONNECTED" | "FRAMING_READY" | "APP_READY" | "CLOSING";
 
@@ -54,7 +54,7 @@ export class Handshake {
     return rpcPayload({
       op: RpcOp.Hello,
       jsonSid: "",
-      body: toBytes(JSON.stringify({ axtpVersion: "1.0.0" })),
+      body: encodeJsonBody({ axtpVersion: "1.0.0" }),
       meta: {}
     });
   }
@@ -126,21 +126,20 @@ export class Handshake {
       this.stateValue = "FRAMING_READY";
     }
     // 校验 axtpVersion（spec:205 Hello.axtpVersion 是 spec compatibility authority）
-    try {
-      const d = JSON.parse(bytesToText(payload.body)) as { axtpVersion?: string };
-      if (typeof d.axtpVersion === "string" && !d.axtpVersion.startsWith("1.")) {
-        return {
-          becameReady: false,
-          error: new AxtpError(
-            ErrorCode.ControlNegotiationFailed,
-            `unsupported axtpVersion: ${d.axtpVersion}`
-          )
-        };
-      }
-    } catch {
+    const d = decodeJsonBody(payload.body) as { axtpVersion?: string } | undefined;
+    if (d === undefined) {
       return {
         becameReady: false,
         error: new AxtpError(ErrorCode.RpcPayloadInvalid, "invalid Hello body")
+      };
+    }
+    if (typeof d.axtpVersion === "string" && !d.axtpVersion.startsWith("1.")) {
+      return {
+        becameReady: false,
+        error: new AxtpError(
+          ErrorCode.ControlNegotiationFailed,
+          `unsupported axtpVersion: ${d.axtpVersion}`
+        )
       };
     }
     // client 回 Identify（带 randomSeed + eventMasks）
@@ -150,7 +149,7 @@ export class Handshake {
     const identify = rpcPayload({
       op: RpcOp.Identify,
       jsonSid: "",
-      body: toBytes(JSON.stringify(body)),
+      body: encodeJsonBody(body),
       meta: { randomSeed, jsonEventMasks: this.eventMasksValue }
     });
     return { outbound: identify, becameReady: false };
@@ -161,28 +160,29 @@ export class Handshake {
     if (this.logicalRole !== "server") {
       return { becameReady: false };
     }
-    try {
-      const d = JSON.parse(bytesToText(payload.body)) as {
-        randomSeed?: number;
-        eventMasks?: string;
-      };
-      const randomSeed = typeof d.randomSeed === "number" ? d.randomSeed >>> 0 : 0;
-      this.eventMasksValue = typeof d.eventMasks === "string" ? d.eventMasks : "";
-      this.sidValue = this.generateSid(randomSeed);
-      const identified = rpcPayload({
-        op: RpcOp.Identified,
-        jsonSid: this.sidValue,
-        body: toBytes("{}"),
-        meta: {}
-      });
-      this.stateValue = "APP_READY";
-      return { outbound: identified, becameReady: true };
-    } catch {
+    const d = decodeJsonBody(payload.body) as
+      | {
+          randomSeed?: number;
+          eventMasks?: string;
+        }
+      | undefined;
+    if (d === undefined) {
       return {
         becameReady: false,
         error: new AxtpError(ErrorCode.RpcPayloadInvalid, "invalid Identify body")
       };
     }
+    const randomSeed = typeof d.randomSeed === "number" ? d.randomSeed >>> 0 : 0;
+    this.eventMasksValue = typeof d.eventMasks === "string" ? d.eventMasks : "";
+    this.sidValue = this.generateSid(randomSeed);
+    const identified = rpcPayload({
+      op: RpcOp.Identified,
+      jsonSid: this.sidValue,
+      body: encodeJsonBody({}),
+      meta: {}
+    });
+    this.stateValue = "APP_READY";
+    return { outbound: identified, becameReady: true };
   }
 
   private handleIdentified(payload: RpcPayload): HandshakeResult {

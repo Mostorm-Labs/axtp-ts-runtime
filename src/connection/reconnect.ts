@@ -35,13 +35,12 @@ export function nextDelay(policy: Required<ReconnectPolicy>, attempt: number): n
   const max = policy.maxDelayMs;
   const mult = policy.multiplier;
   const exp = Math.min(base * Math.pow(mult, attempt), max);
-  if (!policy.jitter) return exp;
-  return Math.floor(Math.random() * exp);
+  if (!policy.jitter) return Math.max(1, exp);
+  return Math.max(1, Math.floor(Math.random() * exp));
 }
 
 export interface ReconnectInfo {
   readonly attempt: number;
-  readonly totalDowntimeMs: number;
 }
 
 /** merge 用户 policy 与默认值。 */

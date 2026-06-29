@@ -42,14 +42,16 @@ export interface CloseReason {
   readonly remote: boolean;
 }
 
-export enum CloseCode {
-  Normal = 0,
-  TransportError = 1,
-  HeartbeatTimeout = 2,
-  HandshakeFailed = 3,
-  ProtocolError = 4,
-  Reconnect = 5
-}
+export const CloseCode = {
+  Normal: 0,
+  TransportError: 1,
+  HeartbeatTimeout: 2,
+  HandshakeFailed: 3,
+  ProtocolError: 4,
+  Reconnect: 5
+} as const;
+
+export type CloseCode = (typeof CloseCode)[keyof typeof CloseCode];
 
 /** 单条已建立连接的传输接口。 */
 export interface ITransport {

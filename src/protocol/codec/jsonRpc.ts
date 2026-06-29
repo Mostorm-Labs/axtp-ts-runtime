@@ -12,9 +12,10 @@
 // 注意：method/event 在 JSON 恒为字符串名（数字 id 仅 JSON_BINARY，本期不实现）。
 
 import { bytesToText, toBytes, type Bytes } from "../../io/bytes.js";
-import { ErrorCode, RpcEncoding, RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
+import { RpcEncoding, RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
+import { ErrorCode } from "../../types/error.js";
 import { registry } from "../../types/registry.js";
-import { defaultPayloadMeta, rpcPayload, type RpcPayload } from "../model.js";
+import { rpcPayload, type RpcPayload } from "../model.js";
 
 type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
 interface JsonObject {
@@ -70,7 +71,6 @@ export function decodeJsonRpc(text: Bytes | string): RpcPayload | undefined {
           jsonSid: sid,
           body: toBytes(JSON.stringify(d)),
           meta: {
-            ...defaultPayloadMeta(),
             jsonEventMasks: typeof d.eventMasks === "string" ? d.eventMasks : undefined
           }
         });
@@ -81,27 +81,27 @@ export function decodeJsonRpc(text: Bytes | string): RpcPayload | undefined {
           op,
           jsonSid: sid,
           body: toBytes(JSON.stringify(d)),
-          meta: { ...defaultPayloadMeta(), randomSeed, jsonEventMasks: eventMasks }
+          meta: { randomSeed, jsonEventMasks: eventMasks }
         });
       }
       case RpcOp.Identified:
         // Identified.d = {}（对齐 conformance）。sid 在外层。
-        return rpcPayload({ op, jsonSid: sid, body: toBytes("{}"), meta: defaultPayloadMeta() });
+        return rpcPayload({ op, jsonSid: sid, body: toBytes("{}"), meta: {} });
       case RpcOp.Event: {
         const eventName = typeof d.event === "string" ? d.event : "";
-        const eventId = eventName ? (registry.eventId(eventName as never) ?? 0) : 0;
+        const eventId = eventName ? (registry.eventId(eventName) ?? 0) : 0;
         return rpcPayload({
           op,
           methodOrEventId: eventId,
           jsonSid: sid,
           body: toBytes(JSON.stringify(d.data ?? {})),
-          meta: { ...defaultPayloadMeta(), jsonMethodOrEventName: eventName }
+          meta: { jsonMethodOrEventName: eventName }
         });
       }
       case RpcOp.Request: {
         const requestId = parseRequestIdFromEnvelope(object);
         const methodName = typeof d.method === "string" ? d.method : "";
-        const methodId = methodName ? (registry.methodId(methodName as never) ?? 0) : 0;
+        const methodId = methodName ? (registry.methodId(methodName) ?? 0) : 0;
         const params = d.params;
         return rpcPayload({
           op,
@@ -109,7 +109,7 @@ export function decodeJsonRpc(text: Bytes | string): RpcPayload | undefined {
           methodOrEventId: methodId,
           jsonSid: sid,
           body: params === undefined ? toBytes("{}") : toBytes(JSON.stringify(params)),
-          meta: { ...defaultPayloadMeta(), jsonMethodOrEventName: methodName }
+          meta: { jsonMethodOrEventName: methodName }
         });
       }
       case RpcOp.RequestResponse: {
@@ -122,7 +122,7 @@ export function decodeJsonRpc(text: Bytes | string): RpcPayload | undefined {
           statusCode: status as ErrorCode,
           jsonSid: sid,
           body: result === undefined ? new Uint8Array() : toBytes(JSON.stringify(result)),
-          meta: defaultPayloadMeta()
+          meta: {}
         });
       }
       default:
@@ -130,7 +130,7 @@ export function decodeJsonRpc(text: Bytes | string): RpcPayload | undefined {
           op,
           jsonSid: sid,
           body: toBytes(JSON.stringify(d)),
-          meta: defaultPayloadMeta()
+          meta: {}
         });
     }
   } catch {
@@ -187,67 +187,6 @@ export function encodeJsonRpc(payload: RpcPayload): Bytes {
   }
 }
 
-/** 构造 Request envelope 字节（便捷）。 */
-export function buildRequestJson(
-  requestId: number,
-  methodName: string,
-  params: unknown,
-  sid: string
-): Bytes {
-  return encodeJsonRpc(
-    rpcPayload({
-      op: RpcOp.Request,
-      requestId,
-      methodOrEventId: registry.methodId(methodName as never) ?? 0,
-      jsonSid: sid,
-      body: toBytes(JSON.stringify(params ?? {})),
-      meta: { jsonMethodOrEventName: methodName }
-    })
-  );
-}
-
-/** 构造 Response envelope 字节（成功）。 */
-export function buildResponseJson(requestId: number, result: unknown, sid: string): Bytes {
-  return encodeJsonRpc(
-    rpcPayload({
-      op: RpcOp.RequestResponse,
-      requestId,
-      statusCode: ErrorCode.Success,
-      jsonSid: sid,
-      body: toBytes(JSON.stringify(result ?? {}))
-    })
-  );
-}
-
-/** 构造 Error Response envelope 字节。 */
-export function buildErrorResponseJson(requestId: number, code: ErrorCode, sid: string): Bytes {
-  return encodeJsonRpc(
-    rpcPayload({
-      op: RpcOp.RequestResponse,
-      requestId,
-      statusCode: code,
-      jsonSid: sid
-    })
-  );
-}
-
-/** 构造 Hello envelope 字节。 */
-export function buildHelloJson(): Bytes {
-  return toBytes(JSON.stringify({ sid: "", op: RpcOp.Hello, d: { axtpVersion: "1.0.0" } }));
-}
-
-/** 构造 Identify envelope 字节。 */
-export function buildIdentifyJson(randomSeed: number, eventMasks: string): Bytes {
-  const d: JsonObject = { randomSeed: randomSeed >>> 0 };
-  if (eventMasks) d.eventMasks = eventMasks;
-  return toBytes(JSON.stringify({ sid: "", op: RpcOp.Identify, d }));
-}
-
-/** 构造 Identified envelope 字节（d = {}）。 */
-export function buildIdentifiedJson(sid: string): Bytes {
-  return toBytes(JSON.stringify({ sid, op: RpcOp.Identified, d: {} }));
-}
-
 function safeParse(body: Bytes): JsonValue | undefined {
   if (body.length === 0) return undefined;
   try {
@@ -261,6 +200,21 @@ function safeParseObject(body: Bytes): JsonObject {
   const v = safeParse(body);
   if (v === null || typeof v !== "object" || Array.isArray(v)) return {};
   return v as JsonObject;
+}
+
+/** 编码 JSON body（统一入口，避免 session 层内联 TextEncoder）。 */
+export function encodeJsonBody(value: unknown): Bytes {
+  return toBytes(JSON.stringify(value ?? {}));
+}
+
+/** 解码 JSON body（统一入口，避免 session 层内联 TextDecoder）。解析失败返回 undefined。 */
+export function decodeJsonBody(body: Bytes): unknown {
+  if (body.length === 0) return {};
+  try {
+    return JSON.parse(bytesToText(body));
+  } catch {
+    return undefined;
+  }
 }
 
 export { RpcEncoding };

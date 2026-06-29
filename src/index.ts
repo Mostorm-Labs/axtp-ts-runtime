@@ -43,7 +43,6 @@ export {
 
 // 错误
 export { AxtpError, connectionClosedError, ErrorCode, notReadyError } from "./types/error.js";
-export type { AxtpErrorOptions } from "./types/error.js";
 
 // 事件流
 export { EventStream } from "./types/events.js";

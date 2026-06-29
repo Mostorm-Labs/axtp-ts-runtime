@@ -31,8 +31,8 @@ import type {
   EventHandler,
   MethodHandler,
   SessionCloseInfo,
+  SessionConfig,
   SessionIO,
-  SessionOptions,
   UntypedEventHandler,
   UntypedMethodHandler
 } from "./types.js";
@@ -45,6 +45,8 @@ export type {
   GlobalHandlerSource,
   MethodHandler,
   SessionCloseInfo,
+  SessionConfig,
+  SessionInternalConfig,
   SessionOptions,
   UntypedEventHandler,
   UntypedMethodHandler
@@ -68,7 +70,6 @@ export class AxtpSession {
   private readonly onCloseStream = new EventStream<SessionCloseInfo>();
   private readonly onReconnectStream = new EventStream<{
     attempt: number;
-    totalDowntimeMs: number;
   }>();
   private readonly onReconnectFailedStream = new EventStream<void>();
   private readonly onErrorStream = new EventStream<AxtpError>();
@@ -80,20 +81,20 @@ export class AxtpSession {
   /** 公开 id（仅在创建它的 server/client 内有效，非全局唯一）。 */
   readonly id: number;
 
-  constructor(transport: ITransport, options: SessionOptions = {}) {
-    const physicalRole = options.physicalRole ?? "client";
-    const logicalRole = options.logicalRole ?? "server";
-    this.defaultTimeoutMs = options.defaultTimeoutMs ?? 10000;
+  constructor(transport: ITransport, config: SessionConfig = {}) {
+    const physicalRole = config.physicalRole ?? "client";
+    const logicalRole = config.logicalRole ?? "server";
+    this.defaultTimeoutMs = config.defaultTimeoutMs ?? 10000;
     this.id = nextSessionId++;
 
     // 构造 ConnectionOptions（不暴露 negotiationParams 等链路细节给用户）
     const connOptions: ConnectionOptions = {
-      heartbeatIntervalMs: options.heartbeatIntervalMs,
-      heartbeatTimeoutMs: options.heartbeatTimeoutMs,
-      maxFrameSize: options.maxFrameSize,
-      reconnect: options.reconnect
+      heartbeatIntervalMs: config.heartbeatIntervalMs,
+      heartbeatTimeoutMs: config.heartbeatTimeoutMs,
+      maxFrameSize: config.maxFrameSize,
+      reconnect: config.reconnect
     };
-    this.conn = new Connection(physicalRole, transport, connOptions, options.transportFactory);
+    this.conn = new Connection(physicalRole, transport, connOptions, config.transportFactory);
 
     // SessionIO：子组件通过此发送（转发到 Connection）
     this.io = {
@@ -103,8 +104,8 @@ export class AxtpSession {
     };
 
     // 子组件
-    this.router = new HandlerRouter(options.globalHandlers);
-    this.handshakeOrch = new HandshakeOrchestrator(logicalRole, this.io, options.handshakeSeed);
+    this.router = new HandlerRouter(config.globalHandlers);
+    this.handshakeOrch = new HandshakeOrchestrator(logicalRole, this.io, config.handshakeSeed);
     this.rpc = new RpcExchange(
       this.io,
       this.router,
@@ -123,7 +124,7 @@ export class AxtpSession {
     this.conn.onError.subscribe((err) => this.onErrorStream.emit(err));
 
     // H3：握手超时（防止 onReady 永不 resolve）
-    const timeoutMs = options.handshakeTimeoutMs ?? 15000;
+    const timeoutMs = config.handshakeTimeoutMs ?? 15000;
     this.handshakeTimer = setTimeout(() => {
       if (!this.ready && !this.closed) {
         this.handleClose({
@@ -164,7 +165,7 @@ export class AxtpSession {
     return this.onErrorStream;
   }
 
-  get onReconnect(): EventStream<{ attempt: number; totalDowntimeMs: number }> {
+  get onReconnect(): EventStream<{ attempt: number }> {
     return this.onReconnectStream;
   }
 
@@ -258,12 +259,13 @@ export class AxtpSession {
   onStream(
     method: string,
     handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>,
-    _onStreamReady?: (stream: Stream) => void
+    onStreamReady?: (stream: Stream) => void
   ): () => void {
     return this.handle(method, (async (ctx: unknown, params: unknown) => {
-      const { result } = await this.streamMgr.wrapStreamHandler(async (p) =>
+      const { result, stream } = await this.streamMgr.wrapStreamHandler(async (p) =>
         handler(ctx as CallContext, p)
       )(ctx, params);
+      onStreamReady?.(stream);
       return result;
     }) as UntypedMethodHandler);
   }
@@ -311,7 +313,7 @@ export class AxtpSession {
   private handleReconnect(_attempt: number): void {
     this.ready = false;
     this.handshakeOrch.reset();
-    this.onReconnectStream.emit({ attempt: _attempt, totalDowntimeMs: 0 });
+    this.onReconnectStream.emit({ attempt: _attempt });
   }
 
   private makeCallContext(requestId: number): CallContext {

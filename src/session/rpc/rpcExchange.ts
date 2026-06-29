@@ -2,11 +2,11 @@
 // 持有 RpcDispatcher（pending call Promise 匹配）。
 // 通过 SessionIO 发送，通过 HandlerRouter 路由入站。
 
-import { bytesToText, toBytes } from "../../io/bytes.js";
-import { ErrorCode, RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
+import { decodeJsonBody, encodeJsonBody } from "../../protocol/codec/jsonRpc.js";
+import { RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../../protocol/model.js";
 import { rpcPayload } from "../../protocol/model.js";
-import { AxtpError } from "../../types/error.js";
+import { AxtpError, ErrorCode } from "../../types/error.js";
 import { registry } from "../../types/registry.js";
 import type { HandlerRouter } from "../handler/handlerRouter.js";
 import type { CallContext, SessionIO } from "../types.js";
@@ -24,14 +24,14 @@ export class RpcExchange {
 
   /** 发起 call。 */
   call(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
-    const methodId = registry.methodId(method as never) ?? 0;
+    const methodId = registry.methodId(method) ?? 0;
     const { requestId, promise } = this.dispatcher.request((id) => {
       const rpc = rpcPayload({
         op: RpcOp.Request,
         requestId: id,
         methodOrEventId: methodId,
         jsonSid: this.getSid(),
-        body: toBytes(JSON.stringify(params ?? {})),
+        body: encodeJsonBody(params),
         meta: { jsonMethodOrEventName: method }
       });
       this.io.sendRpc(rpc);
@@ -47,9 +47,8 @@ export class RpcExchange {
         );
       }
       if (payload.body.length === 0) return undefined;
-      try {
-        return JSON.parse(bytesToText(payload.body));
-      } catch {
+      const decoded = decodeJsonBody(payload.body);
+      if (decoded === undefined) {
         throw new AxtpError(
           ErrorCode.RpcPayloadInvalid,
           `call ${method} response parse failed`,
@@ -57,17 +56,18 @@ export class RpcExchange {
           requestId
         );
       }
+      return decoded;
     });
   }
 
   /** 发起 emit（事件发送）。 */
   emitEvent(event: string, payload: unknown): Promise<void> {
-    const eventId = registry.eventId(event as never) ?? 0;
+    const eventId = registry.eventId(event) ?? 0;
     const rpc = rpcPayload({
       op: RpcOp.Event,
       methodOrEventId: eventId,
       jsonSid: this.getSid(),
-      body: toBytes(JSON.stringify(payload ?? {})),
+      body: encodeJsonBody(payload),
       meta: { jsonMethodOrEventName: event }
     });
     this.io.sendRpc(rpc);
@@ -97,10 +97,8 @@ export class RpcExchange {
       return;
     }
 
-    let params: unknown;
-    try {
-      params = payload.body.length === 0 ? {} : JSON.parse(bytesToText(payload.body));
-    } catch {
+    const params = decodeJsonBody(payload.body);
+    if (params === undefined) {
       this.io.sendRpc(
         rpcPayload({
           op: RpcOp.RequestResponse,
@@ -122,7 +120,7 @@ export class RpcExchange {
               requestId: payload.requestId,
               statusCode: ErrorCode.Success,
               jsonSid: this.getSid(),
-              body: toBytes(JSON.stringify(result ?? {}))
+              body: encodeJsonBody(result)
             })
           );
         },
@@ -145,12 +143,8 @@ export class RpcExchange {
     const eventName = payload.meta.jsonMethodOrEventName ?? "";
     const handlers = this.router.getEventHandlers(eventName);
     if (handlers.size === 0) return;
-    let data: unknown;
-    try {
-      data = payload.body.length === 0 ? {} : JSON.parse(bytesToText(payload.body));
-    } catch {
-      return;
-    }
+    const data = decodeJsonBody(payload.body);
+    if (data === undefined) return;
     for (const handler of handlers) {
       try {
         handler(data);

@@ -49,26 +49,34 @@ export type MethodHandler<K extends MethodName> = (
 export type EventHandler<K extends EventName> = (payload: EventPayload<K>) => void;
 
 /**
- * Session 选项（不继承 ConnectionOptions，避免连接层参数泄漏到用户 API）。
- * 连接参数在此内联声明，Session 内部构造 ConnectionOptions 传递。
+ * Session 选项——用户可见部分（不含 SDK 内部注入字段）。
  */
 export interface SessionOptions {
-  // === 连接参数（透传给 Connection，但不暴露 negotiationParams 等链路细节） ===
+  // === 连接参数（透传给 Connection） ===
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
   maxFrameSize?: number;
   reconnect?: ReconnectPolicy;
 
   // === 会话语义 ===
-  physicalRole?: PhysicalRole;
   logicalRole?: LogicalRole;
   defaultTimeoutMs?: number;
   /** 握手超时 ms（超时后 onReady reject + close）。 */
   handshakeTimeoutMs?: number;
+}
+
+/**
+ * Session 内部配置——SDK 层注入（不暴露给最终用户）。
+ */
+export interface SessionInternalConfig {
+  physicalRole?: PhysicalRole;
   globalHandlers?: GlobalHandlerSource;
   transportFactory?: TransportFactory;
   handshakeSeed?: number;
 }
+
+/** Session 完整配置 = 用户选项 + 内部配置。 */
+export type SessionConfig = SessionOptions & SessionInternalConfig;
 
 /** Session 关闭信息（保留 CloseCode）。 */
 export interface SessionCloseInfo {

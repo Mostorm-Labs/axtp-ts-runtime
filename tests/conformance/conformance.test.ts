@@ -3,6 +3,11 @@
 // 依据：conformance/manifest.yaml 的 required_cases + 各 case yaml 的 assertions。
 
 import { describe, expect, it } from "vitest";
+import { RpcOp } from "../../src/protocol/generated/axtp_ids_generated.js";
+import { AxtpSession } from "../../src/session/session.js";
+import { createMockTransportPair } from "../../src/transport/mock/mockTransport.js";
+import { unframedJsonCapabilities } from "../../src/transport/transport.js";
+import { ErrorCode } from "../../src/types/error.js";
 import {
   buildErrorResponseJson,
   buildHelloJson,
@@ -10,11 +15,7 @@ import {
   buildIdentifyJson,
   buildRequestJson,
   buildResponseJson
-} from "../../src/protocol/codec/jsonRpc.js";
-import { ErrorCode, RpcOp } from "../../src/protocol/generated/axtp_ids_generated.js";
-import { AxtpSession } from "../../src/session/session.js";
-import { createMockTransportPair } from "../../src/transport/mock/mockTransport.js";
-import { unframedJsonCapabilities } from "../../src/transport/transport.js";
+} from "../helpers/jsonRpcBuilders.js";
 
 async function makePair(): Promise<{ client: AxtpSession; server: AxtpSession }> {
   const { left, right } = createMockTransportPair(unframedJsonCapabilities());

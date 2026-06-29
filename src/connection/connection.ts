@@ -40,7 +40,8 @@ import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import { ControlSession, type NegotiatedLink } from "./controlSession.js";
 import { Heartbeat } from "./heartbeat.js";
-import { nextDelay, resolvePolicy, type ReconnectInfo, type ReconnectPolicy } from "./reconnect.js";
+import { resolvePolicy, type ReconnectInfo, type ReconnectPolicy } from "./reconnect.js";
+import { ReconnectCoordinator } from "./reconnectCoordinator.js";
 
 export interface ConnectionOptions {
   heartbeatIntervalMs?: number;
@@ -49,78 +50,6 @@ export interface ConnectionOptions {
   maxFrameSize?: number;
   /** 传输重连策略（仅 client 场景，需 transportFactory）。 */
   reconnect?: ReconnectPolicy;
-}
-
-/**
- * ReconnectCoordinator：传输重连编排（退避 + transportFactory + 链路重建触发）。
- * 失败时 emit onError 通知上层，成功时通过 onReconnected 回调重建 pipeline。
- */
-class ReconnectCoordinator {
-  private attempts = 0;
-  private timer: ReturnType<typeof setTimeout> | undefined;
-  private active = false;
-
-  constructor(
-    private readonly policy: ReturnType<typeof resolvePolicy>,
-    private readonly transportFactory: TransportFactory,
-    private readonly onReconnected: (transport: ITransport) => void,
-    private readonly onSuccess: () => void,
-    private readonly onFailed: () => void,
-    private readonly onError: (err: AxtpError) => void
-  ) {}
-
-  start(): void {
-    if (this.active) return;
-    this.active = true;
-    this.schedule();
-  }
-
-  stop(): void {
-    this.active = false;
-    if (this.timer !== undefined) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
-  }
-
-  get attemptCount(): number {
-    return this.attempts;
-  }
-
-  private schedule(): void {
-    if (!this.active) return;
-    if (this.attempts >= this.policy.maxAttempts) {
-      this.active = false;
-      this.onFailed();
-      return;
-    }
-    const delay = nextDelay(this.policy, this.attempts);
-    this.attempts += 1;
-    this.timer = setTimeout(() => {
-      this.attempt().catch((err) => {
-        // 重连尝试失败：通知 onError，继续退避
-        this.onError(
-          err instanceof AxtpError
-            ? err
-            : new AxtpError(ErrorCode.TransportDisconnected, `reconnect attempt failed: ${err}`)
-        );
-        if (this.active) this.schedule();
-      });
-    }, delay);
-  }
-
-  private async attempt(): Promise<void> {
-    const transport = await this.transportFactory();
-    if (!this.active) return;
-    this.onReconnected(transport);
-  }
-
-  /** 重连成功后调用（Connection 重建 pipeline 后调此重置退避）。 */
-  notifySuccess(): void {
-    if (this.policy.resetBackoffOnSuccess) {
-      this.attempts = 0;
-    }
-  }
 }
 
 export class Connection {
@@ -143,7 +72,7 @@ export class Connection {
   private reconnectCoordinator: ReconnectCoordinator | undefined;
 
   // framed-binary 编解码流水线（WS 模式不使用）。重连时重建。
-  private frameDecoder!: FrameDecoder;
+  private frameDecoder?: FrameDecoder;
   private fragmenter: MessageFragmenter;
   private readonly frameEncoder = new FrameEncoder();
 
@@ -171,13 +100,15 @@ export class Connection {
     // 重连协调器（仅当有 transportFactory 且 policy.enabled）
     const policy = resolvePolicy(options.reconnect);
     if (policy.enabled && transportFactory !== undefined) {
-      this.reconnectCoordinator = new ReconnectCoordinator(
-        policy,
+      this.reconnectCoordinator = ReconnectCoordinator.fromPolicy(
+        options.reconnect,
         transportFactory,
-        (newTransport) => this.handleReconnected(newTransport),
-        () => this.handleReconnectSuccess(),
-        () => this.handleReconnectFailed(),
-        (err) => this.onError.emit(err)
+        {
+          onReconnected: (newTransport) => this.handleReconnected(newTransport),
+          onSuccess: () => this.handleReconnectSuccess(),
+          onFailed: () => this.handleReconnectFailed(),
+          onError: (err) => this.onError.emit(err)
+        }
       );
     }
 
@@ -355,7 +286,7 @@ export class Connection {
 
     // 先 emit onReconnect，让 Session reset 握手（必须在 fireLinkReady/onLinkReady 之前）
     const attempt = this.reconnectCoordinator?.attemptCount ?? 0;
-    this.onReconnect.emit({ attempt, totalDowntimeMs: 0 });
+    this.onReconnect.emit({ attempt });
 
     // attachTransport 会 detach 旧 transport + 订阅新 transport + 建 codec pipeline
     this.attachTransport(newTransport);
@@ -393,7 +324,7 @@ export class Connection {
   private onTransportBytes(bytes: Bytes): void {
     if (this.closed) return;
     if (this.capabilities.supportsControl) {
-      this.frameDecoder.onBytes(bytes);
+      this.frameDecoder?.onBytes(bytes);
     } else {
       const payload = decodeJsonRpc(bytes);
       if (payload !== undefined) this.onPayload.emit(payload);
@@ -436,9 +367,12 @@ export class Connection {
       });
       t.onKeepaliveAck?.(() => this.heartbeat?.reset());
     } else {
-      // M8：两种心跳能力都不支持，告警（连接挂死时无法检测）
-      console.warn(
-        "[AXTP] Transport supports neither CONTROL heartbeat nor native keepalive; connection may hang silently"
+      // 两种心跳能力都不支持：通过 onError 上报（库代码不应用 console）
+      this.onError.emit(
+        new AxtpError(
+          ErrorCode.NotSupported,
+          "Transport supports neither CONTROL heartbeat nor native keepalive; connection may hang silently"
+        )
       );
     }
     this.heartbeat?.start();

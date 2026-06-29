@@ -15,8 +15,9 @@ import {
   encodeReject,
   type NegotiationParams
 } from "../protocol/codec/control.js";
-import { ControlOpcode, ErrorCode } from "../protocol/generated/axtp_ids_generated.js";
+import { ControlOpcode } from "../protocol/generated/axtp_ids_generated.js";
 import type { PhysicalRole } from "../transport/transport.js";
+import { ErrorCode } from "../types/error.js";
 
 export interface NegotiatedLink {
   readonly maxFrameSize: number;

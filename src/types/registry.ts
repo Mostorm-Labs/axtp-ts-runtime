@@ -3,8 +3,8 @@
 // handler 表按 name 索引——规避 method id 与 event id 共享同一数字空间
 // （0x0901 既是 audio.getAlgorithmConfig 方法又是 audio.algorithmConfigChanged 事件）。
 
-import { EVENT_REGISTRY, METHOD_REGISTRY } from "../protocol/generated/registry.js";
 import type { EventName, MethodName } from "../protocol/generated/registry.js";
+import { EVENT_REGISTRY, METHOD_REGISTRY } from "../protocol/generated/registry.js";
 
 export {
   EVENT_REGISTRY,
@@ -66,16 +66,16 @@ class RegistryIndex {
     }
   }
 
-  methodId(name: MethodName): number | undefined {
-    return this.methodNameToId.get(name);
+  methodId(name: string): number | undefined {
+    return this.methodNameToId.get(name as MethodName);
   }
 
   methodName(id: number): MethodName | undefined {
     return this.methodIdToName.get(id);
   }
 
-  eventId(name: EventName): number | undefined {
-    return this.eventNameToId.get(name);
+  eventId(name: string): number | undefined {
+    return this.eventNameToId.get(name as EventName);
   }
 
   eventName(id: number): EventName | undefined {

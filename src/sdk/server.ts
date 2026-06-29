@@ -12,6 +12,7 @@ import {
   type UntypedMethodHandler
 } from "../session/session.js";
 import type { IServerTransport, ITransport, LogicalRole } from "../transport/transport.js";
+import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {
   EventName,
@@ -96,7 +97,8 @@ export class AxtpServer {
     options?: CallOptions
   ): Promise<unknown> {
     const session = this.sessions.get(sessionId);
-    if (session === undefined) return Promise.reject(new Error(`session ${sessionId} not found`));
+    if (session === undefined)
+      return Promise.reject(new AxtpError(ErrorCode.NotFound, `session ${sessionId} not found`));
     return session.call(method, params, options);
   }
 

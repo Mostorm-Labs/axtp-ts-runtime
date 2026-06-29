@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ErrorCode } from "../../src/protocol/generated/axtp_ids_generated.js";
 import { AxtpSession } from "../../src/session/session.js";
 import { createMockTransportPair } from "../../src/transport/mock/mockTransport.js";
 import {
   framedBinaryCapabilities,
   unframedJsonCapabilities
 } from "../../src/transport/transport.js";
+import { ErrorCode } from "../../src/types/error.js";
 
 function settle(ms = 20): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -61,14 +61,14 @@ describe("AxtpSession 握手 + 双向 RPC（WS 模式）", () => {
     expect(result).toEqual({ echo: "hi" });
   });
 
-  it("call 超时 -> RpcResponseTimeout", async () => {
-    const { client } = await makePair("ws");
-    // server 未注册 handler，但 method_not_found 会立即返回——所以用一个有 handler 但不返回的。
-    // 改用直接断言：未注册方法立即返回 method_not_found，不是超时。
-    // 超时测试：mock 一个永不响应的场景需要更复杂的 stub，此处验证超时配置生效即可。
-    await expect(client.call("vendor.never", {}, { timeoutMs: 50 })).rejects.toMatchObject({
-      code: ErrorCode.RpcMethodNotFound
-    });
+  it("call 超时 -> RpcResponseTimeout（server handler 不返回）", async () => {
+    const { client, server } = await makePair("ws");
+    // server 注册 handler 但永不 resolve（模拟慢响应）
+    server.handle("audio.getAlgorithmConfig", () => new Promise(() => {}));
+    // client 用短 timeout 调用，应 reject RpcResponseTimeout
+    await expect(
+      client.call("audio.getAlgorithmConfig", {}, { timeoutMs: 50 })
+    ).rejects.toMatchObject({ code: ErrorCode.RpcResponseTimeout });
   });
 });
 

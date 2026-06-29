@@ -16,15 +16,7 @@ import {
   MessageFragmenter,
   MessageReassembler
 } from "../../src/protocol/codec/frame.js";
-import {
-  buildErrorResponseJson,
-  buildHelloJson,
-  buildIdentifiedJson,
-  buildIdentifyJson,
-  buildRequestJson,
-  buildResponseJson,
-  decodeJsonRpc
-} from "../../src/protocol/codec/jsonRpc.js";
+import { decodeJsonRpc } from "../../src/protocol/codec/jsonRpc.js";
 import { decodeStream, encodeStream, kStreamHeaderSize } from "../../src/protocol/codec/stream.js";
 import {
   ControlOpcode,
@@ -36,6 +28,14 @@ import { rpcPayload } from "../../src/protocol/model.js";
 import { Handshake } from "../../src/session/handshake/handshake.js";
 import { RpcDispatcher } from "../../src/session/rpc/rpcDispatcher.js";
 import { AxtpError, ErrorCode } from "../../src/types/error.js";
+import {
+  buildErrorResponseJson,
+  buildHelloJson,
+  buildIdentifiedJson,
+  buildIdentifyJson,
+  buildRequestJson,
+  buildResponseJson
+} from "../helpers/jsonRpcBuilders.js";
 
 describe("CONTROL codec 6 TLV", () => {
   it("OPEN 编码含全部必需 TLV 且可解码", () => {

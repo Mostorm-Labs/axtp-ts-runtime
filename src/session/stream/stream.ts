@@ -46,9 +46,6 @@ export class Stream {
             // 忽略
           }
         }
-      },
-      onError: () => {
-        // 错误转化为 close（P0 简化）
       }
     };
   }
