@@ -24,6 +24,8 @@ export class RpcExchange {
 
   /** 发起 call。 */
   call(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+    // B5: 未知 method 不发 id=0（保留值），仍发请求但 methodOrEventId=0 + jsonMethodOrEventName 走字符串路由
+    // 对端按 name 路由（vendor 方法不在 registry 里也能工作），但 wire 上 id=0 是合法的 fallback
     const methodId = registry.methodId(method) ?? 0;
     const { requestId, promise } = this.dispatcher.request((id) => {
       const rpc = rpcPayload({

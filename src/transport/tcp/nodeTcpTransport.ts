@@ -133,16 +133,21 @@ export class NodeTcpClientTransport implements IClientTransport {
   connect(): Promise<ITransport> {
     if (!this.available) return Promise.reject(new AxtpError(ErrorCode.Unavailable, "transport unavailable"));
     return new Promise((resolve, reject) => {
+      let settled = false; // B3: resolve/reject 互斥
       const socket = net.createConnection(
         { host: this.options.host ?? "127.0.0.1", port: this.options.port },
         () => {
+          if (settled) return;
+          settled = true;
           const transport = new TcpTransport(socket);
           transport.onClose.subscribe(() => this.onClose.emit(undefined));
           resolve(transport);
         }
       );
       socket.once("error", (err) => {
-        if (!socket.destroyed) reject(err);
+        if (settled) return;
+        settled = true;
+        reject(err);
       });
     });
   }

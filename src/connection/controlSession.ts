@@ -29,6 +29,8 @@ export interface NegotiatedLink {
 export interface ControlSessionCallbacks {
   /** 链路 OPEN/ACCEPT 成功（framed）。 */
   onLinkReady?: (negotiated: NegotiatedLink) => void;
+  /** D1: 链路被拒绝（非零 statusCode 的 ACCEPT），Connection 应关闭连接。 */
+  onRejected?: (statusCode: number) => void;
   /** 需要发送字节（CONTROL 帧）。 */
   onSendBytes?: (bytes: Uint8Array) => void;
   /** 收到对端 HEARTBEAT（需回 ack）—— 由 Connection 处理发送。 */
@@ -82,10 +84,16 @@ export class ControlSession {
 
   /**
    * 处理入站 CONTROL 字节（已剥离 frame header 的 payload body）。
-   * 返回值指示链路状态变化。
+   * B7: 包 try/catch 防止畸形帧导致未捕获异常。
    */
   handleControlBody(body: Uint8Array): void {
-    const decoded = decodeControl(body);
+    let decoded;
+    try {
+      decoded = decodeControl(body);
+    } catch {
+      // 畸形 CONTROL 帧（body 不足 5B 等）：静默丢弃
+      return;
+    }
     switch (decoded.opcode) {
       case ControlOpcode.Open:
         this.handleOpen(decoded.controlId, decoded.tlv);
@@ -153,13 +161,14 @@ export class ControlSession {
     if (controlId !== this.pendingOpenId) return;
     this.pendingOpenId = undefined;
     if (statusCode !== ErrorCode.Success) {
-      // 被拒绝
+      // D1: 被拒绝——通知 Connection 关闭连接（而非静默挂死）
       this.negotiated = {
         maxFrameSize: 0,
         heartbeatIntervalMs: 0,
         selectedRpcEncoding: 0,
         accepted: false
       };
+      this.callbacks.onRejected?.(statusCode);
       return;
     }
     this.open = true;

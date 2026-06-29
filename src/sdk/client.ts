@@ -51,6 +51,7 @@ export class AxtpClient {
   private readonly onDisconnectStream = new EventStream<SessionCloseInfo>();
   private readonly onReconnectStream = new EventStream<{ attempt: number }>();
   private readonly onReconnectFailedStream = new EventStream<void>();
+  private readonly onErrorStream = new EventStream<AxtpError>();
 
   constructor(
     private readonly transport: IClientTransport,
@@ -70,6 +71,10 @@ export class AxtpClient {
   }
   get onReconnectFailed(): EventStream<void> {
     return this.onReconnectFailedStream;
+  }
+  /** D5: 转发 session 的异步错误（如 transport 不支持心跳等） */
+  get onError(): EventStream<AxtpError> {
+    return this.onErrorStream;
   }
 
   get isReady(): boolean {
@@ -99,6 +104,7 @@ export class AxtpClient {
       this.connected = false;
       this.onDisconnectStream.emit(info);
     });
+    this.session.onError.subscribe((err) => this.onErrorStream.emit(err));
     this.session.onReconnect.subscribe((info) => {
       this.onReconnectStream.emit(info);
     });

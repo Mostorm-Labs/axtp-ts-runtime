@@ -53,6 +53,8 @@ export type {
   UntypedMethodHandler
 } from "./types.js";
 
+let nextSessionId = 1;
+
 export class AxtpSession {
   private conn: Connection;
 
@@ -79,12 +81,12 @@ export class AxtpSession {
   private handshakeTimeoutMs: number;
   private handshakeTimer: ReturnType<typeof setTimeout> | undefined;
   /** 公开 id（简短随机字符串，仅在创建它的 server/client 内有效，非全局唯一）。 */
-  readonly id: string;
+  readonly id: number;
 
   constructor(transport: ITransport, config: SessionConfig) {
     const physicalRole = config.physicalRole ?? "client";
     this.defaultTimeoutMs = config.defaultTimeoutMs ?? 10000;
-    this.id = Math.random().toString(36).slice(2, 10);
+    this.id = nextSessionId++; // B6: 自增计数器，避免随机碰撞
 
     // 构造 ConnectionOptions（不暴露 negotiationParams 等链路细节给用户）
     const connOptions: ConnectionOptions = {
@@ -310,6 +312,9 @@ export class AxtpSession {
   /** Connection 传输重连成功后：重建会话（重置握手，重新走 Hello/Identify）。 */
   private handleReconnect(_attempt: number): void {
     this.ready = false;
+    // B2: 重连后旧 sid 已失效，pending call/stream 必须全部失败
+    this.rpc.rejectAll(new AxtpError(ErrorCode.TransportDisconnected, "connection reconnecting"));
+    this.streamMgr.abortAll("connection reconnecting");
     this.handshakeOrch.reset();
     // 重新 arm 握手超时定时器（首次的 timer 已在握手完成时清除）
     this.armHandshakeTimer();
@@ -342,6 +347,7 @@ export class AxtpSession {
   /** M4+M5：接收完整 CloseReason，统一清理所有资源 */
   private handleClose(reason: CloseReason): void {
     if (this.closed) return;
+    const wasReady = this.ready; // D6: 在置 false 前快照
     this.closed = true;
     this.ready = false;
 
@@ -357,8 +363,8 @@ export class AxtpSession {
     );
     this.streamMgr.abortAll(`connection closed: ${reason.reason}`);
 
-    // 如果 onReady 还没 resolve（握手未完成），reject 它
-    if (!this.ready && this.onReadyReject !== undefined) {
+    // D6: 仅在握手未完成时 reject onReady（用快照判断）
+    if (!wasReady && this.onReadyReject !== undefined) {
       this.onReadyReject(
         new AxtpError(ErrorCode.TransportDisconnected, "session closed before ready")
       );

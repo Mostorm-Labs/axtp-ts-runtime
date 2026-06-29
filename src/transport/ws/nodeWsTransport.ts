@@ -183,16 +183,21 @@ export class NodeWsClientTransport implements IClientTransport {
     if (!this.available)
       return Promise.reject(new AxtpError(ErrorCode.Unavailable, "transport unavailable"));
     return new Promise((resolve, reject) => {
+      let settled = false; // B3: resolve/reject 互斥
       const ws = new WebSocket(this.options.url, this.options.protocols, {
         headers: this.options.headers
       });
       ws.once("open", () => {
+        if (settled) return;
+        settled = true;
         const transport = new WsTransport(ws);
         transport.onClose.subscribe(() => this.onClose.emit(undefined));
         resolve(transport);
       });
       ws.once("error", (err) => {
-        if (this.available) reject(err);
+        if (settled) return;
+        settled = true;
+        reject(err);
       });
     });
   }

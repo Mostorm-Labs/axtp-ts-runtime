@@ -74,6 +74,8 @@ export class Connection {
   private controlSession: ControlSession | undefined;
   private heartbeat: Heartbeat | undefined;
   private reconnectCoordinator: ReconnectCoordinator | undefined;
+  /** keepalive ack 监听器取消订阅句柄（B1: 防止 WS pong listener 泄漏） */
+  private keepaliveUnsub: (() => void) | undefined;
 
   // framed-binary 编解码流水线（WS 模式不使用）。重连时重建。
   private frameDecoder?: FrameDecoder;
@@ -130,6 +132,9 @@ export class Connection {
     // detach 旧 transport 订阅（M6：防止旧 transport 事件污染）
     for (const unsub of this.transportUnsubs) unsub();
     this.transportUnsubs = [];
+    // B1: 清理旧 keepalive 监听器
+    this.keepaliveUnsub?.();
+    this.keepaliveUnsub = undefined;
 
     // 刷新 capabilities（重连换 transport 时新 transport 的能力可能不同）
     this.capabilities = transport.capabilities;
@@ -170,7 +175,8 @@ export class Connection {
         onHeartbeat: (controlId) =>
           this.sendFramedMessage(PayloadType.Control, encodeHeartbeatAck(controlId)),
         onHeartbeatAck: () => this.heartbeat?.reset(),
-        onClosing: () => this.close(CloseCode.Normal, "remote close")
+        onClosing: () => this.close(CloseCode.Normal, "remote close"),
+        onRejected: (statusCode) => this.close(CloseCode.HandshakeFailed, `link rejected: 0x${statusCode.toString(16).padStart(4, "0")}`)
       },
       this.options.negotiationParams ??
         defaultOpenParams(
@@ -369,6 +375,11 @@ export class Connection {
   }
 
   private startHeartbeat(negotiatedIntervalMs: number): void {
+    // B1: 清理上一次的 keepalive 监听器（防止 WS pong listener 泄漏）
+    this.keepaliveUnsub?.();
+    this.keepaliveUnsub = undefined;
+    this.heartbeat?.stop();
+
     const interval = negotiatedIntervalMs || this.options.heartbeatIntervalMs || DEFAULT_HEARTBEAT_INTERVAL_MS;
     const timeout = this.options.heartbeatTimeoutMs ?? Math.max(interval * 2, 10000);
 
@@ -393,9 +404,10 @@ export class Connection {
         onTick: () => t.sendKeepalive?.(),
         onTimeout: () => this.close(CloseCode.HeartbeatTimeout, "heartbeat timeout")
       });
-      t.onKeepaliveAck?.(() => this.heartbeat?.reset());
+      // B1: 保存 unsubscribe 句柄，防止重复注册 pong listener
+      this.keepaliveUnsub = t.onKeepaliveAck?.(() => this.heartbeat?.reset());
     } else {
-      // 两种心跳能力都不支持：通过 onError 上报（库代码不应用 console）
+      // 两种心跳能力都不支持：通过 onError 上报
       this.onError.emit(
         new AxtpError(
           ErrorCode.NotSupported,

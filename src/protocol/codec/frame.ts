@@ -138,8 +138,15 @@ export class MessageReassembler {
       frameCount: number;
       totalSize: number;
       fragments: Array<Bytes | undefined>;
+      /** D3: assembly 创建时间，用于超时清理 */
+      createdAt: number;
     }
   >();
+
+  /** D3: 未完成 assembly 超时 ms（超过后清理，防 DoS） */
+  private static readonly ASSEMBLY_TIMEOUT_MS = 30000;
+  /** D3: 最大并发未完成 assembly 数量（防内存耗尽） */
+  private static readonly MAX_PENDING_ASSEMBLIES = 256;
 
   constructor(
     private readonly next: { onMessage(message: Message): void },
@@ -157,13 +164,21 @@ export class MessageReassembler {
       return;
     }
 
+    // D3: 超时清理（每次 onFrame 时惰性扫描过期 assembly）
+    this.evictExpired();
+
     let assembly = this.assemblies.get(frame.header.messageId);
     if (assembly === undefined) {
+      // D3: 超过最大并发数时拒绝新 assembly
+      if (this.assemblies.size >= MessageReassembler.MAX_PENDING_ASSEMBLIES) {
+        return;
+      }
       assembly = {
         payloadType: frame.header.payloadType,
         frameCount: frame.header.frameCount,
         totalSize: 0,
-        fragments: new Array(frame.header.frameCount).fill(undefined)
+        fragments: new Array(frame.header.frameCount).fill(undefined),
+        createdAt: Date.now()
       };
       this.assemblies.set(frame.header.messageId, assembly);
     }
@@ -193,6 +208,17 @@ export class MessageReassembler {
       body: concatBytes(assembly.fragments as Bytes[])
     });
   }
+
+  /** D3: 清理超时的未完成 assembly（防止恶意分片永久占内存） */
+  private evictExpired(): void {
+    if (this.assemblies.size === 0) return;
+    const now = Date.now();
+    for (const [id, assembly] of this.assemblies) {
+      if (now - assembly.createdAt > MessageReassembler.ASSEMBLY_TIMEOUT_MS) {
+        this.assemblies.delete(id);
+      }
+    }
+  }
 }
 
 /** 出站第一级：message -> frames（按 maxFrameSize 分片）。 */
@@ -212,7 +238,16 @@ export class MessageFragmenter {
   fragment(message: Message): Frame[] {
     const capacity = this.payloadCapacity();
     const messageId = this.takeMessageId();
-    if (capacity === 0 || message.body.length === 0) {
+    // B4: capacity=0 且 body 非空时抛错，不静默丢弃数据
+    if (capacity === 0) {
+      if (message.body.length > 0) {
+        throw new Error(
+          `AXTP maxFrameSize (${this.maxFrameSize}) too small: header+CRC=14, no payload capacity`
+        );
+      }
+      return [this.makeFrame(message, messageId, 0, 1, new Uint8Array())];
+    }
+    if (message.body.length === 0) {
       return [this.makeFrame(message, messageId, 0, 1, new Uint8Array())];
     }
     const frameCount = Math.ceil(message.body.length / capacity);

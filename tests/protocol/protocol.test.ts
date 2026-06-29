@@ -336,22 +336,26 @@ describe("Heartbeat", () => {
     vi.useRealTimers();
   });
 
-  it("reset 重置计时（收到 ack/pong）", () => {
+  it("reset 只取消 timeout（D2: tick 保持固定节拍）", () => {
     vi.useFakeTimers();
     const tick = vi.fn();
+    const timeout = vi.fn();
     const hb = new Heartbeat({
       intervalMs: 1000,
       timeoutMs: 2000,
       onTick: tick,
-      onTimeout: () => {}
+      onTimeout: timeout
     });
     hb.start();
-    vi.advanceTimersByTime(900);
-    hb.reset(); // 收到 ack，重置
-    vi.advanceTimersByTime(900);
-    expect(tick).not.toHaveBeenCalled(); // 还未到 interval
-    vi.advanceTimersByTime(100);
+    // tick 触发
+    vi.advanceTimersByTime(1000);
     expect(tick).toHaveBeenCalledTimes(1);
+    // reset（收到 ack）只取消 timeout，tick 计时器不受影响
+    hb.reset();
+    // 下一个 tick 在 1000ms 后触发（固定间隔，不被 reset 推迟）
+    vi.advanceTimersByTime(1000);
+    expect(tick).toHaveBeenCalledTimes(2);
+    expect(timeout).not.toHaveBeenCalled(); // timeout 被 reset 取消
     hb.stop();
     vi.useRealTimers();
   });
