@@ -10,6 +10,7 @@ import { Connection, type ConnectionOptions } from "../connection/connection.js"
 import { RpcOp } from "../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../protocol/model.js";
 import type { CloseReason, ITransport } from "../transport/transport.js";
+import { CloseCode } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {
@@ -184,9 +185,9 @@ export class AxtpSession {
     return this.handshakeOrch.state;
   }
 
-  close(): void {
-    // M5：只调 conn.close()，让 handleClose 统一清理
-    this.conn.close();
+  close(code: CloseCode = CloseCode.Normal, reason = "local close"): void {
+    // 通过 Connection.close() 关闭底层 socket，再由 conn.onClose → handleClose 统一清理
+    this.conn.close(code, reason);
   }
 
   // ===== typed 四件套（重载）=====
@@ -320,11 +321,7 @@ export class AxtpSession {
     if (this.handshakeTimer !== undefined) clearTimeout(this.handshakeTimer);
     this.handshakeTimer = setTimeout(() => {
       if (!this.ready && !this.closed) {
-        this.handleClose({
-          code: 3, // CloseCode.HandshakeFailed
-          reason: "handshake timeout",
-          remote: false
-        });
+        this.close(CloseCode.HandshakeFailed, "handshake timeout");
       }
     }, this.handshakeTimeoutMs);
   }
