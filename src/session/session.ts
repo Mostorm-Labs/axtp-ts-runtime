@@ -113,7 +113,12 @@ export class AxtpSession {
     // 子组件
     this.router = new HandlerRouter(config.globalHandlers);
     const logicalRole = config.logicalRole ?? "server";
-    this.handshakeOrch = new HandshakeOrchestrator(logicalRole, this.io, config.handshakeSeed);
+    this.handshakeOrch = new HandshakeOrchestrator(
+      logicalRole,
+      this.io,
+      config.handshakeSeed,
+      config.eventMasks
+    );
     this.rpc = new RpcExchange(
       this.io,
       this.router,

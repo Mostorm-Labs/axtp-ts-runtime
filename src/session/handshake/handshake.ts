@@ -30,13 +30,18 @@ export class Handshake {
   private stateValue: SessionState = "LINK_CONNECTED";
   private sidValue = "";
   private readonly localEntropy: number;
+  /** client 在 Identify 携带的 eventMasks（订阅意图）。重连后保留（handler 表未变）。 */
+  private eventMasksValue: string | undefined;
 
   constructor(
     private readonly logicalRole: LogicalRole,
     /** server 生成本地熵的种子（与 randomSeed 混合生成 sid）。 */
-    localSeed?: number
+    localSeed?: number,
+    /** client 在 Identify 携带的 eventMasks（订阅意图，hex 编码）。 */
+    eventMasks?: string
   ) {
     this.localEntropy = localSeed ?? Math.floor(Math.random() * 0x7fffffff) + 1;
+    this.eventMasksValue = eventMasks;
   }
 
   /**
@@ -98,12 +103,10 @@ export class Handshake {
     return this.logicalRole;
   }
 
-  /** 重连后重置握手状态（重新走 Hello/Identify/Identified）。 */
+  /** 重连后重置握手状态（重新走 Hello/Identify/Identified）。eventMasks 保留（订阅意图不变）。 */
   reset(): void {
     this.stateValue = "LINK_CONNECTED";
     this.sidValue = "";
-    // eventMasksValue 不重置：重连后应携带与之前相同的订阅意图（handler 表未变）。
-    // 若用户重连前改了订阅，需通过 setEventMasks 更新后再重连。
   }
 
   private handleHello(payload: RpcPayload): HandshakeResult {
@@ -123,13 +126,15 @@ export class Handshake {
         error: new AxtpError(ErrorCode.RpcPayloadInvalid, "invalid Hello body")
       };
     }
-    // client 回 Identify（带 randomSeed）
-    const randomSeed = (Math.floor(Math.random() * 0x7fffffff) + 1) >>> 0;
+    // client 回 Identify（带 randomSeed + eventMasks）
+    const randomSeed = (Math.floor(Math.random() * 0x100000000) || 1) >>> 0;
+    const body: Record<string, unknown> = { randomSeed };
+    if (this.eventMasksValue) body.eventMasks = this.eventMasksValue;
     const identify = rpcPayload({
       op: RpcOp.Identify,
       jsonSid: "",
-      body: encodeJsonBody({ randomSeed }),
-      meta: { randomSeed }
+      body: encodeJsonBody(body),
+      meta: { randomSeed, jsonEventMasks: this.eventMasksValue }
     });
     return { outbound: identify, becameReady: false };
   }

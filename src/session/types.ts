@@ -92,6 +92,8 @@ export interface SessionInternalConfig {
   globalHandlers?: GlobalHandlerSource;
   transportFactory?: TransportFactory;
   handshakeSeed?: number;
+  /** client 在 Identify 携带的 eventMasks（订阅意图，hex 编码）。由 SDK 用 computeEventMasks 计算。 */
+  eventMasks?: string;
 }
 
 /** Session 完整配置 = 用户选项 + 内部配置。 */

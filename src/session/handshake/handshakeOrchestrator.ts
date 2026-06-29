@@ -21,9 +21,10 @@ export class HandshakeOrchestrator {
   constructor(
     logicalRole: LogicalRole,
     private readonly io: SessionIO,
-    seed?: number
+    seed?: number,
+    eventMasks?: string
   ) {
-    this.handshake = new Handshake(logicalRole, seed);
+    this.handshake = new Handshake(logicalRole, seed, eventMasks);
   }
 
   /** 链路 ready 后：Logical Server 发 Hello。 */
