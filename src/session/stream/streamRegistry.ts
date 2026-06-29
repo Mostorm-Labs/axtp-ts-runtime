@@ -17,9 +17,6 @@ export interface StreamContext {
   readonly streamId: number;
   /** 谁发起：本地 openStream 的发流方 / 对端 openStream 后本地 adopt 的收流方。 */
   direction: "send" | "receive";
-  /** 期望的下一个 seqId（仅统计，不强制）。 */
-  expectedSeq: number;
-  hasSeq: boolean;
   chunks: number;
   bytes: number;
   handler: StreamChunkHandler | undefined;
@@ -30,17 +27,16 @@ export interface StreamContext {
 
 export class StreamRegistry {
   private readonly streams = new Map<number, StreamContext>();
-  private readonly inUse = new Set<number>();
 
   /** 对端分配的 streamId，本地 adopt 建收流 context（receive 方）。 */
   adopt(streamId: number): StreamContext {
     if (streamId === 0) throw new AxtpError(ErrorCode.StreamIdInvalid, "streamId must be non-zero");
-    this.inUse.add(streamId);
+    if (this.streams.has(streamId)) {
+      throw new AxtpError(ErrorCode.StreamAlreadyOpen, `stream ${streamId} already open`);
+    }
     const ctx: StreamContext = {
       streamId,
       direction: "receive",
-      expectedSeq: 0,
-      hasSeq: false,
       chunks: 0,
       bytes: 0,
       handler: undefined,
@@ -51,19 +47,11 @@ export class StreamRegistry {
     return ctx;
   }
 
-  /** 入站 STREAM 数据：按 streamId 路由（Core 不丢包，仅统计 seq）。 */
+  /** 入站 STREAM 数据：按 streamId 路由。Core 不丢包，仅统计 chunks/bytes。 */
   onData(payload: StreamPayload): void {
     const ctx = this.streams.get(payload.streamId);
-    if (ctx === undefined) return; // 未知 stream，丢弃（不强制报错）
+    if (ctx === undefined) return;
     if (ctx.closed) return;
-    // seq 统计（不强制，profile-specific）
-    if (ctx.hasSeq) {
-      if (payload.seqId === ctx.expectedSeq - 1) {
-        // duplicate（仅统计，不丢）
-      }
-    }
-    ctx.hasSeq = true;
-    ctx.expectedSeq = (payload.seqId + 1) >>> 0;
     ctx.chunks += 1;
     ctx.bytes += payload.data.length;
     ctx.handler?.onChunk(payload.data, payload.cursor);
@@ -76,7 +64,6 @@ export class StreamRegistry {
     ctx.closed = true;
     ctx.handler?.onClose(reason);
     this.streams.delete(streamId);
-    this.inUse.delete(streamId);
   }
 
   /** teardown：释放所有 StreamContext（spec:253 MUST，断连/重连时）。 */

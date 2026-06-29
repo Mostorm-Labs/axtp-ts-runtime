@@ -52,6 +52,10 @@ export interface ConnectionOptions {
   reconnect?: ReconnectPolicy;
 }
 
+/** 连接默认值常量（统一所有路径的 fallback，避免 profile 间不一致）。 */
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30000;
+const DEFAULT_MAX_FRAME_SIZE = 4096;
+
 export class Connection {
   readonly onClose = new EventStream<CloseReason>();
   readonly onError = new EventStream<AxtpError>();
@@ -131,7 +135,7 @@ export class Connection {
     this.capabilities = transport.capabilities;
 
     // 重建 fragmenter（确保重连完全重置状态）
-    this.fragmenter = new MessageFragmenter(this.options.maxFrameSize ?? 4096);
+    this.fragmenter = new MessageFragmenter(this.options.maxFrameSize ?? DEFAULT_MAX_FRAME_SIZE);
 
     if (this.capabilities.supportsControl) {
       this.buildFramedPipeline();
@@ -170,8 +174,8 @@ export class Connection {
       },
       this.options.negotiationParams ??
         defaultOpenParams(
-          this.options.maxFrameSize ?? 4096,
-          this.options.heartbeatIntervalMs ?? 1000
+          this.options.maxFrameSize ?? DEFAULT_MAX_FRAME_SIZE,
+          this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
         )
     );
 
@@ -186,7 +190,7 @@ export class Connection {
     const reassembler = new MessageReassembler({
       onMessage: (m) => payloadDecoder.onMessage(m.payloadType, m.body)
     });
-    this.frameDecoder = new FrameDecoder(reassembler, this.options.maxFrameSize ?? 4096);
+    this.frameDecoder = new FrameDecoder(reassembler, this.options.maxFrameSize ?? DEFAULT_MAX_FRAME_SIZE);
   }
 
   /** 启动处理（Session 在回调赋值后调用）。framed client 同时发 OPEN。flush 缓冲消息。 */
@@ -206,7 +210,7 @@ export class Connection {
       if (this.physicalRole === "client" && cs !== undefined) cs.sendOpen();
     } else {
       this.fireLinkReady();
-      this.startHeartbeat(this.options.heartbeatIntervalMs ?? 30000);
+      this.startHeartbeat(this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
     }
   }
 
@@ -311,7 +315,7 @@ export class Connection {
       if (this.physicalRole === "client" && cs !== undefined) cs.sendOpen();
     } else {
       this.fireLinkReady();
-      this.startHeartbeat(this.options.heartbeatIntervalMs ?? 30000);
+      this.startHeartbeat(this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
     }
 
     // 标记重连完成（退避重置延迟到链路真正 ready 时，见 onNegotiatedLinkReady / fireLinkReady）
@@ -365,7 +369,7 @@ export class Connection {
   }
 
   private startHeartbeat(negotiatedIntervalMs: number): void {
-    const interval = negotiatedIntervalMs || this.options.heartbeatIntervalMs || 30000;
+    const interval = negotiatedIntervalMs || this.options.heartbeatIntervalMs || DEFAULT_HEARTBEAT_INTERVAL_MS;
     const timeout = this.options.heartbeatTimeoutMs ?? Math.max(interval * 2, 10000);
 
     if (this.capabilities.supportsControl) {

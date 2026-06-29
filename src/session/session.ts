@@ -270,8 +270,13 @@ export class AxtpSession {
 
     // 会话握手
     if (!this.ready && HandshakeOrchestrator.isHandshakeOp(payload.op)) {
-      const becameReady = this.handshakeOrch.ingest(payload);
-      if (becameReady) {
+      const result = this.handshakeOrch.ingest(payload);
+      if (result.error) {
+        // 握手错误（如 axtpVersion 不兼容、畸形 body）→ 关闭连接
+        this.conn.close(CloseCode.HandshakeFailed, result.error.message);
+        return;
+      }
+      if (result.becameReady) {
         this.ready = true;
         this.onReadyStream.emit(undefined);
       }

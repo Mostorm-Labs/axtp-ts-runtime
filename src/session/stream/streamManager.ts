@@ -26,10 +26,7 @@ export class StreamManager {
     params: unknown
   ): Promise<{ streamId: number; response: unknown; stream: Stream }> {
     const result = await callMethod(method, params);
-    const streamId = (result as { streamId?: number }).streamId;
-    if (typeof streamId !== "number" || streamId === 0) {
-      throw new AxtpError(ErrorCode.StreamIdInvalid, "openStream response missing streamId");
-    }
+    const streamId = this.extractStreamId(result, "openStream response missing streamId");
     const sendCtx = this.registry.adopt(streamId);
     sendCtx.direction = "send";
     const stream = this.makeStream(sendCtx);
@@ -45,15 +42,21 @@ export class StreamManager {
   ): (ctx: unknown, params: unknown) => Promise<{ result: unknown; stream: Stream }> {
     return async (_ctx, params) => {
       const result = await handler(params);
-      const streamId = (result as { streamId?: number }).streamId;
-      if (typeof streamId !== "number" || streamId === 0) {
-        throw new AxtpError(ErrorCode.StreamIdInvalid, "onStream handler must return streamId");
-      }
+      const streamId = this.extractStreamId(result, "onStream handler must return streamId");
       const recvCtx = this.registry.adopt(streamId);
       recvCtx.direction = "receive";
       const stream = this.makeStream(recvCtx);
       return { result, stream };
     };
+  }
+
+  /** 从 RPC result 提取 streamId 并校验。 */
+  private extractStreamId(result: unknown, msg: string): number {
+    const streamId = (result as { streamId?: number }).streamId;
+    if (typeof streamId !== "number" || streamId === 0) {
+      throw new AxtpError(ErrorCode.StreamIdInvalid, msg);
+    }
+    return streamId;
   }
 
   /** 构造 Stream 对象。 */

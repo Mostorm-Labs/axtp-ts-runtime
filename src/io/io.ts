@@ -62,7 +62,7 @@ export class ByteReader {
     if (!this.hasRemaining(2)) return undefined;
     const value = (this.data[this.cursor] << 8) | this.data[this.cursor + 1];
     this.cursor += 2;
-    return value;
+    return value & 0xffff;
   }
 
   readU32(): number | undefined {
