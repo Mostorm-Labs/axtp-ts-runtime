@@ -272,6 +272,12 @@ export class AxtpSession {
       return;
     }
 
+    // APP_READY 后校验 sid（spec:211: malformed/empty/non-hex/zero/缺失的 sid MUST 拒绝）
+    const payloadSid = payload.jsonSid ?? "";
+    if (payloadSid !== this.handshakeOrch.sid) {
+      return;
+    }
+
     // APP_READY 业务分发
     switch (payload.op) {
       case RpcOp.Request:

@@ -76,10 +76,10 @@ describe("CONTROL codec 6 TLV", () => {
     expect(ack.controlId).toBe(3); // 回显
   });
 
-  it("TLV 编码精确字节（heartbeatIntervalMs=1000 编为 uint32 => 0a 04 00 00 03 e8）", () => {
+  it("TLV 编码精确字节（heartbeatIntervalMs=1000 编为 uint16 => 0a 02 03 e8，与 spec 样例一致）", () => {
     const bytes = encodeOpen(1, defaultOpenParams(4096, 1000));
     const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-    expect(hex).toContain("0a04000003e8");
+    expect(hex).toContain("0a0203e8");
   });
 });
 

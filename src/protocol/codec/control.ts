@@ -75,13 +75,13 @@ function readTlv(reader: ByteReader): { tag: number; value: number } | undefined
   const len = reader.readU8();
   if (tag === undefined || len === undefined) return undefined;
   let value = 0;
-  if (len === 1) value = reader.readU8() ?? 0;
-  else if (len === 2) value = reader.readU16() ?? 0;
-  else if (len === 4) value = reader.readU32() ?? 0;
+  if (len === 1) value = reader.readU8Strict();
+  else if (len === 2) value = reader.readU16Strict();
+  else if (len === 4) value = reader.readU32Strict();
   else {
-    // 跳过未知长度
+    // 异常宽度：跳过并返回 undefined（调用方会忽略此 TLV）
     reader.readBytes(len);
-    return { tag, value: -1 };
+    return undefined;
   }
   return { tag, value };
 }
@@ -105,7 +105,7 @@ export function encodeControl(
     if (tlv.supportedRpcEncodings !== undefined)
       writeTlv(writer, ControlTlvTag.SupportedRpcEncodings, tlv.supportedRpcEncodings, 1);
     if (tlv.heartbeatIntervalMs !== undefined)
-      writeTlv(writer, ControlTlvTag.HeartbeatIntervalMs, tlv.heartbeatIntervalMs, 4);
+      writeTlv(writer, ControlTlvTag.HeartbeatIntervalMs, tlv.heartbeatIntervalMs, 2);
     if (tlv.ackMode !== undefined) writeTlv(writer, ControlTlvTag.AckMode, tlv.ackMode, 1);
     if (tlv.selectedRpcEncoding !== undefined)
       writeTlv(writer, ControlTlvTag.SelectedRpcEncoding, tlv.selectedRpcEncoding, 1);

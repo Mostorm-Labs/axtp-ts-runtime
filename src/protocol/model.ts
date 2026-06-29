@@ -8,7 +8,7 @@ import {
   RpcBodyEncoding,
   RpcEncoding,
   RpcOp
-} from "../protocol/generated/axtp_ids_generated.js";
+} from "./generated/axtp_ids_generated.js";
 
 export { ControlOpcode, ErrorCode, PayloadType, RpcBodyEncoding, RpcEncoding, RpcOp };
 

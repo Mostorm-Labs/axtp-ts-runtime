@@ -1,5 +1,4 @@
 import path from "node:path";
-import { readFileSync } from "node:fs";
 import type { CommonRegistryItem, Field, SpecModel } from "../models.js";
 import { cppName, hex, sortById, writeTextFile } from "../util.js";
 
@@ -156,19 +155,14 @@ export type EventId = (typeof EVENT_REGISTRY)[EventName]["id"];
 `;
 }
 
-// emitVersion: 产出 SDK 版本常量（从 package.json 的 version 字段生成）。
-// axtpVersion = SDK 版本（如 0.11.0），不是 spec 的 version.yaml 里的 spec.version（1.0.0）。
-function emitVersion(): string {
-  // 从 runtime package.json 读取版本（生成器位于 devtools/generators，runtime package.json 在上两级）
-  const runtimePkgPath = path.resolve(import.meta.dirname ?? __dirname, "../../../../package.json");
-  let version = "0.0.0";
-  try {
-    const pkg = JSON.parse(readFileSync(runtimePkgPath, "utf-8"));
-    version = pkg.version ?? version;
-  } catch {
-    // fallback：无法读取 package.json
-  }
-  return `${banner}// SDK 版本（从 package.json 的 version 生成，勿手改）\nexport const AXTP_SPEC_VERSION = "${version}";\n`;
+// emitVersion: 产出 AXTP spec 兼容版本常量。
+// AXTP_SPEC_VERSION 来自 spec 的 contract/registry/version.yaml 的 spec.version 字段，
+// 这是 Hello.axtpVersion 的值——spec:205 定义为"AXTP spec compatibility authority"。
+// 不是 SDK 软件版本（package.json version），而是协议规范版本。
+function emitVersion(spec: SpecModel): string {
+  const ver = spec.version as { spec?: { version?: string } } | undefined;
+  const version = ver?.spec?.version ?? "1.0.0";
+  return `${banner}// AXTP spec compatibility version（来自 contract/registry/version.yaml 的 spec.version）。\n// 这是 Hello.axtpVersion 的值——spec:205 定义为"AXTP spec compatibility authority"。\n// 不是 SDK 软件版本（package.json version），而是协议规范版本。\nexport const AXTP_SPEC_VERSION = "${version}";\n`;
 }
 
 export async function emitTs(spec: SpecModel, outDir: string): Promise<void> {
@@ -182,6 +176,6 @@ export async function emitTsFiles(spec: SpecModel, tsDir: string): Promise<void>
     writeTextFile(path.join(tsDir, "axtp_ids_generated.ts"), emitIds(spec)),
     writeTextFile(path.join(tsDir, "schemas_generated.ts"), emitSchemas(spec)),
     writeTextFile(path.join(tsDir, "registry.ts"), emitRegistryMap(spec)),
-    writeTextFile(path.join(tsDir, "axtpVersion.ts"), emitVersion())
+    writeTextFile(path.join(tsDir, "axtpVersion.ts"), emitVersion(spec))
   ]);
 }

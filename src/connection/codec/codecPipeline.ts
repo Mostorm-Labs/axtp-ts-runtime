@@ -18,7 +18,7 @@ import {
 import { PayloadDecoder } from "../../protocol/codec/payload.js";
 import { encodeStream } from "../../protocol/codec/stream.js";
 import type { Message, RpcPayload, StreamPayload } from "../../protocol/model.js";
-import { PayloadType } from "../../protocol/model.js";
+import { PayloadType, RpcEncoding } from "../../protocol/model.js";
 import type { ITransport, PhysicalRole } from "../../transport/transport.js";
 import { ControlSession, type NegotiatedLink } from "./controlSession.js";
 
@@ -91,7 +91,7 @@ export class CodecPipeline {
   /** 发送 RPC payload（framed + rpcEncoding 前缀）。 */
   sendRpc(jsonBytes: Uint8Array): void {
     const wrapped = new Uint8Array(1 + jsonBytes.length);
-    wrapped[0] = 0x01; // RpcEncoding.Json
+    wrapped[0] = RpcEncoding.Json;
     wrapped.set(jsonBytes, 1);
     this.send(PayloadType.Rpc, wrapped);
   }
@@ -111,8 +111,9 @@ export class CodecPipeline {
     this.send(PayloadType.Control, encodeHeartbeatAck(controlId));
   }
 
-  /** 更新协商后的 maxFrameSize。 */
+  /** 更新协商后的 maxFrameSize（同时更新入站解码器和出站分片器）。 */
   setMaxFrameSize(size: number): void {
+    this.frameDecoder.setMaxFrameSize(size);
     this.fragmenter.setMaxFrameSize(size);
   }
 

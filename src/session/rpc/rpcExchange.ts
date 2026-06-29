@@ -102,8 +102,7 @@ export class RpcExchange {
         },
         (err) => {
           const code = err instanceof AxtpError ? err.code : ErrorCode.RpcExecutionFailed;
-          const errMsg = err instanceof Error ? err.message : String(err);
-          this.sendResponse(payload.requestId, code, encodeJsonBody({ error: errMsg }));
+          this.sendResponse(payload.requestId, code);
         }
       );
   }
