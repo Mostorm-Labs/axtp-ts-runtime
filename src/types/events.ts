@@ -4,6 +4,8 @@
 //
 // 嵌套 emit（listener 回调内又 emit 同一 stream）：排队到 pendingEmits，
 // 当前 emit 结束后 flush（不再静默丢弃）。
+//
+// close() 后进入终态：后续 subscribe/emit 为 no-op，不可逆。
 
 export type Listener<T> = (value: T) => void;
 
@@ -13,9 +15,12 @@ export class EventStream<T> {
   private pendingRemovals: Listener<T>[] = [];
   /** 嵌套 emit 的排队缓冲（emit 期间 listener 又触发 emit 时，延后到当前 emit 结束）。 */
   private pendingEmits: T[] = [];
+  /** 终态标志：close 后不可再 subscribe/emit。 */
+  private closed = false;
 
-  /** 订阅。返回 unsubscribe 函数。 */
+  /** 订阅。返回 unsubscribe 函数。close 后为 no-op。 */
   subscribe(listener: Listener<T>): () => void {
+    if (this.closed) return () => {};
     this.listeners.add(listener);
     return () => this.unsubscribe(listener);
   }
@@ -29,8 +34,9 @@ export class EventStream<T> {
     this.listeners.delete(listener);
   }
 
-  /** 发出事件，同步通知所有当前订阅者。嵌套 emit 排队延后。 */
+  /** 发出事件，同步通知所有当前订阅者。嵌套 emit 排队延后。close 后为 no-op。 */
   emit(value: T): void {
+    if (this.closed) return;
     if (this.emitting) {
       // 嵌套 emit：排队，当前 emit 结束后 flush
       this.pendingEmits.push(value);
@@ -54,11 +60,17 @@ export class EventStream<T> {
     return this.listeners.size > 0;
   }
 
-  /** 关闭流：清除所有订阅者。在 emit 期间延迟清除（与 unsubscribe 一致）。 */
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
+  /** 关闭流：进入终态，清除所有订阅者和缓冲。不可逆——后续 subscribe/emit 为 no-op。 */
   close(): void {
+    this.closed = true;
     if (this.emitting) {
-      // 延迟到 emit 结束（避免 for...of 迭代 Set 时 clear() 导致迭代器失效崩溃）
+      // emit 期间 close：标记终态，emit 结束后 flushPendingRemovals 会清空 listeners
       for (const listener of this.listeners) this.pendingRemovals.push(listener);
+      this.pendingEmits.length = 0; // 丢弃排队中的嵌套 emit
       return;
     }
     this.listeners.clear();
@@ -84,8 +96,9 @@ export class EventStream<T> {
     this.pendingRemovals.length = 0;
   }
 
-  /** flush 嵌套 emit 期间排队的事件。 */
+  /** flush 嵌套 emit 期间排队的事件。close 后不再 flush。 */
   private flushPendingEmits(): void {
+    if (this.closed) return;
     if (this.pendingEmits.length === 0) return;
     const queued = this.pendingEmits;
     this.pendingEmits = [];

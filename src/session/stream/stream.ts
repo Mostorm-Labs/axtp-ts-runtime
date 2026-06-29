@@ -46,6 +46,19 @@ export class Stream {
             // 忽略
           }
         }
+      },
+      onError: (error: AxtpError) => {
+        // 错误转化为 close（通知 reason 为错误消息）
+        if (this.closed) return;
+        this.closed = true;
+        const reason = error instanceof Error ? error.message : String(error);
+        for (const listener of this.closeListeners) {
+          try {
+            listener(reason);
+          } catch {
+            // 忽略
+          }
+        }
       }
     };
   }
@@ -56,8 +69,17 @@ export class Stream {
     return () => this.chunkListeners.delete(listener);
   }
 
-  /** 流关闭通知（对端关闭 / 连接断开 / 主动 close）。 */
+  /** 流关闭通知（对端关闭 / 连接断开 / 主动 close）。已关闭后注册会立即补发。 */
   onClose(listener: CloseListener): () => void {
+    if (this.closed) {
+      // 已关闭：立即同步调用（补发语义）
+      try {
+        listener("already closed");
+      } catch {
+        // 忽略
+      }
+      return () => {};
+    }
     this.closeListeners.add(listener);
     return () => this.closeListeners.delete(listener);
   }

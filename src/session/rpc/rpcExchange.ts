@@ -106,7 +106,8 @@ export class RpcExchange {
         },
         (err) => {
           const code = err instanceof AxtpError ? err.code : ErrorCode.RpcExecutionFailed;
-          this.sendResponse(payload.requestId, code);
+          const errMsg = err instanceof Error ? err.message : String(err);
+          this.sendResponse(payload.requestId, code, encodeJsonBody({ error: errMsg }));
         }
       );
   }
@@ -121,8 +122,10 @@ export class RpcExchange {
     for (const handler of handlers) {
       try {
         handler(data);
-      } catch {
-        // 单个 handler 抛错不影响其它
+      } catch (err) {
+        // 单个 handler 抛错不影响其它，但记录错误
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`event handler for "${eventName}" threw: ${errMsg}`);
       }
     }
   }

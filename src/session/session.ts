@@ -303,6 +303,8 @@ export class AxtpSession {
   private handleDisconnect(reason: CloseReason): void {
     // 进入 reconnecting 状态
     this.setState("reconnecting");
+    // 立即重置握手状态（不等 onReconnect），确保重连链路重建时握手从头开始
+    this.handshakeOrch.reset();
     // pending call/stream 全部失败
     this.rpc.rejectAll(
       new AxtpError(ErrorCode.TransportDisconnected, `connection disconnected: ${reason.reason}`)
@@ -312,9 +314,8 @@ export class AxtpSession {
 
   /** Connection 传输重连成功后：重建会话。 */
   private handleReconnect(attempt: number): void {
-    // 进入 connecting（重新握手）
+    // 进入 connecting（重新握手）——握手状态已在 handleDisconnect 里 reset
     this.setState("connecting");
-    this.handshakeOrch.reset();
     this.armHandshakeTimer();
     this.onReconnect.emit({ attempt });
   }

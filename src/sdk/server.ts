@@ -36,6 +36,7 @@ export class AxtpServer {
   private readonly handlers = new HandlerRegistry();
   private readonly onConnectStream = new EventStream<AxtpSession>();
   private readonly onDisconnectStream = new EventStream<AxtpSession>();
+  private readonly onErrorStream = new EventStream<AxtpError>();
   private readonly onCloseStream = new EventStream<void>();
   private closed = false;
 
@@ -67,6 +68,10 @@ export class AxtpServer {
       this.onDisconnectStream.emit(session);
     });
 
+    session.onError.subscribe((err) => {
+      this.onErrorStream.emit(err);
+    });
+
     // 握手成功后才注册到 sessions 表 + 触发 onConnect
     session.onReady.subscribe(() => {
       this.sessions.set(session.id, session);
@@ -82,6 +87,11 @@ export class AxtpServer {
   /** 单个 client session 断开时触发。 */
   get onDisconnect(): EventStream<AxtpSession> {
     return this.onDisconnectStream;
+  }
+
+  /** Server 错误（session 内部错误/握手失败等）。 */
+  get onError(): EventStream<AxtpError> {
+    return this.onErrorStream;
   }
 
   /** Server 整体关闭时触发。 */
@@ -164,6 +174,7 @@ export class AxtpServer {
     this.onCloseStream.emit(undefined);
     this.onConnectStream.close();
     this.onDisconnectStream.close();
+    this.onErrorStream.close();
   }
 
   get isClosed(): boolean {

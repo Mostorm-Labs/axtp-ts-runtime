@@ -6,7 +6,6 @@
 // 心跳：framed 用 CONTROL Heartbeat/Ack；WS 用原生 keepalive。
 
 import type { Bytes } from "../io/bytes.js";
-import type { NegotiationParams } from "../protocol/codec/control.js";
 import { decodeJsonRpc, encodeJsonRpc } from "../protocol/codec/jsonRpc.js";
 import type { RpcPayload, StreamPayload } from "../protocol/model.js";
 import type {
@@ -28,8 +27,6 @@ import { ReconnectCoordinator } from "./reconnect/reconnectCoordinator.js";
 export interface ConnectionOptions {
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
-  /** framed 链路协商参数（framed-only，不暴露给用户 SessionOptions）。 */
-  negotiationParams?: NegotiationParams;
   maxFrameSize?: number;
   reconnect?: ReconnectPolicy;
 }
@@ -92,6 +89,13 @@ export class Connection {
           onError: (err) => this.onError.emit(err)
         }
       );
+    } else if (policy.enabled && transportFactory === undefined) {
+      this.onError.emit(
+        new AxtpError(
+          ErrorCode.InvalidState,
+          "reconnect enabled but no transportFactory provided; reconnect disabled"
+        )
+      );
     }
 
     this.capabilities = transport.capabilities;
@@ -150,8 +154,7 @@ export class Connection {
         transport,
         {
           maxFrameSize: this.options.maxFrameSize ?? DEFAULT_MAX_FRAME_SIZE,
-          heartbeatIntervalMs: this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS,
-          negotiationParams: this.options.negotiationParams
+          heartbeatIntervalMs: this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
         },
         {
           onRpc: (p) => this.onPayload.emit(p),

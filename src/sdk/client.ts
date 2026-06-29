@@ -195,7 +195,9 @@ export class AxtpClient {
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown>;
   call(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
     this.requireUsable();
-    return this.session!.call(method, params, options);
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
+    return session.call(method, params, options);
   }
 
   handle<K extends MethodName>(
@@ -208,21 +210,27 @@ export class AxtpClient {
     handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
   ): () => void {
     this.requireConnected();
-    return this.session!.handle(method, handler as UntypedMethodHandler);
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
+    return session.handle(method, handler as UntypedMethodHandler);
   }
 
   emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
   emit(event: string, payload: unknown): Promise<void>;
   emit(event: string, payload: unknown): Promise<void> {
     this.requireUsable();
-    return this.session!.emit(event, payload);
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
+    return session.emit(event, payload);
   }
 
   on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void;
   on(event: string, handler: UntypedEventHandler): () => void;
   on(event: string, handler: UntypedEventHandler): () => void {
     this.requireConnected();
-    return this.session!.on(event, handler);
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
+    return session.on(event, handler);
   }
 
   // ===== Stream =====
@@ -233,7 +241,9 @@ export class AxtpClient {
     options?: CallOptions
   ): Promise<{ streamId: number; response: unknown; stream: Stream }> {
     this.requireUsable();
-    return this.session!.openStream(method, params, options);
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
+    return session.openStream(method, params, options);
   }
 
   onStream(
@@ -241,13 +251,16 @@ export class AxtpClient {
     handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
   ): () => void {
     this.requireConnected();
-    return this.session!.onStream(method, handler);
+    const session = this.session;
+    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
+    return session.onStream(method, handler);
   }
 
-  /** 主动关闭，不再重连。 */
-  close(): void {
-    this.session?.close();
+  /** 主动关闭，不再重连。await session 关闭完成。 */
+  async close(): Promise<void> {
+    const session = this.session;
     this.setState("closed");
+    session?.close();
   }
 
   private requireUsable(): void {

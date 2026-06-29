@@ -29,14 +29,14 @@ export interface HandshakeResult {
 export class Handshake {
   private stateValue: SessionState = "LINK_CONNECTED";
   private sidValue = "";
-  private readonly localState: number;
+  private readonly localEntropy: number;
 
   constructor(
     private readonly logicalRole: LogicalRole,
     /** server 生成本地熵的种子（与 randomSeed 混合生成 sid）。 */
     localSeed?: number
   ) {
-    this.localState = localSeed ?? Math.floor(Math.random() * 0x7fffffff) + 1;
+    this.localEntropy = localSeed ?? Math.floor(Math.random() * 0x7fffffff) + 1;
   }
 
   /**
@@ -77,7 +77,7 @@ export class Handshake {
 
   /** 生成 sid：randomSeed ⊕ 本地状态，8 位 hex，非零（spec:207 禁直接当 sid）。 */
   private generateSid(randomSeed: number): string {
-    let mixed = ((randomSeed >>> 0) ^ (this.localState >>> 0)) >>> 0;
+    let mixed = ((randomSeed >>> 0) ^ (this.localEntropy >>> 0)) >>> 0;
     if (mixed === 0) mixed = 1;
     return mixed.toString(16).padStart(8, "0");
   }

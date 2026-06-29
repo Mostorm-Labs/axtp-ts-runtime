@@ -11,6 +11,7 @@ import { AxtpError, ErrorCode } from "../../types/error.js";
 export interface StreamChunkHandler {
   onChunk(data: Bytes, cursor: bigint): void;
   onClose(reason?: string): void;
+  onError(error: AxtpError): void;
 }
 
 export interface StreamContext {
