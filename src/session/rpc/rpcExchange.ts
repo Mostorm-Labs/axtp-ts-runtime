@@ -24,8 +24,6 @@ export class RpcExchange {
 
   /** 发起 call。 */
   call(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
-    // B5: 未知 method 不发 id=0（保留值），仍发请求但 methodOrEventId=0 + jsonMethodOrEventName 走字符串路由
-    // 对端按 name 路由（vendor 方法不在 registry 里也能工作），但 wire 上 id=0 是合法的 fallback
     const methodId = registry.methodId(method) ?? 0;
     const { requestId, promise } = this.dispatcher.request((id) => {
       const rpc = rpcPayload({
@@ -48,7 +46,7 @@ export class RpcExchange {
           requestId
         );
       }
-      if (payload.body.length === 0) return undefined;
+      // 空 body 返回 {}（与 decodeJsonBody 语义一致，不返回 undefined）
       const decoded = decodeJsonBody(payload.body);
       if (decoded === undefined) {
         throw new AxtpError(
@@ -62,8 +60,8 @@ export class RpcExchange {
     });
   }
 
-  /** 发起 emit（事件发送）。 */
-  emitEvent(event: string, payload: unknown): Promise<void> {
+  /** 发起 emit（事件发送）。同步 fire-and-forget。 */
+  emitEvent(event: string, payload: unknown): void {
     const eventId = registry.eventId(event) ?? 0;
     const rpc = rpcPayload({
       op: RpcOp.Event,
@@ -73,7 +71,6 @@ export class RpcExchange {
       meta: { jsonMethodOrEventName: event }
     });
     this.io.sendRpc(rpc);
-    return Promise.resolve();
   }
 
   /** 入站 RequestResponse：匹配 dispatcher。 */
@@ -112,7 +109,7 @@ export class RpcExchange {
       );
   }
 
-  /** 入站 Event：路由到 event handler。 */
+  /** 入站 Event：路由到 event handler。单个 handler 抛错静默忽略（不影响其它）。 */
   dispatchEvent(payload: RpcPayload): void {
     const eventName = payload.meta.jsonMethodOrEventName ?? "";
     const handlers = this.router.getEventHandlers(eventName);
@@ -122,10 +119,8 @@ export class RpcExchange {
     for (const handler of handlers) {
       try {
         handler(data);
-      } catch (err) {
-        // 单个 handler 抛错不影响其它，但记录错误
-        const errMsg = err instanceof Error ? err.message : String(err);
-        console.warn(`event handler for "${eventName}" threw: ${errMsg}`);
+      } catch {
+        // 单个 handler 抛错静默忽略（与 stream listener 一致）
       }
     }
   }
@@ -135,8 +130,8 @@ export class RpcExchange {
     this.dispatcher.rejectAll(err);
   }
 
-  /** 未 ready 的业务请求 -> CONTROL_OPEN_REQUIRED。 */
-  rejectNotReady(payload: RpcPayload): void {
+  /** 未 ready 的业务请求 -> 回 CONTROL_OPEN_REQUIRED。 */
+  respondOpenRequired(payload: RpcPayload): void {
     if (payload.op === RpcOp.Request) {
       this.sendResponse(payload.requestId, ErrorCode.ControlOpenRequired);
     }

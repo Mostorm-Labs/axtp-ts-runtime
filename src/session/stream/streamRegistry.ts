@@ -11,7 +11,6 @@ import { AxtpError, ErrorCode } from "../../types/error.js";
 export interface StreamChunkHandler {
   onChunk(data: Bytes, cursor: bigint): void;
   onClose(reason?: string): void;
-  onError(error: AxtpError): void;
 }
 
 export interface StreamContext {
@@ -28,6 +27,17 @@ export interface StreamContext {
 
 export class StreamRegistry {
   private readonly streams = new Map<number, StreamContext>();
+  private nextStreamId = 1;
+
+  /** 本地分配一个非零 streamId（供 server 端预分配）。 */
+  allocate(): number {
+    while (this.streams.has(this.nextStreamId) || this.nextStreamId === 0) {
+      this.nextStreamId = this.nextStreamId >= 0xffffffff ? 1 : this.nextStreamId + 1;
+    }
+    const id = this.nextStreamId;
+    this.nextStreamId = this.nextStreamId >= 0xffffffff ? 1 : this.nextStreamId + 1;
+    return id;
+  }
 
   /** 对端分配的 streamId，本地 adopt 建收流 context（receive 方）。 */
   adopt(streamId: number): StreamContext {

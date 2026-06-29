@@ -10,7 +10,7 @@ import { Stream } from "./stream.js";
 import { StreamRegistry, type StreamContext } from "./streamRegistry.js";
 
 export class StreamManager {
-  readonly registry = new StreamRegistry();
+  private readonly registry = new StreamRegistry();
 
   constructor(private readonly io: SessionIO) {}
 
@@ -34,18 +34,24 @@ export class StreamManager {
   }
 
   /**
-   * 包装建流 handler：handler 执行返回 result（含 streamId），
-   * 建 receive context + Stream，返回 { result, stream }。
+   * 包装建流 handler：handler 接收 Stream（receive 方），可 send/onChunk。
+   * handler 返回 result（含 streamId），StreamManager 据此注册 receive context。
    */
   wrapStreamHandler(
-    handler: (params: unknown) => Promise<unknown> | unknown
+    handler: (params: unknown, stream: Stream) => Promise<unknown> | unknown
   ): (ctx: unknown, params: unknown) => Promise<{ result: unknown; stream: Stream }> {
     return async (_ctx, params) => {
-      const result = await handler(params);
-      const streamId = this.extractStreamId(result, "onStream handler must return streamId");
+      // 预分配 streamId，建 receive context + Stream，传给 handler
+      const streamId = this.registry.allocate();
       const recvCtx = this.registry.adopt(streamId);
       recvCtx.direction = "receive";
       const stream = this.makeStream(recvCtx);
+      const result = await handler(params, stream);
+      // 校验 handler 返回的 result 必须含匹配的 streamId
+      const resultStreamId = this.extractStreamId(result, "onStream handler must return streamId");
+      if (resultStreamId !== streamId) {
+        throw new AxtpError(ErrorCode.StreamIdInvalid, "onStream handler streamId mismatch");
+      }
       return { result, stream };
     };
   }
@@ -63,8 +69,8 @@ export class StreamManager {
   private makeStream(ctx: StreamContext): Stream {
     return new Stream(
       ctx,
-      (streamId, data, seqId) => {
-        this.io.sendStream(streamId, data, seqId);
+      (streamId, data, seqId, cursor) => {
+        this.io.sendStream(streamId, data, seqId, cursor);
       },
       (streamId) => this.registry.close(streamId, "local close")
     );

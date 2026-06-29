@@ -110,8 +110,8 @@ export class AxtpSession {
     // SessionIO
     this.io = {
       sendRpc: (p) => this.conn.sendRpc(p),
-      sendStream: (streamId, data, seqId) =>
-        this.conn.sendStream({ streamId, seqId, cursor: 0n, data })
+      sendStream: (streamId, data, seqId, cursor) =>
+        this.conn.sendStream({ streamId, seqId, cursor: cursor ?? 0n, data })
     };
 
     // 子组件
@@ -214,7 +214,8 @@ export class AxtpSession {
   emit(event: string, payload: unknown): Promise<void>;
   emit(event: string, payload: unknown): Promise<void> {
     this.requireReady();
-    return this.rpc.emitEvent(event, payload);
+    this.rpc.emitEvent(event, payload);
+    return Promise.resolve();
   }
 
   on<K extends EventName>(event: K, handler: EventHandler<K>): () => void;
@@ -240,14 +241,12 @@ export class AxtpSession {
 
   onStream(
     method: string,
-    handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>,
-    onStreamReady?: (stream: Stream) => void
+    handler: (ctx: CallContext, params: unknown, stream: Stream) => unknown | Promise<unknown>
   ): () => void {
     return this.handle(method, (async (ctx: unknown, params: unknown) => {
-      const { result, stream } = await this.streamMgr.wrapStreamHandler(async (p) =>
-        handler(ctx as CallContext, p)
+      const { result } = await this.streamMgr.wrapStreamHandler(
+        async (p, stream) => handler(ctx as CallContext, p, stream)
       )(ctx, params);
-      onStreamReady?.(stream);
       return result;
     }) as UntypedMethodHandler);
   }
@@ -277,7 +276,7 @@ export class AxtpSession {
 
     // 未 ready 的业务请求 -> CONTROL_OPEN_REQUIRED
     if (this.sessionState !== "ready") {
-      this.rpc.rejectNotReady(payload);
+      this.rpc.respondOpenRequired(payload);
       return;
     }
 

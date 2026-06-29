@@ -16,8 +16,7 @@ export interface HandshakeIngestResult {
 }
 
 export class HandshakeOrchestrator {
-  readonly handshake: Handshake;
-  private ready = false;
+  private readonly handshake: Handshake;
 
   constructor(
     logicalRole: LogicalRole,
@@ -27,6 +26,11 @@ export class HandshakeOrchestrator {
   ) {
     this.handshake = new Handshake(logicalRole, seed);
     if (eventMasks) this.handshake.setEventMasks(eventMasks);
+  }
+
+  /** 更新 eventMasks（重连后重新携带订阅意图）。 */
+  setEventMasks(eventMasks: string): void {
+    this.handshake.setEventMasks(eventMasks);
   }
 
   /** 链路 ready 后：Logical Server 发 Hello。 */
@@ -41,20 +45,16 @@ export class HandshakeOrchestrator {
   ingest(payload: RpcPayload): HandshakeIngestResult {
     const result = this.handshake.handle(payload);
     if (result.outbound) this.io.sendRpc(result.outbound);
-    if (result.becameReady) {
-      this.ready = true;
-    }
     return { becameReady: result.becameReady, error: result.error };
   }
 
   /** 重连后重置握手状态（重新走 Hello/Identify/Identified）。 */
   reset(): void {
-    this.ready = false;
     this.handshake.reset();
   }
 
   get isReady(): boolean {
-    return this.ready;
+    return this.handshake.isReady;
   }
 
   get sid(): string {

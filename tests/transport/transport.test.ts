@@ -75,7 +75,7 @@ describe("MockTransport", () => {
     expect(right.isConnected()).toBe(false);
   });
 
-  it("pause/resume 控制投递时序", () => {
+  it("pause/resume 控制投递时序", async () => {
     const { left, right } = createMockTransportPair();
     const received: number[] = [];
     right.onMessage.subscribe((b) => received.push(b.length));
@@ -84,6 +84,8 @@ describe("MockTransport", () => {
     left.send(new Uint8Array([1, 2]));
     expect(received).toEqual([]);
     right.resume();
+    // resume 现在异步投递（与 deliver 语义一致），需等 microtask
+    await new Promise((r) => setTimeout(r, 0));
     expect(received).toEqual([1, 2]);
   });
 });

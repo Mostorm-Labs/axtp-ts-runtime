@@ -87,11 +87,11 @@ export class MockTransport implements ITransport {
     this.paused = true;
   }
 
-  /** 恢复投递，flush 缓冲。 */
+  /** 恢复投递，异步 flush 缓冲（与 deliver 的 queueMicrotask 语义一致）。 */
   resume(): void {
     this.paused = false;
-    for (const bytes of this.pending) this.onMessage.emit(bytes);
-    this.pending.length = 0;
+    const buffered = this.pending.splice(0);
+    for (const bytes of buffered) this.deliver(bytes);
   }
 
   close(code: CloseCode = CloseCode.Normal, reason = "closed", remote = false): void {

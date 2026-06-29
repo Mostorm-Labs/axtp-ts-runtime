@@ -202,6 +202,11 @@ export class Connection {
     const buffered = this.pendingBytes.splice(0);
     for (const bytes of buffered) this.onTransportBytes(bytes);
 
+    this.startLinkHandshake();
+  }
+
+  /** 链路握手启动：framed 发 OPEN（client）/ 等 OPEN（server）；WS 直接 linkReady + 心跳。 */
+  private startLinkHandshake(): void {
     if (this.capabilities.supportsControl) {
       if (this.physicalRole === "client") this.pipeline?.sendOpen();
     } else {
@@ -267,6 +272,10 @@ export class Connection {
   }
 
   private handleReconnected(newTransport: ITransport): void {
+    // 先立即 detach 旧 transport 订阅，防止旧 transport 的异步投递字节进入新 pipeline
+    for (const unsub of this.transportUnsubs) unsub();
+    this.transportUnsubs = [];
+
     this.transport = newTransport;
     this.pendingBytes = [];
 
@@ -276,17 +285,11 @@ export class Connection {
     this.attachTransport(newTransport);
     this.setState("link_connecting");
 
-    if (this.capabilities.supportsControl) {
-      if (this.physicalRole === "client") this.pipeline?.sendOpen();
-    } else {
-      this.fireLinkReady();
-      this.startHeartbeat(this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
-    }
+    this.startLinkHandshake();
   }
 
   private handleReconnectSuccess(): void {
-    this.reconnectCoordinator?.notifySuccess();
-    this.reconnectCoordinator?.reset();
+    this.reconnectCoordinator?.onSuccess();
   }
 
   private handleReconnectFailed(): void {

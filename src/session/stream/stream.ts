@@ -22,7 +22,7 @@ export class Stream {
 
   constructor(
     private readonly ctx: StreamContext,
-    private readonly sendFn: (streamId: number, data: Bytes, seqId: number) => void,
+    private readonly sendFn: (streamId: number, data: Bytes, seqId: number, cursor?: bigint) => void,
     private readonly closeFn: (streamId: number) => void
   ) {
     // 绑定到 StreamContext 的 handler，把入站数据转发给本 Stream 的监听器。
@@ -39,19 +39,6 @@ export class Stream {
       onClose: (reason) => {
         if (this.closed) return;
         this.closed = true;
-        for (const listener of this.closeListeners) {
-          try {
-            listener(reason);
-          } catch {
-            // 忽略
-          }
-        }
-      },
-      onError: (error: AxtpError) => {
-        // 错误转化为 close（通知 reason 为错误消息）
-        if (this.closed) return;
-        this.closed = true;
-        const reason = error instanceof Error ? error.message : String(error);
         for (const listener of this.closeListeners) {
           try {
             listener(reason);
@@ -84,12 +71,12 @@ export class Stream {
     return () => this.closeListeners.delete(listener);
   }
 
-  /** 发送数据（出站，双向）。 */
-  send(data: Bytes): void {
+  /** 发送数据（出站，双向）。可选 cursor 透传（由应用层按 cursorUnit 解释）。 */
+  send(data: Bytes, cursor?: bigint): void {
     if (this.closed) throw new AxtpError(ErrorCode.StreamClosed, "stream closed");
     const seqId = this.ctx.nextLocalSeq;
     this.ctx.nextLocalSeq = (this.ctx.nextLocalSeq + 1) >>> 0;
-    this.sendFn(this.ctx.streamId, data, seqId);
+    this.sendFn(this.ctx.streamId, data, seqId, cursor);
   }
 
   /** 主动关闭（会触发 onClose）。 */

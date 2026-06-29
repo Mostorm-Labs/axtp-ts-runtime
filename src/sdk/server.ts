@@ -1,6 +1,6 @@
 // AxtpServer：多 client 管理 + 广播/单播（SDK 层，不知 Connection）。
 // 每 client 一个 AxtpSession（内含 Connection），Session 是上层一等对象。
-// handle/on 全局生效：注册到 HandlerRegistry，所有 session 委托查询。
+// handle/on 全局生效：注册到 HandlerRouter，所有 session 委托查询。
 // call(sessionId, ...) 单播；emit(...) 广播。
 //
 // 事件语义：
@@ -8,7 +8,7 @@
 // - onDisconnect: 单个 session 断开
 // - onClose: Server 整体关闭
 
-import { HandlerRegistry } from "../session/handler/handlerRegistry.js";
+import { HandlerRouter } from "../session/handler/handlerRouter.js";
 import {
   AxtpSession,
   type CallContext,
@@ -33,7 +33,7 @@ export type ServerOptions = CommonOptions;
 
 export class AxtpServer {
   private readonly sessions = new Map<number, AxtpSession>();
-  private readonly handlers = new HandlerRegistry();
+  private readonly handlers = new HandlerRouter();
   private readonly onConnectStream = new EventStream<AxtpSession>();
   private readonly onDisconnectStream = new EventStream<AxtpSession>();
   private readonly onErrorStream = new EventStream<AxtpError>();

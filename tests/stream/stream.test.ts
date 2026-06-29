@@ -18,7 +18,7 @@ describe("STREAM P0 端到端（framed-binary）", () => {
     const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
     await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
 
-    server.onStream("video.openStream", () => ({ streamId: 42, streamProfile: "media.video", state: "open" } as never));
+    server.onStream("video.openStream", (_ctx, _params, stream) => ({ streamId: stream.streamId, streamProfile: "media.video", state: "open" } as never));
 
     const { streamId, stream } = await client.openStream("video.openStream", {
       source: "cam0",
@@ -26,7 +26,7 @@ describe("STREAM P0 端到端（framed-binary）", () => {
       streamProfile: "media.video"
     } as never);
 
-    expect(streamId).toBe(42);
+    expect(streamId).toBeGreaterThan(0);
     expect(stream).toBeDefined();
   });
 
@@ -36,7 +36,7 @@ describe("STREAM P0 端到端（framed-binary）", () => {
     const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
     await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
 
-    server.onStream("video.openStream", () => ({ streamId: 7, streamProfile: "media.video", state: "open" } as never));
+    server.onStream("video.openStream", (_ctx, _params, stream) => ({ streamId: stream.streamId, streamProfile: "media.video", state: "open" } as never));
 
     const { stream } = await client.openStream("video.openStream", { source: "cam0" } as never);
 
@@ -55,21 +55,18 @@ describe("STREAM P0 端到端（framed-binary）", () => {
     const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
     await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
 
-    // server 端通过 onStreamReady 拿到 server-side Stream
-    let serverStream: { onChunk: (cb: (data: Bytes, cursor: bigint) => void) => () => void } | undefined;
+    // server 端 handler 直接接收 Stream（onStream 第三参数）
+    const serverChunks: Bytes[] = [];
     server.onStream(
       "video.openStream",
-      () => ({ streamId: 99, streamProfile: "media.video", state: "open" } as never),
-      (s) => { serverStream = s; }
+      (_ctx, _params, stream) => {
+        stream.onChunk((data) => serverChunks.push(data));
+        return { streamId: stream.streamId, streamProfile: "media.video", state: "open" } as never;
+      }
     );
 
     const { stream } = await client.openStream("video.openStream", { source: "cam0" } as never);
     await settle(10);
-
-    expect(serverStream).toBeDefined();
-    if (serverStream === undefined) return;
-    const serverChunks: Bytes[] = [];
-    serverStream.onChunk((data) => serverChunks.push(data));
 
     // client send
     stream.send(new Uint8Array([1, 2, 3]));
