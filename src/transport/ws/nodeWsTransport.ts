@@ -53,7 +53,9 @@ class WsTransport implements ITransport {
       } else if (data instanceof ArrayBuffer) {
         bytes = new Uint8Array(data);
       } else {
-        bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        // 单 Buffer 文本帧：拷贝而非别名（Node Buffer 共享池 ArrayBuffer，attach 前缓冲
+        // 到 buffered[] 期间内存可能被复用，导致后续解码的 JSON envelope 被改写）。
+        bytes = new Uint8Array(data);
       }
       if (!this.attached) {
         this.buffered.push(bytes);
@@ -127,6 +129,7 @@ interface WsServerOptions {
 export class NodeWsServerTransport implements IServerTransport {
   readonly onConnection = new EventStream<ITransport>();
   readonly onClose = new EventStream<void>();
+  readonly onError = new EventStream<AxtpError>();
   readonly capabilities = unframedJsonCapabilities();
   private wss: WebSocketServer | undefined;
   private listening = false;
@@ -140,7 +143,12 @@ export class NodeWsServerTransport implements IServerTransport {
         host: this.options.host
       });
       this.wss.on("error", (err) => {
-        if (!this.listening) reject(err);
+        if (!this.listening) {
+          reject(err);
+          return;
+        }
+        // listen 成功后的 server 错误：reject 对已 resolve 的 promise 是 no-op，经 onError 显式上抛。
+        this.onError.emit(new AxtpError(ErrorCode.TransportDisconnected, err.message, err));
       });
       this.wss.on("connection", (ws: WebSocket) => {
         this.onConnection.emit(new WsTransport(ws));

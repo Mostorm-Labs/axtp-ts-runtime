@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { AxtpSession } from "../../src/session/session.js";
 import { createMockTransportPair } from "../../src/transport/mock/mockTransport.js";
 import {
@@ -11,6 +11,15 @@ function settle(ms = 20): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// 跟踪本文件创建的 session，afterEach 统一关闭，避免 Heartbeat 定时器在测试结束后继续存活
+// （WS keepalive tick / framed heartbeat tick 都会持续运行，watch 模式下跨用例泄漏）。
+const createdSessions: AxtpSession[] = [];
+
+afterEach(() => {
+  for (const s of createdSessions) s.close();
+  createdSessions.length = 0;
+});
+
 async function makePair(
   wire: "ws" | "framed"
 ): Promise<{ client: AxtpSession; server: AxtpSession }> {
@@ -19,6 +28,7 @@ async function makePair(
   // 经典场景：server 暴露能力（Logical Server），client 消费（Logical Client）
   const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
   const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
+  createdSessions.push(client, server);
   // onReady 现在是 EventStream，await 首次 emit
   await Promise.all([
     new Promise<void>((r) => client.onReady.subscribe(() => r())),

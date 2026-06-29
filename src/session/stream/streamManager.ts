@@ -46,13 +46,19 @@ export class StreamManager {
       const recvCtx = this.registry.adopt(streamId);
       recvCtx.direction = "receive";
       const stream = this.makeStream(recvCtx);
-      const result = await handler(params, stream);
-      // 校验 handler 返回的 result 必须含匹配的 streamId
-      const resultStreamId = this.extractStreamId(result, "onStream handler must return streamId");
-      if (resultStreamId !== streamId) {
-        throw new AxtpError(ErrorCode.StreamIdInvalid, "onStream handler streamId mismatch");
+      try {
+        const result = await handler(params, stream);
+        // 校验 handler 返回的 result 必须含匹配的 streamId
+        const resultStreamId = this.extractStreamId(result, "onStream handler must return streamId");
+        if (resultStreamId !== streamId) {
+          throw new AxtpError(ErrorCode.StreamIdInvalid, "onStream handler streamId mismatch");
+        }
+        return { result, stream };
+      } catch (err) {
+        // handler 抛错 / result 缺 streamId / streamId 不匹配：释放已 adopt 的 context，避免泄漏。
+        this.registry.close(streamId, "onStream handler error");
+        throw err;
       }
-      return { result, stream };
     };
   }
 

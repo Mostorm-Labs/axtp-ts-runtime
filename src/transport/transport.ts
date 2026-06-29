@@ -78,6 +78,8 @@ export interface IServerTransport {
   listen(): Promise<void>;
   readonly onConnection: EventStream<ITransport>;
   readonly onClose: EventStream<void>;
+  /** server 级错误（listen 成功后的 accept 期错误等）。 */
+  readonly onError: EventStream<AxtpError>;
   close(): Promise<void>;
 }
 

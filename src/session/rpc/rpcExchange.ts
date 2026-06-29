@@ -98,11 +98,22 @@ export class RpcExchange {
       .then(() => handler(ctx, params))
       .then(
         (result) => {
-          this.sendResponse(payload.requestId, ErrorCode.Success, encodeJsonBody(result));
+          // 链路可能在 handler 异步执行期间转入 reconnecting/closed：Connection.sendRpc 此时同步抛。
+          // 结果不可 JSON 序列化时 encodeJsonBody 也会抛。此处不可让异常逃逸为进程级
+          // unhandledRejection——响应无法投递时忽略（对端会重连/超时重试）。
+          try {
+            this.sendResponse(payload.requestId, ErrorCode.Success, encodeJsonBody(result));
+          } catch {
+            /* 链路不可用 / 结果不可序列化：响应无法投递，忽略 */
+          }
         },
         (err) => {
           const code = err instanceof AxtpError ? err.code : ErrorCode.RpcExecutionFailed;
-          this.sendResponse(payload.requestId, code);
+          try {
+            this.sendResponse(payload.requestId, code);
+          } catch {
+            /* 链路不可用：错误响应无法投递，忽略 */
+          }
         }
       );
   }

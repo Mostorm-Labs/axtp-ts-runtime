@@ -3,7 +3,7 @@ import { Connection } from "../../src/connection/connection.js";
 import { RpcOp } from "../../src/protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../../src/protocol/model.js";
 import { rpcPayload } from "../../src/protocol/model.js";
-import { createMockTransportPair } from "../../src/transport/mock/mockTransport.js";
+import { createMockTransportPair, MockTransport } from "../../src/transport/mock/mockTransport.js";
 import {
   framedBinaryCapabilities,
   unframedJsonCapabilities
@@ -221,5 +221,89 @@ describe("Connection 心跳（WS unframed-json）", () => {
 
     clientConnection.close();
     await serverTransport.close();
+  });
+});
+
+describe("Connection 重连修复回归", () => {
+  it("本地 close() 不误发 onDisconnect、不武装重连复活（framed/unframed 通用）", async () => {
+    const { left, right } = createMockTransportPair(unframedJsonCapabilities());
+    const server = new Connection("server", right);
+    server.start();
+
+    let factoryCalls = 0;
+    const client = new Connection(
+      "client",
+      left,
+      { reconnect: { enabled: true, initialDelayMs: 5, jitter: false } },
+      () => {
+        factoryCalls += 1;
+        return Promise.resolve(new MockTransport(unframedJsonCapabilities()));
+      }
+    );
+    client.start();
+    await settle(10); // unframed 立即 linkReady -> onSuccess（active=false）
+
+    let disconnectCount = 0;
+    client.onDisconnect.subscribe(() => {
+      disconnectCount += 1;
+    });
+
+    client.close(); // 本地主动关闭
+    await settle(20);
+
+    // 修复后：本地关闭不发 onDisconnect；transport.close() 同步触发 onClose 时 connState 已 closed，
+    // handleTransportClose 提前返回，不会在已 stop 的协调器上重新武装重连（“复活”已关闭连接）。
+    expect(disconnectCount).toBe(0);
+    expect(factoryCalls).toBe(0);
+    expect(client.isClosed).toBe(true);
+  });
+
+  it("重连交还的新 transport 在 link-ready 前断开 -> 继续重连至 maxAttempts，不永久卡死", async () => {
+    vi.useFakeTimers();
+    try {
+      const { left, right } = createMockTransportPair(framedBinaryCapabilities());
+      const server = new Connection("server", right);
+      server.start();
+
+      let factoryCalls = 0;
+      const client = new Connection(
+        "client",
+        left,
+        { reconnect: { enabled: true, initialDelayMs: 1, maxAttempts: 5, jitter: false } },
+        () => {
+          factoryCalls += 1;
+          const t = new MockTransport(framedBinaryCapabilities());
+          // 新 transport 不连任何对端（OPEN 得不到 ACCEPT，link 永不会 ready），
+          // 并在 attach 之后、link-ready 之前关闭 —— 正是原 bug 的卡死窗口。
+          setTimeout(() => t.close(), 0);
+          return Promise.resolve(t);
+        }
+      );
+      client.start();
+      await vi.advanceTimersByTimeAsync(20); // 初始 framed 握手完成 -> onSuccess
+
+      let reconnectCount = 0;
+      let failed = false;
+      client.onReconnect.subscribe(() => {
+        reconnectCount += 1;
+      });
+      client.onReconnectFailed.subscribe(() => {
+        failed = true;
+      });
+
+      left.close(); // 触发重连
+      // 退避 1+2+4+8+16ms + 各次 0ms 关闭，共 < 50ms 即可走完 5 次尝试并 onReconnectFailed。
+      await vi.advanceTimersByTimeAsync(100);
+
+      // 修复前：首次交还后 active 仍为 true，新 transport 断开时 start() 空转、timer 为陈旧 id，
+      // 连接永久卡在 reconnecting（factoryCalls=1、永不 onReconnectFailed）。
+      // 修复后：交还即置 active=false，每次断开都能重新编排，直到 maxAttempts -> onReconnectFailed。
+      expect(factoryCalls).toBeGreaterThanOrEqual(2);
+      expect(reconnectCount).toBeGreaterThanOrEqual(2);
+      expect(failed).toBe(true);
+      expect(client.isClosed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

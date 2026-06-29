@@ -3,7 +3,7 @@ import { AXTP_SPEC_VERSION } from "../../src/protocol/generated/axtpVersion.js";
 // 逐个验证 runtime 的 wire 行为符合 conformance 期望。
 // 依据：conformance/manifest.yaml 的 required_cases + 各 case yaml 的 assertions。
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { RpcOp } from "../../src/protocol/generated/axtp_ids_generated.js";
 import { AxtpSession } from "../../src/session/session.js";
 import { createMockTransportPair } from "../../src/transport/mock/mockTransport.js";
@@ -18,11 +18,20 @@ import {
   buildResponseJson
 } from "../helpers/jsonRpcBuilders.js";
 
+// 跟踪创建的 session，afterEach 统一关闭，避免 Heartbeat 定时器在测试结束后继续存活。
+const createdSessions: AxtpSession[] = [];
+
+afterEach(() => {
+  for (const s of createdSessions) s.close();
+  createdSessions.length = 0;
+});
+
 async function makePair(): Promise<{ client: AxtpSession; server: AxtpSession }> {
   const { left, right } = createMockTransportPair(unframedJsonCapabilities());
   // 经典场景：server=Logical Server, client=Logical Client
   const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
   const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
+  createdSessions.push(client, server);
   await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
   return { client, server };
 }

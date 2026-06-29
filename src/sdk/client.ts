@@ -128,6 +128,9 @@ export class AxtpClient {
       this.setState("ready");
       this.onConnect.emit(undefined);
     } catch (err) {
+      // 关闭已创建的 session（含 Connection/心跳定时器/transport），避免握手卡住超时后资源泄漏。
+      this.session?.close();
+      this.session = undefined;
       this.setState("closed");
       throw err instanceof AxtpError
         ? err
@@ -146,12 +149,14 @@ export class AxtpClient {
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         unsub();
+        closeUnsub();
         reject(new AxtpError(ErrorCode.Timeout, `connect timed out after ${timeoutMs}ms`));
       }, timeoutMs);
 
       const unsub = session.onReady.subscribe(() => {
         clearTimeout(timer);
         unsub();
+        closeUnsub();
         resolve();
       });
 

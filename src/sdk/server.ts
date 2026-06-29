@@ -47,6 +47,7 @@ export class AxtpServer {
 
   async listen(): Promise<void> {
     this.transport.onConnection.subscribe((t) => this.adoptConnection(t));
+    this.transport.onError.subscribe((err) => this.onErrorStream.emit(err));
     await this.transport.listen();
   }
 
@@ -64,8 +65,11 @@ export class AxtpServer {
     });
 
     session.onClose.subscribe(() => {
-      this.sessions.delete(session.id);
-      this.onDisconnectStream.emit(session);
+      // 仅当该 session 确曾 onConnect（已在表中）才发 onDisconnect，避免对握手失败、
+      // 从未 onConnect 的 session 触发“幽灵” onDisconnect。
+      if (this.sessions.delete(session.id)) {
+        this.onDisconnectStream.emit(session);
+      }
     });
 
     session.onError.subscribe((err) => {
@@ -167,6 +171,7 @@ export class AxtpServer {
   }
 
   async close(): Promise<void> {
+    if (this.closed) return;
     this.closed = true;
     for (const session of this.sessions.values()) session.close();
     this.sessions.clear();

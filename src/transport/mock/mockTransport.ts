@@ -113,6 +113,7 @@ export class MockTransport implements ITransport {
 export class MockServerTransport implements IServerTransport {
   readonly onConnection = new EventStream<ITransport>();
   readonly onClose = new EventStream<void>();
+  readonly onError = new EventStream<AxtpError>();
   private listening = false;
   private accepted: MockTransport[] = [];
 
@@ -141,6 +142,7 @@ export class MockServerTransport implements IServerTransport {
     this.accepted.length = 0;
     this.onClose.emit(undefined);
     this.onConnection.close();
+    this.onError.close();
     return Promise.resolve();
   }
 }

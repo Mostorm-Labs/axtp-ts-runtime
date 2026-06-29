@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { AxtpClient } from "../../src/sdk/client.js";
 import { AxtpServer } from "../../src/sdk/server.js";
 import {
@@ -10,6 +10,17 @@ import { unframedJsonCapabilities } from "../../src/transport/transport.js";
 function settle(ms = 20): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+// 跟踪创建的 client/server，afterEach 统一关闭，避免 Connection/Heartbeat 定时器在测试结束后继续存活。
+const createdClients: AxtpClient[] = [];
+const createdServers: AxtpServer[] = [];
+
+afterEach(async () => {
+  for (const c of createdClients) await c.close();
+  for (const s of createdServers) await s.close();
+  createdClients.length = 0;
+  createdServers.length = 0;
+});
 
 async function makeServerClient(): Promise<{
   server: AxtpServer;
@@ -24,6 +35,8 @@ async function makeServerClient(): Promise<{
 
   const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
   const client = new AxtpClient(clientTransport, { logicalRole: "client" });
+  createdClients.push(client);
+  createdServers.push(server);
   await client.connect();
   await settle(10);
   return { server, client, serverTransport };

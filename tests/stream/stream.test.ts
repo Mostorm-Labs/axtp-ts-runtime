@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { Bytes } from "../../src/io/bytes.js";
 import { AxtpSession } from "../../src/session/session.js";
 import { createMockTransportPair } from "../../src/transport/mock/mockTransport.js";
@@ -11,12 +11,21 @@ function settle(ms = 20): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// 跟踪创建的 session，afterEach 统一关闭，避免 Heartbeat 定时器在测试结束后继续存活。
+const createdSessions: AxtpSession[] = [];
+
+afterEach(() => {
+  for (const s of createdSessions) s.close();
+  createdSessions.length = 0;
+});
+
 describe("STREAM P0 端到端（framed-binary）", () => {
   it("client openStream -> server 返回 streamId", async () => {
     const { left, right } = createMockTransportPair(framedBinaryCapabilities());
     const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
     const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
     await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
+    createdSessions.push(client, server);
 
     server.onStream("video.openStream", (_ctx, _params, stream) => ({ streamId: stream.streamId, streamProfile: "media.video", state: "open" } as never));
 
@@ -35,6 +44,7 @@ describe("STREAM P0 端到端（framed-binary）", () => {
     const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
     const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
     await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
+    createdSessions.push(client, server);
 
     server.onStream("video.openStream", (_ctx, _params, stream) => ({ streamId: stream.streamId, streamProfile: "media.video", state: "open" } as never));
 
@@ -54,6 +64,7 @@ describe("STREAM P0 端到端（framed-binary）", () => {
     const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
     const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
     await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
+    createdSessions.push(client, server);
 
     // server 端 handler 直接接收 Stream（onStream 第三参数）
     const serverChunks: Bytes[] = [];
@@ -83,6 +94,7 @@ describe("STREAM 在 WS 模式下拒绝", () => {
     const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
     const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
     await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
+    createdSessions.push(client, server);
 
     server.onStream("video.openStream", () => ({ streamId: 1, streamProfile: "media.video", state: "open" } as never));
 

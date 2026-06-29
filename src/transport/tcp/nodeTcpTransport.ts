@@ -33,7 +33,9 @@ class TcpTransport implements ITransport {
 
   constructor(private readonly socket: net.Socket) {
     socket.on("data", (data: Buffer) => {
-      const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      // 拷贝而非别名：Node 的 Buffer 共享内部池 ArrayBuffer，部分帧会跨多次 'data' 事件
+      // 在 CodecPipeline 中缓冲拼接；若零拷贝建视图，下一次读会覆盖池内存，重组帧被静默损坏。
+      const bytes = new Uint8Array(data);
       if (!this.attached) {
         this.buffered.push(bytes);
         return;
@@ -82,6 +84,7 @@ class TcpTransport implements ITransport {
 export class NodeTcpServerTransport implements IServerTransport {
   readonly onConnection = new EventStream<ITransport>();
   readonly onClose = new EventStream<void>();
+  readonly onError = new EventStream<AxtpError>();
   readonly capabilities = framedBinaryCapabilities();
   private server: net.Server | undefined;
   private listening = false;
@@ -94,7 +97,14 @@ export class NodeTcpServerTransport implements IServerTransport {
         this.onConnection.emit(new TcpTransport(socket));
       });
       this.server.on("error", (err) => {
-        if (!this.listening) reject(err);
+        if (!this.listening) {
+          // pre-listen 错误（如 EADDRINUSE）经 reject 上抛
+          reject(err);
+          return;
+        }
+        // listen 成功后的 server 错误（accept 期 ECONNRESET/EMFILE 等）：reject 对已 resolve
+        // 的 promise 是 no-op，必须经 onError 显式上抛，否则被静默吞掉、server 静默停止接受连接。
+        this.onError.emit(new AxtpError(ErrorCode.TransportDisconnected, err.message, err));
       });
       this.server.listen(this.options.port, this.options.host, () => {
         this.listening = true;

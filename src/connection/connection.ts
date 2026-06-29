@@ -248,8 +248,13 @@ export class Connection {
     if (this.capabilities.supportsControl && this.pipeline?.controlSessionIsOpen) {
       this.pipeline.sendClose();
     }
-    this.transport.close();
+    // 先 terminate（置 connState=closed + emit onClose + cleanupStreams），再 transport.close()。
+    // TCP/WS 的 close() 同步 emit onClose → handleTransportClose；此时 connState 已为 closed，
+    // 命中其 `if (connState === "closed") return` 提前返回。否则本地关闭会误发 onDisconnect，
+    // 且因 close() 已 stop() 协调器（active=false），handleTransportClose→start() 反而重新武装
+    // 重连，定时器到期后 handleReconnected 不检查 closed → “复活”已关闭的连接。
     this.terminate({ code, reason, remote: false });
+    this.transport.close();
   }
 
   /** 统一收尾：setState(closed) + emit onClose (+可选 onReconnectFailed) + cleanupStreams。 */
