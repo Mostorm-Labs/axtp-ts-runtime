@@ -6,14 +6,14 @@
 import { ErrorCode } from "../../protocol/generated/axtp_ids_generated.js";
 import type { StreamPayload } from "../../protocol/model.js";
 import { AxtpError } from "../../types/error.js";
-import type { SessionIO } from "../handshake/handshakeOrchestrator.js";
+import type { SessionIO } from "../types.js";
 import { Stream } from "./stream.js";
 import { StreamRegistry, type StreamContext } from "./streamRegistry.js";
 
 export class StreamManager {
   readonly registry = new StreamRegistry();
 
-  constructor(private readonly io: SessionIO & { sendStream: (p: StreamPayload) => void }) {}
+  constructor(private readonly io: SessionIO) {}
 
   /** 入站 STREAM 数据：按 streamId 路由。 */
   onData(payload: StreamPayload): void {
@@ -37,15 +37,13 @@ export class StreamManager {
     return { streamId, response: result, stream };
   }
 
-  /** 注册建流 handler（server 端）。返回的 result 含 streamId，handler 用它建 receive context。 */
   /**
    * 包装建流 handler：handler 执行返回 result（含 streamId），
-   * 建 receive context + Stream，通过 onStreamCreated 回调把 Stream 交给调用方。
+   * 建 receive context + Stream，返回 { result, stream }。
    */
   wrapStreamHandler(
-    handler: (params: unknown) => Promise<unknown> | unknown,
-    onStreamCreated: (stream: Stream) => void
-  ): (ctx: unknown, params: unknown) => Promise<unknown> {
+    handler: (params: unknown) => Promise<unknown> | unknown
+  ): (ctx: unknown, params: unknown) => Promise<{ result: unknown; stream: Stream }> {
     return async (_ctx, params) => {
       const result = await handler(params);
       const streamId = (result as { streamId?: number }).streamId;
@@ -55,8 +53,7 @@ export class StreamManager {
       const recvCtx = this.registry.adopt(streamId);
       recvCtx.direction = "receive";
       const stream = this.makeStream(recvCtx);
-      onStreamCreated(stream);
-      return result;
+      return { result, stream };
     };
   }
 
@@ -65,7 +62,7 @@ export class StreamManager {
     return new Stream(
       ctx,
       (streamId, data, seqId) => {
-        this.io.sendStream({ streamId, seqId, cursor: 0n, data });
+        this.io.sendStream(streamId, data, seqId);
       },
       (streamId) => this.registry.close(streamId, "local close")
     );

@@ -2,14 +2,14 @@
 // 持有 RpcDispatcher（pending call Promise 匹配）。
 // 通过 SessionIO 发送，通过 HandlerRouter 路由入站。
 
+import { bytesToText, toBytes } from "../../io/bytes.js";
 import { ErrorCode, RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../../protocol/model.js";
 import { rpcPayload } from "../../protocol/model.js";
 import { AxtpError } from "../../types/error.js";
 import { registry } from "../../types/registry.js";
 import type { HandlerRouter } from "../handler/handlerRouter.js";
-import type { SessionIO } from "../handshake/handshakeOrchestrator.js";
-import type { CallContext } from "../types.js";
+import type { CallContext, SessionIO } from "../types.js";
 import { RpcDispatcher } from "./rpcDispatcher.js";
 
 export class RpcExchange {
@@ -31,7 +31,7 @@ export class RpcExchange {
         requestId: id,
         methodOrEventId: methodId,
         jsonSid: this.getSid(),
-        body: new TextEncoder().encode(JSON.stringify(params ?? {})),
+        body: toBytes(JSON.stringify(params ?? {})),
         meta: { jsonMethodOrEventName: method }
       });
       this.io.sendRpc(rpc);
@@ -48,7 +48,7 @@ export class RpcExchange {
       }
       if (payload.body.length === 0) return undefined;
       try {
-        return JSON.parse(new TextDecoder().decode(payload.body));
+        return JSON.parse(bytesToText(payload.body));
       } catch {
         throw new AxtpError(
           ErrorCode.RpcPayloadInvalid,
@@ -67,7 +67,7 @@ export class RpcExchange {
       op: RpcOp.Event,
       methodOrEventId: eventId,
       jsonSid: this.getSid(),
-      body: new TextEncoder().encode(JSON.stringify(payload ?? {})),
+      body: toBytes(JSON.stringify(payload ?? {})),
       meta: { jsonMethodOrEventName: event }
     });
     this.io.sendRpc(rpc);
@@ -99,7 +99,7 @@ export class RpcExchange {
 
     let params: unknown;
     try {
-      params = payload.body.length === 0 ? {} : JSON.parse(new TextDecoder().decode(payload.body));
+      params = payload.body.length === 0 ? {} : JSON.parse(bytesToText(payload.body));
     } catch {
       this.io.sendRpc(
         rpcPayload({
@@ -122,7 +122,7 @@ export class RpcExchange {
               requestId: payload.requestId,
               statusCode: ErrorCode.Success,
               jsonSid: this.getSid(),
-              body: new TextEncoder().encode(JSON.stringify(result ?? {}))
+              body: toBytes(JSON.stringify(result ?? {}))
             })
           );
         },
@@ -147,7 +147,7 @@ export class RpcExchange {
     if (handlers.size === 0) return;
     let data: unknown;
     try {
-      data = payload.body.length === 0 ? {} : JSON.parse(new TextDecoder().decode(payload.body));
+      data = payload.body.length === 0 ? {} : JSON.parse(bytesToText(payload.body));
     } catch {
       return;
     }

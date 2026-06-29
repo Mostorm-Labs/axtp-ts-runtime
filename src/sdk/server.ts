@@ -21,11 +21,22 @@ import type {
   MethodResponse
 } from "../types/registry.js";
 
+/**
+ * Server 选项（独立定义，不继承 SessionOptions）。
+ */
 export interface ServerOptions {
-  defaultTimeoutMs?: number;
-  handshakeTimeoutMs?: number;
   /** Logical 角色：默认 "client"（收 Hello、发 Identify，Cloud Reverse 主场景）。 */
   logicalRole?: LogicalRole;
+  /** call 默认超时 ms。 */
+  defaultTimeoutMs?: number;
+  /** 握手超时 ms。 */
+  handshakeTimeoutMs?: number;
+  /** 心跳间隔 ms（透传给每个 session 的 Connection）。 */
+  heartbeatIntervalMs?: number;
+  /** 心跳超时 ms。 */
+  heartbeatTimeoutMs?: number;
+  /** 最大帧大小。 */
+  maxFrameSize?: number;
 }
 
 export class AxtpServer {
@@ -52,6 +63,10 @@ export class AxtpServer {
       physicalRole: "server",
       logicalRole,
       defaultTimeoutMs: this.options.defaultTimeoutMs ?? 10000,
+      handshakeTimeoutMs: this.options.handshakeTimeoutMs,
+      heartbeatIntervalMs: this.options.heartbeatIntervalMs,
+      heartbeatTimeoutMs: this.options.heartbeatTimeoutMs,
+      maxFrameSize: this.options.maxFrameSize,
       globalHandlers: this.handlers
     });
     this.sessions.set(session.id, session);
@@ -82,7 +97,7 @@ export class AxtpServer {
   ): Promise<unknown> {
     const session = this.sessions.get(sessionId);
     if (session === undefined) return Promise.reject(new Error(`session ${sessionId} not found`));
-    return session.call(method as never, params as never, options);
+    return session.call(method, params, options);
   }
 
   async emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
@@ -101,7 +116,8 @@ export class AxtpServer {
       if (filter !== undefined && !filter(s)) return false;
       return true;
     });
-    await Promise.all(targets.map((s) => s.emit(event as never, payload as never)));
+    // M12：用 allSettled 避免单个 session 失败拖垮整体广播
+    await Promise.allSettled(targets.map((s) => s.emit(event, payload)));
   }
 
   handle<K extends MethodName>(

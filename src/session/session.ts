@@ -8,8 +8,8 @@
 
 import { Connection, type ConnectionOptions } from "../connection/connection.js";
 import { RpcOp } from "../protocol/generated/axtp_ids_generated.js";
-import type { RpcPayload, StreamPayload } from "../protocol/model.js";
-import type { CloseReason, ITransport, LogicalRole, PhysicalRole } from "../transport/transport.js";
+import type { RpcPayload } from "../protocol/model.js";
+import type { CloseReason, ITransport } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {
@@ -54,8 +54,6 @@ let nextSessionId = 1;
 
 export class AxtpSession {
   private conn: Connection;
-  private readonly logicalRole: LogicalRole;
-  private readonly physicalRole: PhysicalRole;
 
   // 子组件
   private readonly router: HandlerRouter;
@@ -64,7 +62,7 @@ export class AxtpSession {
   private readonly streamMgr: StreamManager;
 
   // SessionIO：子组件通过此发送（转发到 Connection）
-  private readonly io: SessionIO & { sendStream: (p: StreamPayload) => void };
+  private readonly io: SessionIO;
 
   private readonly onReadyStream = new EventStream<void>();
   private readonly onCloseStream = new EventStream<SessionCloseInfo>();
@@ -72,6 +70,7 @@ export class AxtpSession {
     attempt: number;
     totalDowntimeMs: number;
   }>();
+  private readonly onReconnectFailedStream = new EventStream<void>();
   private readonly onErrorStream = new EventStream<AxtpError>();
 
   private ready = false;
@@ -84,8 +83,6 @@ export class AxtpSession {
   constructor(transport: ITransport, options: SessionOptions = {}) {
     const physicalRole = options.physicalRole ?? "client";
     const logicalRole = options.logicalRole ?? "server";
-    this.physicalRole = physicalRole;
-    this.logicalRole = logicalRole;
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? 10000;
     this.id = nextSessionId++;
 
@@ -101,7 +98,8 @@ export class AxtpSession {
     // SessionIO：子组件通过此发送（转发到 Connection）
     this.io = {
       sendRpc: (p) => this.conn.sendRpc(p),
-      sendStream: (p) => this.conn.sendStream(p)
+      sendStream: (streamId, data, seqId) =>
+        this.conn.sendStream({ streamId, seqId, cursor: 0n, data })
     };
 
     // 子组件
@@ -121,6 +119,7 @@ export class AxtpSession {
     this.conn.onLinkReady.subscribe(() => this.onLinkReady());
     this.conn.onClose.subscribe((r) => this.handleClose(r));
     this.conn.onReconnect.subscribe((info) => this.handleReconnect(info.attempt));
+    this.conn.onReconnectFailed.subscribe(() => this.onReconnectFailedStream.emit(undefined));
     this.conn.onError.subscribe((err) => this.onErrorStream.emit(err));
 
     // H3：握手超时（防止 onReady 永不 resolve）
@@ -157,10 +156,6 @@ export class AxtpSession {
   private onReadyReject?: (err: AxtpError) => void;
   readonly onReady: Promise<void>;
 
-  get onReadyEvent(): EventStream<void> {
-    return this.onReadyStream;
-  }
-
   get onClose(): EventStream<SessionCloseInfo> {
     return this.onCloseStream;
   }
@@ -171,6 +166,10 @@ export class AxtpSession {
 
   get onReconnect(): EventStream<{ attempt: number; totalDowntimeMs: number }> {
     return this.onReconnectStream;
+  }
+
+  get onReconnectFailed(): EventStream<void> {
+    return this.onReconnectFailedStream;
   }
 
   get isReady(): boolean {
@@ -186,7 +185,7 @@ export class AxtpSession {
   }
 
   get state(): SessionState {
-    return this.handshakeOrch.state as SessionState;
+    return this.handshakeOrch.state;
   }
 
   close(): void {
@@ -252,19 +251,21 @@ export class AxtpSession {
     );
   }
 
+  /**
+   * 注册建流 handler（server 端）。handler 返回含 streamId 的 result，
+   * StreamManager 自动创建 receive Stream，通过 onStreamReady 回调交给调用方。
+   */
   onStream(
     method: string,
-    handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
+    handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>,
+    _onStreamReady?: (stream: Stream) => void
   ): () => void {
-    // M3：onStreamCreated 把 Stream 存到闭包变量（handler 可在返回后通过外部引用访问）
-    const streamHolder: { stream?: Stream } = {};
-    return this.handle(method, ((ctx: unknown, params: unknown) =>
-      this.streamMgr.wrapStreamHandler(
-        async (p) => handler(ctx as CallContext, p),
-        (stream) => {
-          streamHolder.stream = stream;
-        }
-      )(ctx, params)) as UntypedMethodHandler);
+    return this.handle(method, (async (ctx: unknown, params: unknown) => {
+      const { result } = await this.streamMgr.wrapStreamHandler(async (p) =>
+        handler(ctx as CallContext, p)
+      )(ctx, params);
+      return result;
+    }) as UntypedMethodHandler);
   }
 
   // ===== 入站总入口 =====

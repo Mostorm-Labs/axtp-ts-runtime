@@ -45,14 +45,6 @@ export class EventStream<T> {
     }
   }
 
-  get listenerCount(): number {
-    return this.listeners.size;
-  }
-
-  hasListeners(): boolean {
-    return this.listeners.size > 0;
-  }
-
   /** 关闭流：清除所有订阅者。 */
   close(): void {
     this.listeners.clear();

@@ -57,29 +57,9 @@ export class StreamRegistry {
   private readonly streams = new Map<number, StreamContext>();
   private readonly allocator = new StreamIdAllocator();
 
-  /** 本地发起建流：分配 streamId，返回 context（send 方）。 */
-  open(): StreamContext {
-    const streamId = this.allocator.allocate();
-    const ctx: StreamContext = {
-      streamId,
-      direction: "send",
-      expectedSeq: 0,
-      hasSeq: false,
-      chunks: 0,
-      bytes: 0,
-      handler: undefined,
-      nextLocalSeq: 0,
-      closed: false
-    };
-    this.streams.set(streamId, ctx);
-    return ctx;
-  }
-
   /** 对端分配的 streamId，本地 adopt 建收流 context（receive 方）。 */
   adopt(streamId: number): StreamContext {
     if (streamId === 0) throw new AxtpError(ErrorCode.StreamIdInvalid, "streamId must be non-zero");
-    if (this.streams.has(streamId))
-      throw new AxtpError(ErrorCode.StreamAlreadyOpen, `stream ${streamId} already open`);
     this.allocator.markInUse(streamId);
     const ctx: StreamContext = {
       streamId,
@@ -114,12 +94,6 @@ export class StreamRegistry {
     ctx.handler?.onChunk(payload.data, payload.cursor);
   }
 
-  /** 注册 chunk handler。 */
-  setHandler(streamId: number, handler: StreamChunkHandler): void {
-    const ctx = this.streams.get(streamId);
-    if (ctx !== undefined) ctx.handler = handler;
-  }
-
   /** 关闭单个流。 */
   close(streamId: number, reason?: string): void {
     const ctx = this.streams.get(streamId);
@@ -137,17 +111,5 @@ export class StreamRegistry {
       ctx.handler?.onClose(reason);
     }
     this.streams.clear();
-  }
-
-  has(streamId: number): boolean {
-    return this.streams.has(streamId);
-  }
-
-  get(streamId: number): StreamContext | undefined {
-    return this.streams.get(streamId);
-  }
-
-  get count(): number {
-    return this.streams.size;
   }
 }

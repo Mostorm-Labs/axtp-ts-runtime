@@ -5,12 +5,8 @@
 import { RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../../protocol/model.js";
 import type { LogicalRole } from "../../transport/transport.js";
-import { Handshake } from "./handshake.js";
-
-/** Session 提供给子组件的发送接口（避免子组件直接依赖 Connection）。 */
-export interface SessionIO {
-  sendRpc(payload: RpcPayload): void;
-}
+import type { SessionIO } from "../types.js";
+import { Handshake, type SessionState } from "./handshake.js";
 
 export class HandshakeOrchestrator {
   readonly handshake: Handshake;
@@ -58,7 +54,7 @@ export class HandshakeOrchestrator {
     return this.handshake.sid;
   }
 
-  get state(): string {
+  get state(): SessionState {
     return this.handshake.state;
   }
 

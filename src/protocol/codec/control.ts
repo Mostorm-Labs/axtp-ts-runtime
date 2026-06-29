@@ -9,8 +9,8 @@
 //   0x1E selectedRpcEncoding（成功 ACCEPT 必需，uint8）
 // 对 OPEN/HEARTBEAT/CLOSE 的 response MUST 回显 controlId（spec:123）。
 
-import { ByteReader, ByteWriter } from "../../io/io.js";
 import type { Bytes } from "../../io/bytes.js";
+import { ByteReader, ByteWriter } from "../../io/io.js";
 import { ControlOpcode, RpcEncoding } from "../../protocol/generated/axtp_ids_generated.js";
 import { controlPayload, type ControlPayload } from "../model.js";
 

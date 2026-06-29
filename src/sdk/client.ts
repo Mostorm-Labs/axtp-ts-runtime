@@ -7,11 +7,11 @@ import {
   AxtpSession,
   type CallContext,
   type CallOptions,
-  type SessionOptions,
+  type SessionCloseInfo,
   type UntypedEventHandler,
   type UntypedMethodHandler
 } from "../session/session.js";
-import type { IClientTransport } from "../transport/transport.js";
+import type { IClientTransport, LogicalRole } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {
@@ -22,9 +22,25 @@ import type {
   MethodResponse
 } from "../types/registry.js";
 
-export interface ClientOptions extends SessionOptions {
-  /** 传输重连策略（透传给 Session→Connection）。 */
+/**
+ * Client 选项（独立定义，不继承 SessionOptions，避免暴露内部参数）。
+ * 只包含用户该配置的参数；physicalRole/transportFactory/globalHandlers 等由 SDK 内部注入。
+ */
+export interface ClientOptions {
+  /** Logical 角色：默认 "server"（Cloud Reverse 主场景：发起连接方=能力提供方）。 */
+  logicalRole?: LogicalRole;
+  /** call 默认超时 ms。 */
+  defaultTimeoutMs?: number;
+  /** 握手超时 ms（超时后 connect reject）。 */
+  handshakeTimeoutMs?: number;
+  /** 传输重连策略。 */
   reconnect?: ReconnectPolicy;
+  /** 心跳间隔 ms。 */
+  heartbeatIntervalMs?: number;
+  /** 心跳超时 ms。 */
+  heartbeatTimeoutMs?: number;
+  /** 最大帧大小。 */
+  maxFrameSize?: number;
 }
 
 export class AxtpClient {
@@ -32,7 +48,7 @@ export class AxtpClient {
   private connected = false;
 
   private readonly onConnectStream = new EventStream<void>();
-  private readonly onDisconnectStream = new EventStream<{ reason: string; remote: boolean }>();
+  private readonly onDisconnectStream = new EventStream<SessionCloseInfo>();
   private readonly onReconnectStream = new EventStream<{
     attempt: number;
     totalDowntimeMs: number;
@@ -49,7 +65,7 @@ export class AxtpClient {
   get onConnect(): EventStream<void> {
     return this.onConnectStream;
   }
-  get onDisconnect(): EventStream<{ reason: string; remote: boolean }> {
+  get onDisconnect(): EventStream<SessionCloseInfo> {
     return this.onDisconnectStream;
   }
   get onReconnect(): EventStream<{ attempt: number; totalDowntimeMs: number }> {
@@ -71,10 +87,17 @@ export class AxtpClient {
   async connect(): Promise<void> {
     if (this.connected) throw new Error("client already connected");
     const transport = await this.transport.connect();
-    // Session 创建 Connection（SDK 不知 Connection）。transportFactory 供重连用。
+    // Session 创建 Connection（SDK 不知 Connection）。
+    // physicalRole/transportFactory 由 SDK 注入，不从 options 暴露。
     this.session = new AxtpSession(transport, {
-      ...this.options,
       physicalRole: "client",
+      logicalRole: this.options.logicalRole,
+      defaultTimeoutMs: this.options.defaultTimeoutMs,
+      handshakeTimeoutMs: this.options.handshakeTimeoutMs,
+      reconnect: this.options.reconnect,
+      heartbeatIntervalMs: this.options.heartbeatIntervalMs,
+      heartbeatTimeoutMs: this.options.heartbeatTimeoutMs,
+      maxFrameSize: this.options.maxFrameSize,
       transportFactory: () => this.transport.connect()
     });
     this.session.onClose.subscribe((info) => {
@@ -83,6 +106,9 @@ export class AxtpClient {
     });
     this.session.onReconnect.subscribe((info) => {
       this.onReconnectStream.emit(info);
+    });
+    this.session.onReconnectFailed.subscribe(() => {
+      this.onReconnectFailedStream.emit(undefined);
     });
     await this.session.onReady;
     this.connected = true;
@@ -101,7 +127,7 @@ export class AxtpClient {
     this.requireUsable();
     const session = this.session;
     if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
-    return session.call(method as never, params as never, options);
+    return session.call(method, params, options);
   }
 
   handle<K extends MethodName>(
@@ -127,7 +153,7 @@ export class AxtpClient {
     this.requireUsable();
     const session = this.session;
     if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
-    return session.emit(event as never, payload as never);
+    return session.emit(event, payload);
   }
 
   on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void;
@@ -139,7 +165,7 @@ export class AxtpClient {
   }
 
   /** 主动关闭，不再重连。 */
-  async close(): Promise<void> {
+  close(): void {
     this.session?.close();
     this.connected = false;
   }

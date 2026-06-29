@@ -16,7 +16,7 @@ import {
   type NegotiationParams
 } from "../protocol/codec/control.js";
 import { ControlOpcode, ErrorCode } from "../protocol/generated/axtp_ids_generated.js";
-import type { CloseCode, CloseReason, PhysicalRole } from "../transport/transport.js";
+import type { PhysicalRole } from "../transport/transport.js";
 
 export interface NegotiatedLink {
   readonly maxFrameSize: number;
@@ -64,19 +64,11 @@ export class ControlSession {
     const controlId = this.takeControlId();
     this.pendingOpenId = controlId;
     const bytes = encodeOpen(controlId, this.localParams);
-    this.callbacks.onSendBytes?.(this.wrapFrame(bytes, ControlOpcode.Open));
+    this.callbacks.onSendBytes?.(bytes);
   }
 
   get isOpen(): boolean {
     return this.open && !this.closing;
-  }
-
-  get isClosing(): boolean {
-    return this.closing;
-  }
-
-  get negotiatedLink(): NegotiatedLink | undefined {
-    return this.negotiated;
   }
 
   /** 主动发起 CLOSE。 */
@@ -84,7 +76,7 @@ export class ControlSession {
     const controlId = this.takeControlId();
     this.closing = true;
     const bytes = encodeClose(controlId);
-    this.callbacks.onSendBytes?.(this.wrapFrame(bytes, ControlOpcode.Close));
+    this.callbacks.onSendBytes?.(bytes);
   }
 
   /**
@@ -135,12 +127,7 @@ export class ControlSession {
     const peerSupportsJson = (tlv.supportedRpcEncodings ?? 0) & 0x01;
     if (!peerSupportsJson) {
       // 拒绝（带非零 statusCode 的 ACCEPT）
-      this.callbacks.onSendBytes?.(
-        this.wrapFrame(
-          encodeReject(controlId, ErrorCode.ControlNegotiationFailed),
-          ControlOpcode.Accept
-        )
-      );
+      this.callbacks.onSendBytes?.(encodeReject(controlId, ErrorCode.ControlNegotiationFailed));
       return;
     }
     const bytes = encodeAccept(controlId, acceptParams);
@@ -151,7 +138,7 @@ export class ControlSession {
       selectedRpcEncoding: 0x01,
       accepted: true
     };
-    this.callbacks.onSendBytes?.(this.wrapFrame(bytes, ControlOpcode.Accept));
+    this.callbacks.onSendBytes?.(bytes);
     this.callbacks.onLinkReady?.(this.negotiated);
   }
 
@@ -188,7 +175,7 @@ export class ControlSession {
     this.closing = true;
     this.open = false;
     // 回 CLOSE_ACK（回显 controlId）
-    this.callbacks.onSendBytes?.(this.wrapFrame(encodeCloseAck(controlId), ControlOpcode.CloseAck));
+    this.callbacks.onSendBytes?.(encodeCloseAck(controlId));
     this.callbacks.onClosing?.(controlId);
   }
 
@@ -197,16 +184,4 @@ export class ControlSession {
     this.nextControlId = (this.nextControlId + 1) & 0xffff;
     return id;
   }
-
-  /** 把 CONTROL payload body 包成 frame 字节（Connection 提供编码能力时由其完成；这里用占位回调）。
-   * 当前实现：直接把 body 作为"已成帧字节"传给 onSendBytes——实际成帧由 Connection 的 codec 完成。
-   * 为保持 ControlSession 不依赖 frame codec，这里发出的是 CONTROL payload body，由 Connection 包装成帧。 */
-  private wrapFrame(controlBody: Uint8Array, _opcode: ControlOpcode): Uint8Array {
-    return controlBody;
-  }
-}
-
-/** 便捷：构造 CloseReason。 */
-export function toCloseReason(code: CloseCode, reason: string, remote: boolean): CloseReason {
-  return { code, reason, remote };
 }

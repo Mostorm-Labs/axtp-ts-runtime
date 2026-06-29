@@ -74,7 +74,7 @@ export class FrameDecoder {
       const destinationId = reader.readU8Strict();
       const messageId = reader.readU16Strict();
       const frameIndex = reader.readU8Strict();
-      const frameCount = reader.readU8Strict();;
+      const frameCount = reader.readU8Strict();
 
       // 校验 ②version ③payloadType ⑤FrameCount ⑥FrameIndex ④PayloadLength+14<=maxFrameSize
       if (

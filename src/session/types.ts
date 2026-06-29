@@ -25,6 +25,7 @@ import type {
 /** Session 提供给子组件的发送接口（避免子组件直接依赖 Connection）。 */
 export interface SessionIO {
   sendRpc(payload: RpcPayload): void;
+  sendStream(streamId: number, data: Uint8Array, seqId: number): void;
 }
 
 /** call 选项。 */

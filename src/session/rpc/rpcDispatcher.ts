@@ -95,10 +95,6 @@ export class RpcDispatcher {
     return this.pending.size;
   }
 
-  hasPending(requestId: number): boolean {
-    return this.pending.has(requestId);
-  }
-
   private allocateRequestId(): number {
     const id = this.nextRequestId;
     this.nextRequestId = this.nextRequestId >= kMaxRequestId ? 1 : this.nextRequestId + 1;

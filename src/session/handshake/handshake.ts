@@ -8,6 +8,7 @@
 // sid = 8 位 hex，混合 randomSeed（禁直接当 sid，spec:207）。
 // Identified.d = {}（对齐 conformance；sid 在 envelope 外层）。
 
+import { bytesToText, toBytes } from "../../io/bytes.js";
 import { ErrorCode, RpcOp } from "../../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload } from "../../protocol/model.js";
 import { rpcPayload } from "../../protocol/model.js";
@@ -53,7 +54,7 @@ export class Handshake {
     return rpcPayload({
       op: RpcOp.Hello,
       jsonSid: "",
-      body: new TextEncoder().encode(JSON.stringify({ axtpVersion: "1.0.0" })),
+      body: toBytes(JSON.stringify({ axtpVersion: "1.0.0" })),
       meta: {}
     });
   }
@@ -75,7 +76,7 @@ export class Handshake {
   }
 
   /** 生成 sid：randomSeed ⊕ 本地状态，8 位 hex，非零（spec:207 禁直接当 sid）。 */
-  generateSid(randomSeed: number): string {
+  private generateSid(randomSeed: number): string {
     let mixed = ((randomSeed >>> 0) ^ (this.localState >>> 0)) >>> 0;
     if (mixed === 0) mixed = 1;
     return mixed.toString(16).padStart(8, "0");
@@ -103,11 +104,6 @@ export class Handshake {
     this.sidValue = "";
   }
 
-  /** 进入 CLOSING（连接关闭流程）。 */
-  enterClosing(): void {
-    this.stateValue = "CLOSING";
-  }
-
   /** 期望的 eventMasks（client 在 Identify 携带；server 从 Identify 读取）。 */
   get eventMasks(): string | undefined {
     return this.eventMasksValue;
@@ -131,7 +127,7 @@ export class Handshake {
     }
     // 校验 axtpVersion（spec:205 Hello.axtpVersion 是 spec compatibility authority）
     try {
-      const d = JSON.parse(new TextDecoder().decode(payload.body)) as { axtpVersion?: string };
+      const d = JSON.parse(bytesToText(payload.body)) as { axtpVersion?: string };
       if (typeof d.axtpVersion === "string" && !d.axtpVersion.startsWith("1.")) {
         return {
           becameReady: false,
@@ -154,8 +150,8 @@ export class Handshake {
     const identify = rpcPayload({
       op: RpcOp.Identify,
       jsonSid: "",
-      body: new TextEncoder().encode(JSON.stringify(body)),
-      meta: { randomSeed, jsonEventMasks: this.eventMacksForMeta() }
+      body: toBytes(JSON.stringify(body)),
+      meta: { randomSeed, jsonEventMasks: this.eventMasksValue }
     });
     return { outbound: identify, becameReady: false };
   }
@@ -166,7 +162,7 @@ export class Handshake {
       return { becameReady: false };
     }
     try {
-      const d = JSON.parse(new TextDecoder().decode(payload.body)) as {
+      const d = JSON.parse(bytesToText(payload.body)) as {
         randomSeed?: number;
         eventMasks?: string;
       };
@@ -176,7 +172,7 @@ export class Handshake {
       const identified = rpcPayload({
         op: RpcOp.Identified,
         jsonSid: this.sidValue,
-        body: new TextEncoder().encode("{}"),
+        body: toBytes("{}"),
         meta: {}
       });
       this.stateValue = "APP_READY";
@@ -205,9 +201,5 @@ export class Handshake {
     this.sidValue = sid;
     this.stateValue = "APP_READY";
     return { becameReady: true };
-  }
-
-  private eventMacksForMeta(): string | undefined {
-    return this.eventMasksValue;
   }
 }

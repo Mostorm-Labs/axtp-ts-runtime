@@ -55,15 +55,6 @@ export class Heartbeat {
     return this.running;
   }
 
-  /** 更新配置（如重新协商 intervalMs）。 */
-  updateConfig(config: Partial<HeartbeatConfig>): void {
-    this.configValue = { ...this.configValue, ...config };
-    if (this.running) {
-      this.clearTimers();
-      this.scheduleTick();
-    }
-  }
-
   private scheduleTick(): void {
     if (!this.running) return;
     this.tickTimer = setTimeout(() => {
@@ -95,11 +86,4 @@ export class Heartbeat {
       this.timeoutTimer = undefined;
     }
   }
-}
-
-/** 默认配置工厂。 */
-export function defaultHeartbeatConfig(
-  intervalMs = 30000
-): Omit<HeartbeatConfig, "onTick" | "onTimeout"> {
-  return { intervalMs, timeoutMs: Math.max(intervalMs * 2, 10000) };
 }

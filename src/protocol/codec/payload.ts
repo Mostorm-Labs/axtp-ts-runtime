@@ -4,13 +4,8 @@
 // CONTROL payload 用 control.ts 的 5B header + TLV。
 // STREAM payload 用 stream.ts 的 16B header。
 
-import {
-  ControlOpcode,
-  PayloadType,
-  RpcEncoding
-} from "../../protocol/generated/axtp_ids_generated.js";
+import { PayloadType, RpcEncoding } from "../../protocol/generated/axtp_ids_generated.js";
 import type { RpcPayload, StreamPayload } from "../model.js";
-import { rpcPayload } from "../model.js";
 import { decodeJsonRpc } from "./jsonRpc.js";
 import { decodeStream } from "./stream.js";
 
@@ -56,19 +51,3 @@ export class PayloadDecoder {
     if (payload !== undefined) this.sink.onRpc(payload);
   }
 }
-
-/** 编码 framed-binary RPC message body（rpcEncoding 前缀 + JSON）。 */
-export function encodeFramedRpcBody(jsonBody: Uint8Array): Uint8Array {
-  const out = new Uint8Array(1 + jsonBody.length);
-  out[0] = RpcEncoding.Json;
-  out.set(jsonBody, 1);
-  return out;
-}
-
-/** 判断 CONTROL opcode 是否为心跳。 */
-export function isHeartbeatOpcode(opcode: ControlOpcode): boolean {
-  return opcode === ControlOpcode.Heartbeat || opcode === ControlOpcode.HeartbeatAck;
-}
-
-/** 占位：导出 rpcPayload 以便上层构造 framed-binary payload。 */
-export { rpcPayload };

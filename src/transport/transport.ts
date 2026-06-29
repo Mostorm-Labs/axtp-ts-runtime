@@ -7,9 +7,6 @@ import type { Bytes } from "../io/bytes.js";
 import type { AxtpError } from "../types/error.js";
 import type { EventStream } from "../types/events.js";
 
-/** wire 模式：Standard Framed Binary（TCP）或 WebSocket Unframed JSON。 */
-export type WireMode = "framed-binary" | "unframed-json";
-
 /**
  * Physical 角色：谁发起传输连接（TCP/WS socket）。
  * 驱动 CONTROL OPEN/ACCEPT——Physical Client 发 OPEN，Physical Server 回 ACCEPT。
@@ -30,8 +27,6 @@ export type LogicalRole = "client" | "server";
 
 /** 传输能力声明。 */
 export interface TransportCapabilities {
-  readonly wireMode: WireMode;
-  /** WS=true（message 边界天然），TCP=false（字节流需 frame resync）。 */
   readonly messageOriented: boolean;
   /** framed=true（存在 CONTROL OPEN/ACCEPT/HEARTBEAT），WS=false。 */
   readonly supportsControl: boolean;
@@ -105,7 +100,6 @@ export type TransportFactory = () => Promise<ITransport>;
 /** 默认能力工厂，供具体 transport 复用。 */
 export function framedBinaryCapabilities(): TransportCapabilities {
   return {
-    wireMode: "framed-binary",
     messageOriented: false,
     supportsControl: true,
     supportsKeepalive: false
@@ -114,7 +108,6 @@ export function framedBinaryCapabilities(): TransportCapabilities {
 
 export function unframedJsonCapabilities(): TransportCapabilities {
   return {
-    wireMode: "unframed-json",
     messageOriented: true,
     supportsControl: false,
     supportsKeepalive: true
