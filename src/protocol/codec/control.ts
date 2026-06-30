@@ -21,6 +21,12 @@ export const ControlTlvTag = {
   MaxFrameSize: 0x04,
   SupportedPayloadTypes: 0x07,
   SupportedRpcEncodings: 0x08,
+  /**
+   * heartbeatIntervalMs。协议内部矛盾：contract/registry/schema/control_schema.yaml:45 声明 uint32，
+   * 但 spec 20-core.md:152 示例 `0a 02 03 e8` 用 uint16（len=02）。运行时遵循 spec 示例
+   * （writeTlv width=2 即 uint16，max 60000 可容纳）。建议向协议仓库 D:\WorkSpace\github\axtp
+   * 报告该 schema/spec 不一致。
+   */
   HeartbeatIntervalMs: 0x0a,
   AckMode: 0x0b,
   SelectedRpcEncoding: 0x1e

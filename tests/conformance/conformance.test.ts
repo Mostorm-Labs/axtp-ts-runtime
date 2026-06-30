@@ -17,6 +17,7 @@ import {
   buildRequestJson,
   buildResponseJson
 } from "../helpers/jsonRpcBuilders.js";
+import { computeEventMasks, METHOD_REGISTRY, registry } from "../../src/types/registry.js";
 
 // 跟踪创建的 session，afterEach 统一关闭，避免 Heartbeat 定时器在测试结束后继续存活。
 const createdSessions: AxtpSession[] = [];
@@ -157,5 +158,71 @@ describe("conformance: envelope 结构", () => {
     const obj = JSON.parse(new TextDecoder().decode(req));
     expect(typeof obj.d.method).toBe("string");
     expect(obj.d.method).toBe("audio.getAlgorithmConfig");
+  });
+});
+
+describe("conformance: event.emit_event", () => {
+  it("server emit -> client on，event.name + data.reason != null", async () => {
+    const { client, server } = await makePair();
+    let received: { reason?: string } | undefined;
+    client.on("audio.algorithmConfigChanged", (data) => {
+      received = data as { reason?: string };
+    });
+    await server.emit("audio.algorithmConfigChanged", {
+      reason: "user_request",
+      applyState: "applied"
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(received).toBeDefined();
+    expect(received?.reason).not.toBeNull();
+  });
+});
+
+describe("conformance: event.subscribe_event / unsubscribe_event", () => {
+  it("computeEventMasks(['audio.algorithmConfigChanged']) === '090101'（domain 0x09, bitOffset 0, LSB）", () => {
+    expect(computeEventMasks(["audio.algorithmConfigChanged"])).toBe("090101");
+  });
+
+  it("带 eventMasks 的 client 握手成功（Identify 携带订阅意图）", async () => {
+    const { left, right } = createMockTransportPair(unframedJsonCapabilities());
+    const client = new AxtpSession(() => Promise.resolve(left), {
+      physicalRole: "client",
+      logicalRole: "client",
+      eventMasks: computeEventMasks(["audio.algorithmConfigChanged"])
+    });
+    const server = new AxtpSession(() => Promise.resolve(right), {
+      physicalRole: "server",
+      logicalRole: "server"
+    });
+    createdSessions.push(client, server);
+    await Promise.all([
+      new Promise<void>((r) => client.onReady.subscribe(() => r())),
+      new Promise<void>((r) => server.onReady.subscribe(() => r()))
+    ]);
+    expect(client.sid).toMatch(/^[0-9a-f]{8}$/);
+    expect(client.sid).toBe(server.sid);
+  });
+
+  // 运行时未实现 REIDENTIFY（spec draft，client.updateSubscriptions() 占位 throw NotImplemented）
+  it.skip("event.unsubscribe_event：REIDENTIFY 清除订阅", () => {});
+});
+
+describe("conformance: capability.get_all / method_binding", () => {
+  it("registry method id 绑定 + 数量 >= 4", () => {
+    expect(registry.methodId("audio.getAlgorithmConfig")).toBe(0x0901);
+    expect(registry.methodId("audio.getAlgorithmCapabilities")).toBe(0x090d);
+    expect(Object.keys(METHOD_REGISTRY).length).toBeGreaterThanOrEqual(4);
+  });
+
+  // 运行时无 capability→methods registry（types/registry.ts 仅 method/event 索引）
+  it.skip("capability.method_binding：audio.algorithm capability→methods 绑定", () => {});
+});
+
+describe("conformance: capability.unsupported_method", () => {
+  it("vendor.unsupported -> oneOf{RPC_METHOD_NOT_FOUND(0x0036), CAPABILITY_METHOD_UNSUPPORTED}（运行时回 RpcMethodNotFound）", async () => {
+    const { client } = await makePair();
+    await expect(client.call("vendor.unsupported", {})).rejects.toMatchObject({
+      code: ErrorCode.RpcMethodNotFound
+    });
   });
 });
