@@ -8,7 +8,7 @@ import {
   encodeHeartbeat,
   encodeHeartbeatAck,
   encodeOpen,
-  encodeReject
+  encodeRejectedAccept
 } from "../../src/protocol/codec/control.js";
 import {
   FrameDecoder,
@@ -61,7 +61,7 @@ describe("CONTROL codec 6 TLV", () => {
   });
 
   it("reject = 带非零 statusCode 的 ACCEPT（无 REJECT opcode）", () => {
-    const bytes = encodeReject(1, ErrorCode.ControlOpenRejected);
+    const bytes = encodeRejectedAccept(1, ErrorCode.ControlOpenRejected);
     const decoded = decodeControl(bytes);
     expect(decoded.opcode).toBe(ControlOpcode.Accept); // 仍是 ACCEPT
     expect(decoded.statusCode).toBe(ErrorCode.ControlOpenRejected);
@@ -317,6 +317,28 @@ describe("Handshake 状态机", () => {
     const r = client.handle(rpcPayload({ op: RpcOp.Identified, jsonSid: "xyz" }));
     expect(r.error).toBeDefined();
     expect(client.isReady).toBe(false);
+  });
+
+  it("axtpVersion 主版本非 1 被拒（错误码 RpcPayloadInvalid）", () => {
+    const client = new Handshake("client");
+    const hello = rpcPayload({
+      op: RpcOp.Hello,
+      body: new TextEncoder().encode(JSON.stringify({ axtpVersion: "2.0.0" }))
+    });
+    const r = client.handle(hello);
+    expect(r.error?.code).toBe(ErrorCode.RpcPayloadInvalid);
+    expect(r.becameReady).toBe(false);
+  });
+
+  it("axtpVersion='1'（纯主版本号）被接受（不再因 startsWith('1.') 误拒）", () => {
+    const client = new Handshake("client");
+    const hello = rpcPayload({
+      op: RpcOp.Hello,
+      body: new TextEncoder().encode(JSON.stringify({ axtpVersion: "1" }))
+    });
+    const r = client.handle(hello);
+    expect(r.error).toBeUndefined();
+    expect(r.outbound?.op).toBe(RpcOp.Identify);
   });
 });
 

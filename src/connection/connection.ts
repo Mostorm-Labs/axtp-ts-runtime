@@ -66,7 +66,6 @@ export class Connection {
 
   private connState: ConnectionState = "idle";
   private started = false;
-  private nextHeartbeatControlId = 0x100;
 
   constructor(
     physicalRole: PhysicalRole,
@@ -125,13 +124,10 @@ export class Connection {
     this.heartbeat?.stop();
     this.heartbeat = undefined;
 
-    // 4. 重置链路状态（linkReadyFired 改为状态机驱动，无需 boolean）
-    this.nextHeartbeatControlId = 0x100;
-
-    // 5. 刷新 capabilities
+    // 4. 刷新 capabilities
     this.capabilities = transport.capabilities;
 
-    // 6. 重建 pipeline（framed only）——完全新实例，无旧状态泄漏
+    // 5. 重建 pipeline（framed only）——完全新实例，无旧状态泄漏
     this.pipeline = undefined;
     if (this.capabilities.supportsControl) {
       this.pipeline = new CodecPipeline(
@@ -147,7 +143,7 @@ export class Connection {
           onControlHeartbeat: (cid) => this.pipeline?.sendHeartbeatAck(cid),
           onControlHeartbeatAck: () => this.heartbeat?.reset(),
           onControlClosing: () => this.close(CloseCode.Normal, "remote close"),
-          onControlRejected: (sc) =>
+          onControlOpenRejected: (sc) =>
             this.close(
               CloseCode.HandshakeFailed,
               `link rejected: 0x${sc.toString(16).padStart(4, "0")}`
@@ -157,7 +153,7 @@ export class Connection {
       );
     }
 
-    // 7. 订阅 transport 事件
+    // 6. 订阅 transport 事件
     this.transportUnsubs.push(
       transport.onMessage.subscribe((bytes) => {
         if (this.connState === "closed") return;
@@ -226,13 +222,22 @@ export class Connection {
     }
   }
 
-  sendRpc(payload: RpcPayload): void {
-    if (this.connState === "closed") return;
+  /**
+   * 链路就绪断言。closed 静默丢弃（close 后异步竞态 sendRpc 不击穿）；
+   * 其它非 link_ready 抛 TransportDisconnected。与 Session.requireReady 对齐。
+   */
+  private assertLinkReady(): boolean {
+    if (this.connState === "closed") return false;
     if (this.connState !== "link_ready")
       throw new AxtpError(
         ErrorCode.TransportDisconnected,
         `connection not ready: ${this.connState}`
       );
+    return true;
+  }
+
+  sendRpc(payload: RpcPayload): void {
+    if (!this.assertLinkReady()) return;
     const jsonBytes = encodeJsonRpc(payload);
     if (this.capabilities.supportsControl) {
       this.pipeline?.sendRpc(jsonBytes);
@@ -242,12 +247,7 @@ export class Connection {
   }
 
   sendStream(payload: StreamPayload): void {
-    if (this.connState === "closed") return;
-    if (this.connState !== "link_ready")
-      throw new AxtpError(
-        ErrorCode.TransportDisconnected,
-        `connection not ready: ${this.connState}`
-      );
+    if (!this.assertLinkReady()) return;
     if (!this.capabilities.supportsControl) {
       throw new AxtpError(ErrorCode.NotSupported, "STREAM not supported on this transport");
     }
@@ -363,8 +363,7 @@ export class Connection {
         intervalMs: interval,
         timeoutMs: timeout,
         onTick: () => {
-          const cid = this.nextHeartbeatControlId;
-          this.nextHeartbeatControlId = (this.nextHeartbeatControlId + 1) & 0xffff;
+          const cid = this.pipeline?.allocControlId() ?? 0;
           this.pipeline?.sendHeartbeat(cid);
         },
         onTimeout: () => this.close(CloseCode.HeartbeatTimeout, "heartbeat timeout")

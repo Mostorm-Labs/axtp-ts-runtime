@@ -45,6 +45,19 @@ export interface NegotiationParams {
 export const kDefaultPayloadTypes = 0x07; // bitmap: bit0=Control, bit1=Rpc, bit2=Stream（spec:130）
 export const kJsonOnlyEncoding = RpcEncoding.Json; // 0x01
 
+/**
+ * heartbeatIntervalMs 建议范围（spec 未强制硬性约束，runtime 防御性 clamp，
+ * 防止对端或本地越界配置导致心跳过频/失效）。
+ */
+export const MIN_HEARTBEAT_INTERVAL_MS = 500;
+export const MAX_HEARTBEAT_INTERVAL_MS = 60000;
+
+/** 把 heartbeatIntervalMs 夹到合法范围；非有限值回落到下限。 */
+export function clampHeartbeatInterval(ms: number): number {
+  if (!Number.isFinite(ms)) return MIN_HEARTBEAT_INTERVAL_MS;
+  return Math.max(MIN_HEARTBEAT_INTERVAL_MS, Math.min(MAX_HEARTBEAT_INTERVAL_MS, Math.trunc(ms)));
+}
+
 /** 默认 Phase1 OPEN 参数。 */
 export function defaultOpenParams(
   maxFrameSize = 4096,
@@ -54,7 +67,7 @@ export function defaultOpenParams(
     maxFrameSize,
     supportedPayloadTypes: kDefaultPayloadTypes,
     supportedRpcEncodings: kJsonOnlyEncoding,
-    heartbeatIntervalMs,
+    heartbeatIntervalMs: clampHeartbeatInterval(heartbeatIntervalMs),
     ackMode: AckMode.None
   };
 }
@@ -160,8 +173,11 @@ export function encodeAccept(controlId: number, params: NegotiationParams): Byte
   return encodeControl(ControlOpcode.Accept, controlId, 0, params);
 }
 
-/** 编码拒绝 OPEN 的 ACCEPT（非零 statusCode，无 TLV）。spec:121 拒绝=带非零 statusCode 的 ACCEPT。 */
-export function encodeReject(controlId: number, statusCode: number): Bytes {
+/**
+ * 编码拒绝 OPEN 的 ACCEPT（非零 statusCode，无 TLV）。
+ * spec:121: 不存在 REJECT opcode，拒绝 OPEN = 带非零 statusCode 的 ACCEPT。
+ */
+export function encodeRejectedAccept(controlId: number, statusCode: number): Bytes {
   return encodeControl(ControlOpcode.Accept, controlId, statusCode);
 }
 

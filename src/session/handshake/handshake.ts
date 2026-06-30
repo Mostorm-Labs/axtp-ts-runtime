@@ -15,6 +15,15 @@ import { RpcOp, rpcPayload } from "../../protocol/model.js";
 import type { LogicalRole } from "../../transport/transport.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
 
+/**
+ * axtpVersion 兼容判定：主版本=1 即接受（spec:205 它是 spec compatibility authority，
+ * spec 未规定精确匹配算法）。支持 "1"/"1.0"/"1.0.0"；拒绝 "2.x"/"10.x"。
+ */
+function isAxtpVersionCompatible(version: string): boolean {
+  const major = Number.parseInt(version, 10);
+  return Number.isInteger(major) && major === 1;
+}
+
 export type SessionState = "LINK_CONNECTED" | "FRAMING_READY" | "APP_READY" | "CLOSING";
 
 export interface HandshakeResult {
@@ -127,16 +136,14 @@ export class Handshake {
       };
     }
     const helloObj = d as { axtpVersion?: string } | undefined;
-    // spec:205: axtpVersion 是 spec compatibility authority。缺失或非 string 或主版本非 1 都拒绝。
-    if (
-      typeof helloObj?.axtpVersion !== "string" ||
-      !helloObj.axtpVersion.startsWith("1.")
-    ) {
+    // spec:205: axtpVersion 是 spec compatibility authority。缺失/非 string/主版本非 1 都拒绝。
+    const version = helloObj?.axtpVersion;
+    if (typeof version !== "string" || !isAxtpVersionCompatible(version)) {
       return {
         becameReady: false,
         error: new AxtpError(
-          ErrorCode.ControlNegotiationFailed,
-          `unsupported or missing axtpVersion: ${helloObj?.axtpVersion ?? "(absent)"}`
+          ErrorCode.RpcPayloadInvalid,
+          `unsupported or missing axtpVersion: ${version ?? "(absent)"}`
         )
       };
     }

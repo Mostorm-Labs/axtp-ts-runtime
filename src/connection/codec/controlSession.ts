@@ -6,13 +6,14 @@
 // 协商（maxFrameSize/heartbeatIntervalMs/supportedRpcEncodings）结果供 Connection 配置 codec + 心跳。
 
 import {
+  clampHeartbeatInterval,
   decodeControl,
   defaultOpenParams,
   encodeAccept,
   encodeClose,
   encodeCloseAck,
   encodeOpen,
-  encodeReject,
+  encodeRejectedAccept,
   type NegotiationParams
 } from "../../protocol/codec/control.js";
 import { ControlOpcode, RpcEncoding } from "../../protocol/model.js";
@@ -29,8 +30,8 @@ export interface NegotiatedLink {
 export interface ControlSessionCallbacks {
   /** 链路 OPEN/ACCEPT 成功（framed）。 */
   onLinkReady?: (negotiated: NegotiatedLink) => void;
-  /** D1: 链路被拒绝（非零 statusCode 的 ACCEPT），Connection 应关闭连接。 */
-  onRejected?: (statusCode: number) => void;
+  /** D1: OPEN 被拒绝（非零 statusCode 的 ACCEPT），Connection 应关闭连接。 */
+  onOpenRejected?: (statusCode: number) => void;
   /** 需要发送字节（CONTROL 帧）。 */
   onSendBytes?: (bytes: Uint8Array) => void;
   /** 收到对端 HEARTBEAT（需回 ack）—— 由 Connection 处理发送。 */
@@ -41,14 +42,21 @@ export interface ControlSessionCallbacks {
   onClosing?: (controlId: number) => void;
 }
 
+/** 链路层生命周期状态（与 Connection/Session/Handshake 的显式状态机风格一致）。 */
+export type ControlLinkState =
+  | "idle" // 构造后，未发 OPEN / 未收 OPEN
+  | "opening" // client 已发 OPEN，等 ACCEPT
+  | "open" // OPEN/ACCEPT 成功，链路可用
+  | "closing" // 本端已发 CLOSE，等 CLOSE_ACK
+  | "closed"; // 收到 CLOSE / CLOSE_ACK，链路终结
+
 /**
  * framed-binary 链路层状态机。
  * client 角色：主动发 OPEN，等 ACCEPT。
  * server 角色：等 OPEN，回 ACCEPT（协商）。
  */
 export class ControlSession {
-  private open = false;
-  private closing = false;
+  private linkState: ControlLinkState = "idle";
   private nextControlId = 1;
   private pendingOpenId: number | undefined;
   private negotiated: NegotiatedLink | undefined;
@@ -64,20 +72,21 @@ export class ControlSession {
 
   /** Physical Client: 发起 OPEN。 */
   sendOpen(): void {
-    const controlId = this.takeControlId();
+    const controlId = this.allocControlId();
     this.pendingOpenId = controlId;
+    this.linkState = "opening";
     const bytes = encodeOpen(controlId, this.localParams);
     this.callbacks.onSendBytes?.(bytes);
   }
 
   get isOpen(): boolean {
-    return this.open && !this.closing;
+    return this.linkState === "open";
   }
 
   /** 主动发起 CLOSE。 */
   sendClose(): void {
-    const controlId = this.takeControlId();
-    this.closing = true;
+    const controlId = this.allocControlId();
+    this.linkState = "closing";
     const bytes = encodeClose(controlId);
     this.callbacks.onSendBytes?.(bytes);
   }
@@ -111,8 +120,7 @@ export class ControlSession {
         this.handleClose(decoded.controlId);
         break;
       case ControlOpcode.CloseAck:
-        this.closing = true;
-        this.open = false;
+        this.linkState = "closed";
         break;
     }
   }
@@ -130,29 +138,29 @@ export class ControlSession {
       tlv.ackMode
     ];
     if (requiredFields.some((v) => v === undefined)) {
-      this.callbacks.onSendBytes?.(encodeReject(controlId, ErrorCode.ControlNegotiationFailed));
+      this.callbacks.onSendBytes?.(encodeRejectedAccept(controlId, ErrorCode.ControlNegotiationFailed));
       return;
     }
 
     // 校验 maxFrameSize 合理性（12B header + 2B CRC + 至少 1B payload = 15B 最小帧）
     if ((tlv.maxFrameSize ?? 0) < 15) {
-      this.callbacks.onSendBytes?.(encodeReject(controlId, ErrorCode.ControlNegotiationFailed));
+      this.callbacks.onSendBytes?.(encodeRejectedAccept(controlId, ErrorCode.ControlNegotiationFailed));
       return;
     }
 
     // 校验对端是否支持 JSON（本期 JSON-only）
     const peerSupportsJson = (tlv.supportedRpcEncodings ?? 0) & RpcEncoding.Json;
     if (!peerSupportsJson) {
-      this.callbacks.onSendBytes?.(encodeReject(controlId, ErrorCode.ControlNegotiationFailed));
+      this.callbacks.onSendBytes?.(encodeRejectedAccept(controlId, ErrorCode.ControlNegotiationFailed));
       return;
     }
 
-    // 协商：取双方较小 maxFrameSize，heartbeat 取对方值，selectedRpcEncoding = JSON。
+    // 协商：maxFrameSize 取双方较小；heartbeat 取 peer 值（非双方 min 协商），并 clamp 到合法范围。
     // 上方 requiredFields 校验已确保非 undefined，但 TS 无法跨行收窄，用局部变量避免 !。
     const negotiatedMaxFrame = tlv.maxFrameSize ?? this.localParams.maxFrameSize;
-    const negotiatedHeartbeat = tlv.heartbeatIntervalMs ?? this.localParams.heartbeatIntervalMs;
+    const peerHeartbeat = tlv.heartbeatIntervalMs ?? this.localParams.heartbeatIntervalMs;
     const maxFrameSize = Math.min(this.localParams.maxFrameSize, negotiatedMaxFrame);
-    const heartbeatIntervalMs = negotiatedHeartbeat;
+    const heartbeatIntervalMs = clampHeartbeatInterval(peerHeartbeat);
     // spec:127-134 ACCEPT 必需字段（不含 OPEN 专用的 supportedRpcEncodings/supportedPayloadTypes）
     const acceptParams: NegotiationParams = {
       maxFrameSize,
@@ -162,7 +170,7 @@ export class ControlSession {
       selectedRpcEncoding: RpcEncoding.Json // JSON only
     };
     const bytes = encodeAccept(controlId, acceptParams);
-    this.open = true;
+    this.linkState = "open";
     this.negotiated = {
       maxFrameSize,
       heartbeatIntervalMs,
@@ -183,17 +191,17 @@ export class ControlSession {
     if (controlId !== this.pendingOpenId) return;
     this.pendingOpenId = undefined;
     if (statusCode !== ErrorCode.Success) {
-      // D1: 被拒绝——通知 Connection 关闭连接（而非静默挂死）
+      // D1: 被拒绝——保持 opening（由 Connection.onControlOpenRejected → close() 接管关闭）。
       this.negotiated = {
         maxFrameSize: 0,
         heartbeatIntervalMs: 0,
         selectedRpcEncoding: 0,
         accepted: false
       };
-      this.callbacks.onRejected?.(statusCode);
+      this.callbacks.onOpenRejected?.(statusCode);
       return;
     }
-    this.open = true;
+    this.linkState = "open";
     this.negotiated = {
       maxFrameSize: tlv.maxFrameSize ?? this.localParams.maxFrameSize,
       heartbeatIntervalMs: tlv.heartbeatIntervalMs ?? this.localParams.heartbeatIntervalMs,
@@ -204,14 +212,18 @@ export class ControlSession {
   }
 
   private handleClose(controlId: number): void {
-    this.closing = true;
-    this.open = false;
+    this.linkState = "closed";
     // 回 CLOSE_ACK（回显 controlId）
     this.callbacks.onSendBytes?.(encodeCloseAck(controlId));
     this.callbacks.onClosing?.(controlId);
   }
 
-  private takeControlId(): number {
+  /**
+   * 分配一个 controlId（OPEN/CLOSE/HEARTBEAT 等所有 CONTROL 共用，单一分配器）。
+   * 从 1 递增，&0xffff 回滚。spec:123 response MUST 回显 controlId；OPEN 在 handleAccept
+   * 校验 pendingOpenId，HEARTBEAT/CLOSE 的 ack 仅按 opcode 处理（cid 不参与匹配判定）。
+   */
+  allocControlId(): number {
     const id = this.nextControlId;
     this.nextControlId = (this.nextControlId + 1) & 0xffff;
     return id;

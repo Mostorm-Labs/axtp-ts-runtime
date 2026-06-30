@@ -29,7 +29,7 @@ export interface CodecPipelineCallbacks {
   onControlHeartbeat(controlId: number): void;
   onControlHeartbeatAck(controlId: number): void;
   onControlClosing(): void;
-  onControlRejected(statusCode: number): void;
+  onControlOpenRejected(statusCode: number): void;
   onLinkReady(neg: NegotiatedLink): void;
 }
 
@@ -66,7 +66,7 @@ export class CodecPipeline {
         onHeartbeat: (controlId) => callbacks.onControlHeartbeat(controlId),
         onHeartbeatAck: (controlId) => callbacks.onControlHeartbeatAck(controlId),
         onClosing: () => callbacks.onControlClosing(),
-        onRejected: (statusCode) => callbacks.onControlRejected(statusCode)
+        onOpenRejected: (statusCode) => callbacks.onControlOpenRejected(statusCode)
       },
       defaultOpenParams(options.maxFrameSize, options.heartbeatIntervalMs)
     );
@@ -110,6 +110,11 @@ export class CodecPipeline {
   /** 发送 CONTROL HeartbeatAck。 */
   sendHeartbeatAck(controlId: number): void {
     this.send(PayloadType.Control, encodeHeartbeatAck(controlId));
+  }
+
+  /** 分配 CONTROL controlId（委托 ControlSession，OPEN/CLOSE/HEARTBEAT 共用单一 ID 空间）。 */
+  allocControlId(): number {
+    return this.controlSession.allocControlId();
   }
 
   /** 更新协商后的 maxFrameSize（同时更新入站解码器和出站分片器）。 */

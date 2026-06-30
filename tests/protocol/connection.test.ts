@@ -306,3 +306,24 @@ describe("Connection 重连修复回归", () => {
     }
   });
 });
+
+describe("Connection sendRpc 状态守卫", () => {
+  it("idle（未 start）状态 sendRpc 抛 TransportDisconnected", () => {
+    const { left } = createMockTransportPair(unframedJsonCapabilities());
+    const client = new Connection("client", () => Promise.resolve(left));
+    expect(() => client.sendRpc(rpcPayload({ op: RpcOp.Request, requestId: 1 }))).toThrow();
+  });
+
+  it("closed 后 sendRpc 静默丢弃（不抛错）", async () => {
+    const { left, right } = createMockTransportPair(unframedJsonCapabilities());
+    const client = new Connection("client", () => Promise.resolve(left));
+    const server = new Connection("server", () => Promise.resolve(right));
+    server.start();
+    client.start();
+    await settle(10);
+    client.close();
+    await settle(10);
+    expect(client.isClosed).toBe(true);
+    expect(() => client.sendRpc(rpcPayload({ op: RpcOp.Request, requestId: 1 }))).not.toThrow();
+  });
+});
