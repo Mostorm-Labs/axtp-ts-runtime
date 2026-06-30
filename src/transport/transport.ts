@@ -61,8 +61,14 @@ export interface ITransport {
   readonly onMessage: EventStream<Bytes>;
   readonly onClose: EventStream<CloseReason>;
   readonly onError: EventStream<AxtpError>;
-  /** 关闭连接。 */
+  /** 关闭连接（实现可选择优雅：WS 发 close 帧、TCP destroy）。 */
   close(): void;
+  /**
+   * 强制立即断开，不发起/等待关闭握手（WS ws.terminate() / TCP socket.destroy()）。
+   * 用于对端已无响应的场景（心跳超时、传输错误、重连失败）——优雅 close 握手在死连接上会悬空。
+   * 未实现时由调用方回落到 close()。可安全多次调用。
+   */
+  terminate?(): void;
   /** Connection 接管：停止内部缓冲，flush 已缓冲消息（真实 transport 实现，mock 可选）。 */
   attach?(): void;
   /** 发送保活探测（supportsKeepalive=true 时实现）。 */

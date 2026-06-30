@@ -47,14 +47,25 @@ export interface PayloadMeta {
   jsonEventMasks?: string;
 }
 
-/** RPC payload：会话层消息。 */
+/**
+ * RPC payload：会话层消息（JSON / JSON_BINARY 双轨统一模型）。
+ *
+ * 本期 JSON-only。methodOrEventId / bodyEncoding 是 spec 20-core.md:218
+ * JSON_BINARY 15B fixed header 的合同字段：JSON 路径下 methodOrEventId 仅作
+ * encode 时 method/event name 的数字 fallback，bodyEncoding 不读不写。
+ * spec:213 称高吞吐 profile SHOULD 实现 JSON_BINARY (0x04)——届时启用这些字段，勿删。
+ *
+ * wire 的 rpcEncoding(1B) 前缀属于 framed payload（payload.ts / codecPipeline.ts
+ * 直接读写 body[0]），不在 envelope 内，故 RpcPayload 不设 encoding 字段。
+ */
 export interface RpcPayload {
-  readonly encoding: RpcEncoding;
   readonly op: RpcOp;
   /** 分配前 0；Identified 后填 sid（仅 JSON 路径用 jsonSid 字符串）。 */
   readonly requestId: number;
+  /** JSON_BINARY 合同 method/event id (uint16)；JSON 路径仅作 name fallback。 */
   readonly methodOrEventId: number;
   readonly statusCode: ErrorCode;
+  /** JSON_BINARY 合同 body 编码（NONE/TLV8/TLV16，spec:223）；JSON 路径不读写。 */
   readonly bodyEncoding: RpcBodyEncoding;
   readonly meta: PayloadMeta;
   /** 业务 body（JSON 文本字节 / TLV 字节）。 */
@@ -84,7 +95,6 @@ export interface StreamPayload {
 
 export function rpcPayload(init: Partial<RpcPayload> & { op: RpcOp }): RpcPayload {
   return {
-    encoding: init.encoding ?? RpcEncoding.Json,
     op: init.op,
     requestId: init.requestId ?? 0,
     methodOrEventId: init.methodOrEventId ?? 0,
@@ -105,7 +115,7 @@ export function controlPayload(init: {
   return {
     opcode: init.opcode,
     controlId: init.controlId,
-    statusCode: init.statusCode ?? 0,
+    statusCode: init.statusCode ?? ErrorCode.Success,
     body: init.body ?? new Uint8Array()
   };
 }

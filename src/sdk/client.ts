@@ -271,7 +271,7 @@ export class AxtpClient {
   /** 从已注册事件名计算 eventMasks（hex 编码，供 Identify 携带）。 */
   private computeEventMasks(): string | undefined {
     if (this.subscribedEvents.size === 0) return undefined;
-    return computeEventMasks([...this.subscribedEvents] as never[]);
+    return computeEventMasks([...this.subscribedEvents]);
   }
 
   // ===== Stream =====

@@ -258,16 +258,25 @@ export class Connection {
     if (this.connState === "closed") return;
     this.reconnectCoordinator?.stop();
     this.heartbeat?.stop();
-    if (this.capabilities.supportsControl && this.pipeline?.controlSessionIsOpen) {
+    // 死连接（心跳超时 / 传输错误 / 重连失败）：对端已无响应，发 CONTROL CLOSE 帧也收不到 ACK；
+    // 此时跳过 sendClose 并用 transport.terminate() 强制断开，避免 ws.close(1000) 在死连接上悬空
+    // 等待 close timer。主动优雅关闭（Normal / HandshakeFailed）仍走 sendClose + transport.close()。
+    const force =
+      code === CloseCode.HeartbeatTimeout ||
+      code === CloseCode.TransportError ||
+      code === CloseCode.Reconnect;
+    if (!force && this.capabilities.supportsControl && this.pipeline?.controlSessionIsOpen) {
       this.pipeline.sendClose();
     }
-    // 先 terminate（置 connState=closed + emit onClose + cleanupStreams），再 transport.close()。
-    // TCP/WS 的 close() 同步 emit onClose → handleTransportClose；此时 connState 已为 closed，
-    // 命中其 `if (connState === "closed") return` 提前返回。否则本地关闭会误发 onDisconnect，
+    // 先 terminate（置 connState=closed + emit onClose + cleanupStreams），再断 transport。
+    // TCP/WS 的 close()/terminate() 同步 emit onClose → handleTransportClose；此时 connState 已为
+    // closed，命中其 `if (connState === "closed") return` 提前返回。否则本地关闭会误发 onDisconnect，
     // 且因 close() 已 stop() 协调器（active=false），handleTransportClose→start() 反而重新武装
     // 重连，定时器到期后 handleReconnected 不检查 closed → “复活”已关闭的连接。
     this.terminate({ code, reason, remote: false });
-    this.transport?.close();
+    const t = this.transport;
+    if (force && t?.terminate) t.terminate();
+    else t?.close();
   }
 
   /** 统一收尾：setState(closed) + emit onClose (+可选 onReconnectFailed) + cleanupStreams。 */
@@ -316,7 +325,10 @@ export class Connection {
   }
 
   private handleReconnectFailed(): void {
-    this.transport?.close();
+    // 重连耗尽：transport 已不可用，强制 terminate（不等 close 握手）。
+    const t = this.transport;
+    if (t?.terminate) t.terminate();
+    else t?.close();
     this.terminate({ code: CloseCode.Reconnect, reason: "reconnect failed", remote: false }, true);
   }
 

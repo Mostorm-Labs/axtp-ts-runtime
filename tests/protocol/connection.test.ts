@@ -5,6 +5,7 @@ import type { RpcPayload } from "../../src/protocol/model.js";
 import { rpcPayload } from "../../src/protocol/model.js";
 import { createMockTransportPair, MockTransport } from "../../src/transport/mock/mockTransport.js";
 import {
+  CloseCode,
   framedBinaryCapabilities,
   unframedJsonCapabilities
 } from "../../src/transport/transport.js";
@@ -88,6 +89,28 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
     await settle(10);
     expect(clientClosed).toBe(true);
     expect(client.isClosed).toBe(true);
+  });
+
+  it("close(HeartbeatTimeout) 经 transport.terminate 强制断开（非 close 握手）", async () => {
+    const { left } = createMockTransportPair(framedBinaryCapabilities());
+    const client = new Connection("client", () => Promise.resolve(left));
+    client.start();
+    await settle(20);
+    const terminateSpy = vi.spyOn(left, "terminate");
+    client.close(CloseCode.HeartbeatTimeout, "heartbeat timeout");
+    expect(terminateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("close(Normal) 经 transport.close 优雅关闭，不调 terminate", async () => {
+    const { left } = createMockTransportPair(framedBinaryCapabilities());
+    const client = new Connection("client", () => Promise.resolve(left));
+    client.start();
+    await settle(20);
+    const terminateSpy = vi.spyOn(left, "terminate");
+    const closeSpy = vi.spyOn(left, "close");
+    client.close(CloseCode.Normal, "local close");
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    expect(terminateSpy).not.toHaveBeenCalled();
   });
 });
 

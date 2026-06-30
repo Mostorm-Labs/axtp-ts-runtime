@@ -64,11 +64,11 @@ export const registry = new RegistryIndex();
  * bit0 映射到该 domain 中 registry bitOffset=0 的 event。
  * 空/缺失 mask = 不订阅。每个 domain 一个 entry，按 domainId 排序输出。
  */
-export function computeEventMasks(eventNames: readonly EventName[]): string {
+export function computeEventMasks(eventNames: readonly string[]): string {
   if (eventNames.length === 0) return "";
   const byDomain = new Map<number, number[]>();
   for (const name of eventNames) {
-    const entry = EVENT_REGISTRY[name];
+    const entry = EVENT_REGISTRY[name as EventName];
     if (entry === undefined) continue;
     const domainId = (entry.id >> 8) & 0xff;
     let bits = byDomain.get(domainId);

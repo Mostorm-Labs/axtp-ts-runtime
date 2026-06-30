@@ -28,7 +28,10 @@ import type {
   MethodResponse
 } from "../types/registry.js";
 
-/** Server 选项（当前与 CommonOptions 相同，预留扩展点）。 */
+/**
+ * Server 选项。当前与 CommonOptions 相同；未来增加 server 专属字段（如 maxConnections、auth）
+ * 时改为 interface 形式声明。现以 type 别名表达，避免空 interface（@typescript-eslint/no-empty-object-type）。
+ */
 export type ServerOptions = CommonOptions;
 
 export class AxtpServer {

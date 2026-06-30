@@ -108,6 +108,11 @@ export class MockTransport implements ITransport {
     this.onError.close();
   }
 
+  /** 强制断开（mock 无真实关闭握手，语义等同 close）。 */
+  terminate(): void {
+    this.close(CloseCode.Normal, "terminated", false);
+  }
+
 }
 
 /** Mock server：可手动 accept 多个连接，每连接产出 MockTransport。 */

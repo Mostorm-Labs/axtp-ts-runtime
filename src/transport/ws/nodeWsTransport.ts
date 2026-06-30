@@ -110,6 +110,20 @@ class WsTransport implements ITransport {
     this.onError.close();
   }
 
+  /** 强制立即断开（ws.terminate）：心跳超时/死连接场景，不发 close 帧、不等握手。 */
+  terminate(): void {
+    if (!this.connected) return;
+    this.connected = false;
+    try {
+      this.ws.terminate();
+    } catch {
+      // best-effort：socket 已关闭/异常时忽略
+    }
+    this.onClose.emit({ code: CloseCode.Normal, reason: "terminated", remote: false });
+    this.onMessage.close();
+    this.onError.close();
+  }
+
 
   /** Connection 接管：停止缓冲，flush 已缓冲消息到 onMessage。 */
   attach(): void {

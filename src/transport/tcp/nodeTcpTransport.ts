@@ -70,6 +70,14 @@ class TcpTransport implements ITransport {
     this.onError.close();
   }
 
+  /**
+   * 强制立即断开。TCP transport 的 close() 已用 socket.destroy()（立即销毁、无优雅握手），
+   * 故 terminate 与 close 行为一致；显式实现以满足 ITransport 契约，表达"强制"语义。
+   */
+  terminate(): void {
+    this.close();
+  }
+
 
   /** Connection 接管：停止缓冲，flush 已缓冲消息到 onMessage。 */
   attach(): void {
