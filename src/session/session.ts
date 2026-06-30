@@ -7,7 +7,7 @@
 // onStateChange: EventStream<SessionLifecycleState>（状态转换通知）
 
 import { Connection, type ConnectionOptions } from "../connection/connection.js";
-import type { RpcPayload } from "../protocol/model.js";
+import type { RpcMessage } from "../protocol/model.js";
 import { RpcOp } from "../protocol/model.js";
 import type { CloseReason, TransportFactory } from "../transport/transport.js";
 import { CloseCode } from "../transport/transport.js";
@@ -59,7 +59,7 @@ export type {
   UntypedMethodHandler
 };
 
-let nextSessionId = 1;
+let nextLocalId = 1;
 
 export class AxtpSession {
   private conn: Connection;
@@ -86,13 +86,13 @@ export class AxtpSession {
   private readonly defaultTimeoutMs: number;
   private handshakeTimeoutMs: number;
   private handshakeTimer: ReturnType<typeof setTimeout> | undefined;
-  /** 公开 id */
-  readonly id: number;
+  /** 公开 localId（运行时自增整数，区别于协议 sid 的 8 位 hex）。 */
+  readonly localId: number;
 
   constructor(transportFactory: TransportFactory, config: SessionConfig) {
     const physicalRole = config.physicalRole ?? "client";
     this.defaultTimeoutMs = config.defaultTimeoutMs ?? 10000;
-    this.id = nextSessionId++;
+    this.localId = nextLocalId++;
 
     // 构造 ConnectionOptions
     const connOptions: ConnectionOptions = {
@@ -245,7 +245,7 @@ export class AxtpSession {
 
   // ===== 入站总入口 =====
 
-  private ingest(payload: RpcPayload): void {
+  private ingest(payload: RpcMessage): void {
     if (this.sessionState === "closed") return;
 
     // 会话握手
@@ -273,8 +273,12 @@ export class AxtpSession {
     }
 
     // APP_READY 后校验 sid（spec:211: malformed/empty/non-hex/zero/缺失的 sid MUST 被拒绝）
-    const payloadSid = payload.jsonSid ?? "";
-    if (!/^[0-9a-fA-F]{8}$/.test(payloadSid) || payloadSid !== this.handshakeOrch.sid) {
+    const payloadSid = payload.sid;
+    if (
+      !/^[0-9a-fA-F]{8}$/.test(payloadSid) ||
+      payloadSid === "00000000" ||
+      payloadSid !== this.handshakeOrch.sid
+    ) {
       this.conn.close(CloseCode.HandshakeFailed, `invalid sid: ${payloadSid}`);
       return;
     }

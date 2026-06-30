@@ -3,18 +3,28 @@
 export {
   ControlOpcode,
   controlPayload,
+  eventMsg,
+  helloMsg,
+  identifiedMsg,
+  identifyMsg,
   PayloadType,
+  requestMsg,
+  responseMsg,
   RpcBodyEncoding,
   RpcEncoding,
-  RpcOp,
-  rpcPayload
+  RpcOp
 } from "./protocol/model.js";
 export type {
   ControlPayload,
+  EventPayload,
   Frame,
   FrameHeader,
+  HelloPayload,
+  IdentifyPayload,
+  IdentifiedPayload,
   Message,
-  PayloadMeta,
-  RpcPayload,
+  RequestPayload,
+  ResponsePayload,
+  RpcMessage,
   StreamPayload
 } from "./protocol/model.js";

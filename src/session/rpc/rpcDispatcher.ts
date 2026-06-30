@@ -3,18 +3,18 @@
 // 断连/超时：rejectAll 让所有 pending call 失败（ConnectionClosed）。
 // requestId 为 uint32，从 1 递增、回绕。
 
-import type { RpcPayload } from "../../protocol/model.js";
+import type { ResponsePayload } from "../../protocol/model.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
 
 interface PendingEntry {
-  readonly resolve: (payload: RpcPayload) => void;
+  readonly resolve: (payload: ResponsePayload) => void;
   readonly reject: (error: AxtpError) => void;
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
 export interface RequestResult {
   readonly requestId: number;
-  readonly promise: Promise<RpcPayload>;
+  readonly promise: Promise<ResponsePayload>;
 }
 
 const kMaxRequestId = 0xffffffff;
@@ -33,11 +33,11 @@ export class RpcDispatcher {
   ): RequestResult {
     const requestId = this.allocateRequestId();
     // 先创建 resolver 容器（避免依赖 Promise executor 同步执行的隐式契约）
-    const resolver: { resolve: (p: RpcPayload) => void; reject: (e: AxtpError) => void } = {
+    const resolver: { resolve: (p: ResponsePayload) => void; reject: (e: AxtpError) => void } = {
       resolve: () => {},
       reject: () => {}
     };
-    const promise = new Promise<RpcPayload>((resolve, reject) => {
+    const promise = new Promise<ResponsePayload>((resolve, reject) => {
       resolver.resolve = resolve;
       resolver.reject = reject;
     });
@@ -67,7 +67,7 @@ export class RpcDispatcher {
   }
 
   /** 响应到达：匹配 requestId 并 resolve。 */
-  resolve(payload: RpcPayload): void {
+  resolve(payload: ResponsePayload): void {
     const entry = this.pending.get(payload.requestId);
     if (entry === undefined) return;
     clearTimeout(entry.timer);

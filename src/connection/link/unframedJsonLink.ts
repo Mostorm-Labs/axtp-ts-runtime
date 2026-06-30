@@ -5,7 +5,7 @@
 
 import type { Bytes } from "../../io/bytes.js";
 import { decodeJsonRpc, encodeJsonRpc } from "../../protocol/codec/jsonRpc.js";
-import type { RpcPayload, StreamPayload } from "../../protocol/model.js";
+import type { RpcMessage, StreamPayload } from "../../protocol/model.js";
 import type { ITransport } from "../../transport/transport.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
 import { EventStream } from "../../types/events.js";
@@ -21,7 +21,7 @@ export interface UnframedJsonLinkOptions {
 
 export class UnframedJsonLink implements Link {
   // onClosing / onOpenRejected 是接口契约的一部分，但 unframed 无 CONTROL，永不 emit。
-  readonly onPayload = new EventStream<RpcPayload>();
+  readonly onPayload = new EventStream<RpcMessage>();
   readonly onStream = new EventStream<StreamPayload>();
   readonly onLinkReady = new EventStream<void>();
   readonly onClosing = new EventStream<void>();
@@ -41,9 +41,10 @@ export class UnframedJsonLink implements Link {
   ingest(bytes: Bytes): void {
     const payload = decodeJsonRpc(bytes);
     if (payload !== undefined) this.onPayload.emit(payload);
+    else this.onError.emit(new AxtpError(ErrorCode.RpcPayloadInvalid, "malformed JSON envelope"));
   }
 
-  sendRpc(payload: RpcPayload): void {
+  sendRpc(payload: RpcMessage): void {
     this.transport.send(encodeJsonRpc(payload));
   }
 

@@ -2,7 +2,7 @@
 // 持有 Handshake，onLinkReady 时 Logical Server 发 Hello，ingest 握手消息推进状态。
 // 通过 SessionIO 发送 outbound（不直接持有 Connection）。
 
-import type { RpcPayload } from "../../protocol/model.js";
+import type { RpcMessage } from "../../protocol/model.js";
 import { RpcOp } from "../../protocol/model.js";
 import type { LogicalRole } from "../../transport/transport.js";
 import type { AxtpError } from "../../types/error.js";
@@ -36,7 +36,7 @@ export class HandshakeOrchestrator {
   }
 
   /** 处理入站握手消息。返回推进结果（含可能的握手错误）。 */
-  ingest(payload: RpcPayload): HandshakeIngestResult {
+  ingest(payload: RpcMessage): HandshakeIngestResult {
     const result = this.handshake.handle(payload);
     if (result.outbound) this.io.sendRpc(result.outbound);
     return { becameReady: result.becameReady, error: result.error };

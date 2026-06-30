@@ -18,7 +18,7 @@ import {
 } from "../../protocol/codec/control.js";
 import { ControlOpcode, RpcEncoding } from "../../protocol/model.js";
 import type { PhysicalRole } from "../../transport/transport.js";
-import { ErrorCode } from "../../types/error.js";
+import { AxtpError, ErrorCode } from "../../types/error.js";
 
 export interface NegotiatedLink {
   readonly maxFrameSize: number;
@@ -40,6 +40,8 @@ export interface ControlSessionCallbacks {
   onHeartbeatAck?: (controlId: number) => void;
   /** 链路进入 CLOSING（收到 CLOSE）。 */
   onClosing?: (controlId: number) => void;
+  /** decode 失败（畸形 CONTROL 帧）：上报，不再静默丢弃。 */
+  onError?: (err: AxtpError) => void;
 }
 
 /** 链路层生命周期状态（与 Connection/Session/Handshake 的显式状态机风格一致）。 */
@@ -99,8 +101,11 @@ export class ControlSession {
     let decoded;
     try {
       decoded = decodeControl(body);
-    } catch {
-      // 畸形 CONTROL 帧（body 不足 5B 等）：静默丢弃
+    } catch (err) {
+      // 畸形 CONTROL 帧（body 不足 5B 等）：上报 onError，不再静默丢弃
+      this.callbacks.onError?.(
+        new AxtpError(ErrorCode.ControlPayloadInvalid, "malformed CONTROL frame", err)
+      );
       return;
     }
     switch (decoded.opcode) {

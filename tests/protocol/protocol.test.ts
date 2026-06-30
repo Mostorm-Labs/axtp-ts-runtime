@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Heartbeat } from "../../src/connection/heartbeat.js";
-import { hexToBytes } from "../../src/io/bytes.js";
+import { hexToBytes, toBytes } from "../../src/io/bytes.js";
 import {
   decodeControl,
   defaultOpenParams,
@@ -16,7 +16,8 @@ import {
   MessageFragmenter,
   MessageReassembler
 } from "../../src/protocol/codec/frame.js";
-import { decodeJsonRpc } from "../../src/protocol/codec/jsonRpc.js";
+import { PayloadDecoder } from "../../src/protocol/codec/payload.js";
+import { decodeJsonRpc, encodeJsonRpc } from "../../src/protocol/codec/jsonRpc.js";
 import { decodeStream, encodeStream, kStreamHeaderSize } from "../../src/protocol/codec/stream.js";
 import {
   ControlOpcode,
@@ -25,7 +26,7 @@ import {
 } from "../../src/protocol/generated/axtp_ids_generated.js";
 import { AXTP_SPEC_VERSION } from "../../src/protocol/generated/axtpVersion.js";
 import type { Frame, Message } from "../../src/protocol/model.js";
-import { rpcPayload } from "../../src/protocol/model.js";
+import { helloMsg, identifyMsg, identifiedMsg, responseMsg } from "../../src/protocol/model.js";
 import { Handshake } from "../../src/session/handshake/handshake.js";
 import { RpcDispatcher } from "../../src/session/rpc/rpcDispatcher.js";
 import { AxtpError, ErrorCode } from "../../src/types/error.js";
@@ -80,6 +81,16 @@ describe("CONTROL codec 6 TLV", () => {
     const bytes = encodeOpen(1, defaultOpenParams(4096, 1000));
     const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
     expect(hex).toContain("0a0203e8");
+  });
+
+  it("TLV extended length marker (0xFF) 被跳过，不破坏后续 TLV（spec 40-codec.md:88）", () => {
+    // opcode=OPEN(01) controlId=0001 statusCode=0000 + TLV body:
+    //   unknown tag 0x99 用 extended marker: 99 FF 0003 414243
+    //   maxFrameSize: 04 02 10 00 (=4096)
+    const bytes = hexToBytes("0100010000" + "99FF0003414243" + "04021000");
+    const decoded = decodeControl(bytes);
+    expect(decoded.opcode).toBe(ControlOpcode.Open);
+    expect(decoded.tlv.maxFrameSize).toBe(0x1000);
   });
 });
 
@@ -165,14 +176,41 @@ describe("Frame codec", () => {
   });
 });
 
+describe("PayloadDecoder onError（A3：decode 失败上报，不再静默）", () => {
+  it("非 JSON rpcEncoding 上报 onError（RpcEncodingUnsupported）", () => {
+    const errors: AxtpError[] = [];
+    const decoder = new PayloadDecoder({
+      onControl: () => {},
+      onRpc: () => {},
+      onStream: () => {},
+      onError: (e) => errors.push(e)
+    });
+    decoder.onMessage(PayloadType.Rpc, new Uint8Array([0x04, 0x7a, 0x7a])); // 0x04=JSON_BINARY
+    expect(errors).toHaveLength(1);
+    expect(errors[0].code).toBe(ErrorCode.RpcEncodingUnsupported);
+  });
+
+  it("malformed JSON envelope 上报 onError（RpcPayloadInvalid）", () => {
+    const errors: AxtpError[] = [];
+    const decoder = new PayloadDecoder({
+      onControl: () => {},
+      onRpc: () => {},
+      onStream: () => {},
+      onError: (e) => errors.push(e)
+    });
+    decoder.onMessage(PayloadType.Rpc, new Uint8Array([0x01, 0x7a, 0x7a])); // JSON + "zz"
+    expect(errors).toHaveLength(1);
+    expect(errors[0].code).toBe(ErrorCode.RpcPayloadInvalid);
+  });
+});
+
 describe("JSON-RPC codec", () => {
   it("Hello envelope", () => {
     const bytes = buildHelloJson();
     const p = decodeJsonRpc(bytes);
     expect(p).toBeDefined();
     if (p === undefined) return;
-    expect(p.op).toBe(RpcOp.Hello);
-    expect(JSON.parse(new TextDecoder().decode(p.body)).axtpVersion).toBe(AXTP_SPEC_VERSION);
+    expect(p).toMatchObject({ op: RpcOp.Hello, axtpVersion: AXTP_SPEC_VERSION });
   });
 
   it("Identify 含 randomSeed + eventMasks", () => {
@@ -180,9 +218,7 @@ describe("JSON-RPC codec", () => {
     const p = decodeJsonRpc(bytes);
     expect(p).toBeDefined();
     if (p === undefined) return;
-    expect(p.op).toBe(RpcOp.Identify);
-    expect(p.meta.randomSeed).toBe(0x12345678);
-    expect(p.meta.jsonEventMasks).toBe("090101");
+    expect(p).toMatchObject({ op: RpcOp.Identify, randomSeed: 0x12345678, eventMasks: "090101" });
   });
 
   it("Identified.d = {} 且 sid 在外层（对齐 conformance）", () => {
@@ -198,17 +234,13 @@ describe("JSON-RPC codec", () => {
     const p = decodeJsonRpc(req);
     expect(p).toBeDefined();
     if (p === undefined) return;
-    expect(p.op).toBe(RpcOp.Request);
-    expect(p.requestId).toBe(1);
-    expect(p.meta.jsonMethodOrEventName).toBe("audio.getAlgorithmConfig");
+    expect(p).toMatchObject({ op: RpcOp.Request, requestId: 1, method: "audio.getAlgorithmConfig" });
 
     const resp = buildResponseJson(1, { ok: true }, "12345678");
     const rp = decodeJsonRpc(resp);
     expect(rp).toBeDefined();
     if (rp === undefined) return;
-    expect(rp.requestId).toBe(1);
-    expect(rp.statusCode).toBe(ErrorCode.Success);
-    expect(JSON.parse(new TextDecoder().decode(rp.body)).ok).toBe(true);
+    expect(rp).toMatchObject({ requestId: 1, status: ErrorCode.Success, result: { ok: true } });
   });
 
   it("Error Response status = uint errorCode", () => {
@@ -223,20 +255,108 @@ describe("JSON-RPC codec", () => {
   });
 });
 
+describe("RpcMessage codec（判别联合，与旧 codec 逐字节等价）", () => {
+  it("Hello：一等字段 axtpVersion，round-trip 字节不变", () => {
+    const wire = buildHelloJson();
+    const msg = decodeJsonRpc(wire);
+    expect(msg).toBeDefined();
+    if (msg === undefined) return;
+    expect(msg.op).toBe(RpcOp.Hello);
+    expect(msg).toMatchObject({ sid: "", axtpVersion: AXTP_SPEC_VERSION });
+    expect([...encodeJsonRpc(msg)]).toEqual([...wire]);
+  });
+
+  it("Identify：一等字段 randomSeed/eventMasks，round-trip 字节不变", () => {
+    const wire = buildIdentifyJson(0x12345678, "090101");
+    const msg = decodeJsonRpc(wire);
+    expect(msg).toBeDefined();
+    if (msg === undefined) return;
+    expect(msg).toMatchObject({ op: RpcOp.Identify, randomSeed: 0x12345678, eventMasks: "090101" });
+    expect([...encodeJsonRpc(msg)]).toEqual([...wire]);
+  });
+
+  it("Identify 无 eventMasks：round-trip 字节不变", () => {
+    const wire = buildIdentifyJson(0x11112222, "");
+    const msg = decodeJsonRpc(wire);
+    expect(msg).toBeDefined();
+    if (msg === undefined) return;
+    expect(msg).toMatchObject({ randomSeed: 0x11112222 });
+    expect((msg as { eventMasks?: string }).eventMasks).toBeUndefined();
+    expect([...encodeJsonRpc(msg)]).toEqual([...wire]);
+  });
+
+  it("Identified：d={}，sid 在外层，round-trip 字节不变", () => {
+    const wire = buildIdentifiedJson("12345678");
+    const msg = decodeJsonRpc(wire);
+    expect(msg).toBeDefined();
+    if (msg === undefined) return;
+    expect(msg).toMatchObject({ op: RpcOp.Identified, sid: "12345678" });
+    expect([...encodeJsonRpc(msg)]).toEqual([...wire]);
+  });
+
+  it("Event：一等字段 eventName/data，round-trip 字节不变", () => {
+    const wire = toBytes(
+      JSON.stringify({
+        sid: "12345678",
+        op: RpcOp.Event,
+        d: { event: "audio.algorithmConfigChanged", data: { v: 1 } }
+      })
+    );
+    const msg = decodeJsonRpc(wire);
+    expect(msg).toBeDefined();
+    if (msg === undefined) return;
+    expect(msg).toMatchObject({ eventName: "audio.algorithmConfigChanged", data: { v: 1 } });
+    expect([...encodeJsonRpc(msg)]).toEqual([...wire]);
+  });
+
+  it("Request：一等字段 method/params，round-trip 字节不变", () => {
+    const wire = buildRequestJson(7, "audio.getAlgorithmConfig", { x: 1 }, "");
+    const msg = decodeJsonRpc(wire);
+    expect(msg).toBeDefined();
+    if (msg === undefined) return;
+    expect(msg).toMatchObject({
+      requestId: 7,
+      method: "audio.getAlgorithmConfig",
+      params: { x: 1 }
+    });
+    expect([...encodeJsonRpc(msg)]).toEqual([...wire]);
+  });
+
+  it("Response：status/result 一等字段，round-trip 字节不变", () => {
+    const wire = buildResponseJson(7, { ok: true }, "12345678");
+    const msg = decodeJsonRpc(wire);
+    expect(msg).toBeDefined();
+    if (msg === undefined) return;
+    expect(msg).toMatchObject({ requestId: 7, status: ErrorCode.Success, result: { ok: true } });
+    expect([...encodeJsonRpc(msg)]).toEqual([...wire]);
+  });
+
+  it("error response（非 success）：无 result，round-trip 字节不变", () => {
+    const wire = buildErrorResponseJson(7, ErrorCode.RpcMethodNotFound, "12345678");
+    const msg = decodeJsonRpc(wire);
+    expect(msg).toBeDefined();
+    if (msg === undefined) return;
+    expect(msg).toMatchObject({ status: ErrorCode.RpcMethodNotFound });
+    expect([...encodeJsonRpc(msg)]).toEqual([...wire]);
+  });
+
+  it("无效 JSON 返回 undefined（不抛）", () => {
+    expect(decodeJsonRpc(hexToBytes("7a7a"))).toBeUndefined();
+  });
+});
+
 describe("RpcDispatcher", () => {
   it("request -> resolve（事件驱动，无 poll）", async () => {
     const dispatcher = new RpcDispatcher();
     const { requestId, promise } = dispatcher.request((id) => {
       // 模拟响应到达
       setTimeout(() => {
-        dispatcher.resolve(
-          rpcPayload({ op: RpcOp.RequestResponse, requestId: id, statusCode: ErrorCode.Success })
-        );
+        dispatcher.resolve(responseMsg("", id, ErrorCode.Success));
       }, 0);
     }, 1000);
     const payload = await promise;
     expect(payload.requestId).toBe(requestId);
-    expect(payload.statusCode).toBe(ErrorCode.Success);
+    expect(payload.status).toBe(ErrorCode.Success);
   });
 
   it("超时 reject（RpcResponseTimeout）", async () => {
@@ -260,31 +380,20 @@ describe("Handshake 状态机", () => {
   it("server: 收 Identify -> 生成 sid -> Identified（d={}）", () => {
     const server = new Handshake("server", 0xabc);
     server.onLinkReady();
-    const identify = rpcPayload({
-      op: RpcOp.Identify,
-      body: new TextEncoder().encode(JSON.stringify({ randomSeed: 0x12345678 }))
-    });
-    const result = server.handle(identify);
+    const result = server.handle(identifyMsg("", 0x12345678));
     expect(result.becameReady).toBe(true);
     expect(result.outbound).toBeDefined();
     const outbound = result.outbound;
     if (outbound === undefined) return;
-    expect(outbound.op).toBe(RpcOp.Identified);
-    expect(outbound.jsonSid).toMatch(/^[0-9a-f]{8}$/);
+    expect(outbound).toMatchObject({ op: RpcOp.Identified });
+    expect(outbound.sid).toMatch(/^[0-9a-f]{8}$/);
     expect(server.sid).toMatch(/^[0-9a-f]{8}$/);
-    // d = {}
-    expect(JSON.parse(new TextDecoder().decode(outbound.body))).toEqual({});
   });
 
   it("sid 不等于 randomSeed（混合本地状态）", () => {
     const server = new Handshake("server", 0x111);
     server.onLinkReady();
-    const _result = server.handle(
-      rpcPayload({
-        op: RpcOp.Identify,
-        body: new TextEncoder().encode(JSON.stringify({ randomSeed: 0x99999999 }))
-      })
-    );
+    const _result = server.handle(identifyMsg("", 0x99999999));
     expect(server.sid).not.toBe("99999999");
     expect(parseInt(server.sid, 16)).not.toBe(0x99999999);
   });
@@ -314,17 +423,14 @@ describe("Handshake 状态机", () => {
     expect(hello).toBeDefined();
     if (hello === undefined) return;
     client.handle(hello);
-    const r = client.handle(rpcPayload({ op: RpcOp.Identified, jsonSid: "xyz" }));
+    const r = client.handle(identifiedMsg("xyz"));
     expect(r.error).toBeDefined();
     expect(client.isReady).toBe(false);
   });
 
   it("axtpVersion 主版本非 1 被拒（错误码 RpcPayloadInvalid）", () => {
     const client = new Handshake("client");
-    const hello = rpcPayload({
-      op: RpcOp.Hello,
-      body: new TextEncoder().encode(JSON.stringify({ axtpVersion: "2.0.0" }))
-    });
+    const hello = helloMsg("", "2.0.0");
     const r = client.handle(hello);
     expect(r.error?.code).toBe(ErrorCode.RpcPayloadInvalid);
     expect(r.becameReady).toBe(false);
@@ -332,13 +438,21 @@ describe("Handshake 状态机", () => {
 
   it("axtpVersion='1'（纯主版本号）被接受（不再因 startsWith('1.') 误拒）", () => {
     const client = new Handshake("client");
-    const hello = rpcPayload({
-      op: RpcOp.Hello,
-      body: new TextEncoder().encode(JSON.stringify({ axtpVersion: "1" }))
-    });
+    const hello = helloMsg("", "1");
     const r = client.handle(hello);
     expect(r.error).toBeUndefined();
     expect(r.outbound?.op).toBe(RpcOp.Identify);
+  });
+
+  it("zero sid (00000000) 被拒（spec 20-core.md:211）", () => {
+    const client = new Handshake("client");
+    const hello = decodeJsonRpc(buildHelloJson());
+    expect(hello).toBeDefined();
+    if (hello === undefined) return;
+    client.handle(hello);
+    const r = client.handle(identifiedMsg("00000000"));
+    expect(r.error).toBeDefined();
+    expect(client.isReady).toBe(false);
   });
 });
 

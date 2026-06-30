@@ -8,7 +8,7 @@
 // 对 Session 层完全透明——Session 仍通过 Connection 的 onPayload/onStream/onLinkReady 消费。
 
 import type { Bytes } from "../../io/bytes.js";
-import type { RpcPayload, StreamPayload } from "../../protocol/model.js";
+import type { RpcMessage, StreamPayload } from "../../protocol/model.js";
 import type { AxtpError } from "../../types/error.js";
 import type { EventStream } from "../../types/events.js";
 
@@ -18,7 +18,7 @@ import type { EventStream } from "../../types/events.js";
  */
 export interface Link {
   /** 解码后的 RPC payload（CONTROL/STREAM 编解码在实现内部完成）。 */
-  readonly onPayload: EventStream<RpcPayload>;
+  readonly onPayload: EventStream<RpcMessage>;
   /** 解码后的 STREAM payload（unframed 实现永不 emit——WS 不承载 STREAM）。 */
   readonly onStream: EventStream<StreamPayload>;
   /** 链路 ready：framed 在 OPEN/ACCEPT 协商成功后；unframed 在 startOpen 时即时。 */
@@ -35,7 +35,7 @@ export interface Link {
   /** 入站：transport 原始字节 → 解码 → emit onPayload/onStream。 */
   ingest(bytes: Bytes): void;
   /** 出站 RPC：实现内部 encode + 成帧(framed) / 直发(unframed)。 */
-  sendRpc(payload: RpcPayload): void;
+  sendRpc(payload: RpcMessage): void;
   /** 出站 STREAM：framed 成帧发送；unframed 抛 NotSupported（spec：WS 不承载 STREAM）。 */
   sendStream(payload: StreamPayload): void;
   /** 发起链路建立：framed client 发 OPEN / framed server no-op（等 OPEN）/ unframed 即时 emit onLinkReady。 */

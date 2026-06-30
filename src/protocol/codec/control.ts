@@ -82,19 +82,27 @@ function writeTlv(writer: ByteWriter, tag: number, value: number, width: 1 | 2 |
 }
 
 function readTlv(reader: ByteReader): { tag: number; value: number } | undefined {
-  const tag = reader.readU8();
-  const len = reader.readU8();
-  if (tag === undefined || len === undefined) return undefined;
-  let value = 0;
-  if (len === 1) value = reader.readU8Strict();
-  else if (len === 2) value = reader.readU16Strict();
-  else if (len === 4) value = reader.readU32Strict();
-  else {
-    // 异常宽度：跳过并返回 undefined（调用方会忽略此 TLV）
-    reader.readBytes(len);
-    return undefined;
+  // 内部循环：跳过 extended length marker（spec 40-codec.md:88）和异常宽度/unknown
+  // value（spec:95），返回第一个可解析的 TLV；耗尽返回 undefined。
+  while (!reader.empty()) {
+    const tag = reader.readU8();
+    const len = reader.readU8();
+    if (tag === undefined || len === undefined) return undefined;
+    // spec 40-codec.md:88 short TLV extended length marker：type + 0xFF + extLen16 + value。
+    // 0xFF 不是 value 长度而是 marker；按 extLen 跳过 unknown value，继续下一个 TLV。
+    if (len === 0xff) {
+      const extLen = reader.readU16();
+      if (extLen === undefined) return undefined;
+      if (reader.readBytes(extLen) === undefined) return undefined; // 字节不足，中止
+      continue;
+    }
+    if (len === 1) return { tag, value: reader.readU8Strict() };
+    if (len === 2) return { tag, value: reader.readU16Strict() };
+    if (len === 4) return { tag, value: reader.readU32Strict() };
+    // 异常宽度：跳过 unknown value（spec:95），继续下一个 TLV。
+    if (reader.readBytes(len) === undefined) return undefined; // 字节不足，中止
   }
-  return { tag, value };
+  return undefined;
 }
 
 /** 编码 CONTROL payload header（opcode + controlId + statusCode）+ TLV body。 */

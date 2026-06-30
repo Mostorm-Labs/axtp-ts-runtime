@@ -5,9 +5,8 @@ import { toBytes } from "../../src/io/bytes.js";
 import { encodeJsonRpc } from "../../src/protocol/codec/jsonRpc.js";
 import { AXTP_SPEC_VERSION } from "../../src/protocol/generated/axtpVersion.js";
 import { RpcOp } from "../../src/protocol/generated/axtp_ids_generated.js";
-import { rpcPayload } from "../../src/protocol/model.js";
+import { requestMsg, responseMsg } from "../../src/protocol/model.js";
 import { ErrorCode } from "../../src/types/error.js";
-import { registry } from "../../src/types/registry.js";
 
 export function buildRequestJson(
   requestId: number,
@@ -15,39 +14,15 @@ export function buildRequestJson(
   params: unknown,
   sid: string
 ): Bytes {
-  return encodeJsonRpc(
-    rpcPayload({
-      op: RpcOp.Request,
-      requestId,
-      methodOrEventId: registry.methodId(methodName) ?? 0,
-      jsonSid: sid,
-      body: toBytes(JSON.stringify(params ?? {})),
-      meta: { jsonMethodOrEventName: methodName }
-    })
-  );
+  return encodeJsonRpc(requestMsg(sid, requestId, methodName, params ?? {}));
 }
 
 export function buildResponseJson(requestId: number, result: unknown, sid: string): Bytes {
-  return encodeJsonRpc(
-    rpcPayload({
-      op: RpcOp.RequestResponse,
-      requestId,
-      statusCode: ErrorCode.Success,
-      jsonSid: sid,
-      body: toBytes(JSON.stringify(result ?? {}))
-    })
-  );
+  return encodeJsonRpc(responseMsg(sid, requestId, ErrorCode.Success, result ?? {}));
 }
 
 export function buildErrorResponseJson(requestId: number, code: ErrorCode, sid: string): Bytes {
-  return encodeJsonRpc(
-    rpcPayload({
-      op: RpcOp.RequestResponse,
-      requestId,
-      statusCode: code,
-      jsonSid: sid
-    })
-  );
+  return encodeJsonRpc(responseMsg(sid, requestId, code));
 }
 
 export function buildHelloJson(): Bytes {

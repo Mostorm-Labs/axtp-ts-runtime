@@ -1,5 +1,5 @@
 // Handshake：唯一的会话状态机（Hello/Identify/Identified）。
-// 不掺 wire 差异——收到的都是解码好的 RpcPayload（由 Connection 上交）。
+// 不掺 wire 差异——收到的都是解码好的 RpcMessage（由 Connection 上交）。
 // 规范 Runtime gate 4 态：LINK_CONNECTED -> FRAMING_READY -> APP_READY -> CLOSING。
 // 会话语义，归 Session。
 //
@@ -8,16 +8,20 @@
 // sid = 8 位 hex，混合 randomSeed（禁直接当 sid，spec:207）。
 // Identified.d = {}（对齐 conformance；sid 在 envelope 外层）。
 
-import { decodeJsonBody, encodeJsonBody } from "../../protocol/codec/jsonRpc.js";
 import { AXTP_SPEC_VERSION } from "../../protocol/generated/axtpVersion.js";
-import type { RpcPayload } from "../../protocol/model.js";
-import { RpcOp, rpcPayload } from "../../protocol/model.js";
+import type {
+  HelloPayload,
+  IdentifyPayload,
+  IdentifiedPayload,
+  RpcMessage
+} from "../../protocol/model.js";
+import { RpcOp, helloMsg, identifiedMsg, identifyMsg } from "../../protocol/model.js";
 import type { LogicalRole } from "../../transport/transport.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
 
 /**
  * axtpVersion 兼容判定：主版本=1 即接受（spec:205 它是 spec compatibility authority，
- * spec 未规定精确匹配算法）。支持 "1"/"1.0"/"1.0.0"；拒绝 "2.x"/"10.x"。
+ * spec 未规定精确匹配算法）。支持 "1"/"1.0"/"1.0.0"；拒绝 "2.x"/空串。
  */
 function isAxtpVersionCompatible(version: string): boolean {
   const major = Number.parseInt(version, 10);
@@ -27,11 +31,11 @@ function isAxtpVersionCompatible(version: string): boolean {
 export type SessionState = "LINK_CONNECTED" | "FRAMING_READY" | "APP_READY" | "CLOSING";
 
 export interface HandshakeResult {
-  /** 待发送的 payload（若有），由 Connection 负责发送字节。undefined 表示无需回复。 */
-  readonly outbound?: RpcPayload;
+  /** 待发送的 RpcMessage（若有），由 Connection 负责发送字节。undefined 表示无需回复。 */
+  readonly outbound?: RpcMessage;
   /** 是否进入 APP_READY。 */
   readonly becameReady: boolean;
-  /** 错误（若有，非致命则 outbound 携带 error response）。 */
+  /** 错误（若有）。 */
   readonly error?: AxtpError;
 }
 
@@ -64,19 +68,12 @@ export class Handshake {
   }
 
   /** Logical Server 产生首条 Hello。Logical Client 不调。 */
-  startHello(): RpcPayload {
-    return rpcPayload({
-      op: RpcOp.Hello,
-      jsonSid: "",
-      body: encodeJsonBody({ axtpVersion: AXTP_SPEC_VERSION }),
-      meta: {}
-    });
+  startHello(): HelloPayload {
+    return helloMsg("", AXTP_SPEC_VERSION);
   }
 
-  /**
-   * 处理入站握手消息（RpcPayload）。返回 outbound（待发送）/ becameReady / error。
-   */
-  handle(payload: RpcPayload): HandshakeResult {
+  /** 处理入站握手消息。返回 outbound（待发送）/ becameReady / error。 */
+  handle(payload: RpcMessage): HandshakeResult {
     switch (payload.op) {
       case RpcOp.Hello:
         return this.handleHello(payload);
@@ -112,13 +109,13 @@ export class Handshake {
     return this.logicalRole;
   }
 
-  /** 重连后重置握手状态（重新走 Hello/Identify/Identified）。eventMasks 保留（订阅意图不变）。 */
+  /** 重连后重置握手状态（重新走 Hello/Identify/Identified）。eventMasks 保留。 */
   reset(): void {
     this.stateValue = "LINK_CONNECTED";
     this.sidValue = "";
   }
 
-  private handleHello(payload: RpcPayload): HandshakeResult {
+  private handleHello(payload: HelloPayload): HandshakeResult {
     // Logical Client 收 Hello 回 Identify；Logical Server 不应收到 Hello（自己是发送方）
     if (this.logicalRole !== "client") {
       return { becameReady: false };
@@ -127,76 +124,43 @@ export class Handshake {
       // WS 模式下 Hello 可能在 LINK_CONNECTED 到达（无 CONTROL），直接推进。
       this.stateValue = "FRAMING_READY";
     }
-    // 解析 Hello body，校验 axtpVersion（spec:205: axtpVersion 是 spec compatibility authority）
-    const d = decodeJsonBody(payload.body);
-    if (d === undefined) {
-      return {
-        becameReady: false,
-        error: new AxtpError(ErrorCode.RpcPayloadInvalid, "invalid Hello body")
-      };
-    }
-    const helloObj = d as { axtpVersion?: string } | undefined;
-    // spec:205: axtpVersion 是 spec compatibility authority。缺失/非 string/主版本非 1 都拒绝。
-    const version = helloObj?.axtpVersion;
-    if (typeof version !== "string" || !isAxtpVersionCompatible(version)) {
+    // spec:205: axtpVersion 是 spec compatibility authority。缺失/主版本非 1 都拒绝。
+    const version = payload.axtpVersion;
+    if (!isAxtpVersionCompatible(version)) {
       return {
         becameReady: false,
         error: new AxtpError(
           ErrorCode.RpcPayloadInvalid,
-          `unsupported or missing axtpVersion: ${version ?? "(absent)"}`
+          `unsupported or missing axtpVersion: ${version || "(absent)"}`
         )
       };
     }
     // client 回 Identify（带 randomSeed + eventMasks）
     const randomSeed = (Math.floor(Math.random() * 0x100000000) || 1) >>> 0;
-    const body: Record<string, unknown> = { randomSeed };
-    if (this.eventMasksValue) body.eventMasks = this.eventMasksValue;
-    const identify = rpcPayload({
-      op: RpcOp.Identify,
-      jsonSid: "",
-      body: encodeJsonBody(body),
-      meta: { randomSeed, jsonEventMasks: this.eventMasksValue }
-    });
+    const identify = identifyMsg("", randomSeed, this.eventMasksValue);
     return { outbound: identify, becameReady: false };
   }
 
-  private handleIdentify(payload: RpcPayload): HandshakeResult {
+  private handleIdentify(payload: IdentifyPayload): HandshakeResult {
     // Logical Server 收 Identify 回 Identified、生成 sid
     if (this.logicalRole !== "server") {
       return { becameReady: false };
     }
-    const d = decodeJsonBody(payload.body) as
-      | {
-          randomSeed?: number;
-          eventMasks?: string;
-        }
-      | undefined;
-    if (d === undefined) {
-      return {
-        becameReady: false,
-        error: new AxtpError(ErrorCode.RpcPayloadInvalid, "invalid Identify body")
-      };
-    }
-    const randomSeed = typeof d.randomSeed === "number" ? d.randomSeed >>> 0 : 0;
-    this.sidValue = this.generateSid(randomSeed);
-    const identified = rpcPayload({
-      op: RpcOp.Identified,
-      jsonSid: this.sidValue,
-      body: encodeJsonBody({}),
-      meta: {}
-    });
+    this.sidValue = this.generateSid(payload.randomSeed);
+    const identified = identifiedMsg(this.sidValue);
     this.stateValue = "APP_READY";
     return { outbound: identified, becameReady: true };
   }
 
-  private handleIdentified(payload: RpcPayload): HandshakeResult {
+  private handleIdentified(payload: IdentifiedPayload): HandshakeResult {
     // Logical Client 收 Identified 变 ready
     if (this.logicalRole !== "client") {
       return { becameReady: false };
     }
     // sid 在 envelope 外层（conformance: identified.d == {}）
-    const sid = payload.jsonSid ?? "";
-    if (!/^[0-9a-fA-F]{8}$/.test(sid)) {
+    const sid = payload.sid;
+    // spec:211 APP_READY 后 malformed/empty/non-hex/zero sid MUST 拒绝
+    if (!/^[0-9a-fA-F]{8}$/.test(sid) || sid === "00000000") {
       return {
         becameReady: false,
         error: new AxtpError(ErrorCode.RpcPayloadInvalid, `invalid sid: ${sid}`)

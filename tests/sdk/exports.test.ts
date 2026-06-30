@@ -27,7 +27,7 @@ describe("public exports: 主入口聚合 SDK 核心 + 子入口", () => {
     // ./protocol
     expect(main.ControlOpcode).toBeDefined();
     expect(main.PayloadType).toBeDefined();
-    expect(main.rpcPayload).toBeDefined();
+    expect(main.requestMsg).toBeDefined();
     // ./transport
     expect(main.CloseCode).toBeDefined();
     expect(main.framedBinaryCapabilities).toBeDefined();
@@ -45,7 +45,9 @@ describe("public exports: 主入口聚合 SDK 核心 + 子入口", () => {
 
   it("./protocol 子入口", () => {
     expect(protocolEntry.ControlOpcode).toBeDefined();
-    expect(protocolEntry.rpcPayload).toBeDefined();
+    // RpcMessage 判别联合工厂（新核心模型）；type-only 的 RpcMessage/子类型由 tsc 在 import 处验证
+    expect(protocolEntry.requestMsg).toBeDefined();
+    expect(protocolEntry.helloMsg).toBeDefined();
     expect((protocolEntry as Record<string, unknown>).AxtpClient).toBeUndefined();
   });
 

@@ -6,7 +6,7 @@
 // 重连：transport.onClose → ReconnectCoordinator → 新 transport → attachTransport(统一重置) → 链路启动。
 // 心跳：由 Link 自持（framed=CONTROL Heartbeat/Ack，WS=原生 keepalive），onHeartbeatTimeout → close。
 
-import type { RpcPayload, StreamPayload } from "../protocol/model.js";
+import type { RpcMessage, StreamPayload } from "../protocol/model.js";
 import type {
   CloseReason,
   ITransport,
@@ -32,8 +32,8 @@ export interface ConnectionOptions {
 /** Connection 生命周期状态机。 */
 export type ConnectionState =
   | "idle" // 构造后未 start
-  | "link_connecting" // start() 后，等链路 ready
-  | "link_ready" // 链路 ready
+  | "connecting" // start() 后，等链路 ready
+  | "ready" // 链路 ready
   | "reconnecting" // 传输断开，重连退避/尝试中
   | "closed"; // 终态
 
@@ -44,7 +44,7 @@ export class Connection {
   readonly onClose = new EventStream<CloseReason>();
   readonly onDisconnect = new EventStream<CloseReason>();
   readonly onError = new EventStream<AxtpError>();
-  readonly onPayload = new EventStream<RpcPayload>();
+  readonly onPayload = new EventStream<RpcMessage>();
   readonly onStream = new EventStream<StreamPayload>();
   readonly onLinkReady = new EventStream<void>();
   readonly onReconnect = new EventStream<ReconnectInfo>();
@@ -151,7 +151,7 @@ export class Connection {
   start(): void {
     if (this.started) return;
     this.started = true;
-    this.setState("link_connecting");
+    this.setState("connecting");
     void this.openInitialLink();
   }
 
@@ -199,11 +199,11 @@ export class Connection {
 
   /**
    * 链路就绪断言。closed 静默丢弃（close 后异步竞态 sendRpc 不击穿）；
-   * 其它非 link_ready 抛 TransportDisconnected。与 Session.requireReady 对齐。
+   * 其它非 ready 抛 TransportDisconnected。与 Session.requireReady 对齐。
    */
   private assertLinkReady(): boolean {
     if (this.connState === "closed") return false;
-    if (this.connState !== "link_ready")
+    if (this.connState !== "ready")
       throw new AxtpError(
         ErrorCode.TransportDisconnected,
         `connection not ready: ${this.connState}`
@@ -211,7 +211,7 @@ export class Connection {
     return true;
   }
 
-  sendRpc(payload: RpcPayload): void {
+  sendRpc(payload: RpcMessage): void {
     if (!this.assertLinkReady()) return;
     this.link?.sendRpc(payload);
   }
@@ -284,7 +284,7 @@ export class Connection {
     this.onReconnect.emit({ attempt });
 
     this.attachTransport(newTransport);
-    this.setState("link_connecting");
+    this.setState("connecting");
 
     this.startLinkHandshake();
   }
@@ -309,8 +309,8 @@ export class Connection {
   }
 
   private fireLinkReady(): void {
-    if (this.connState === "link_ready") return;
-    this.setState("link_ready");
+    if (this.connState === "ready") return;
+    this.setState("ready");
     this.onLinkReady.emit(undefined);
   }
 

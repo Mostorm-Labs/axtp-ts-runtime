@@ -111,6 +111,8 @@ export class AxtpClient {
     const policy = resolvePolicy(this.options.reconnect);
     this.session = new AxtpSession(() => this.transport.connect(), {
       physicalRole: "client",
+      // 默认 logical server（发 Hello）：对应 AXTP-WS-CLOUD-REVERSE（Device=physical client=logical server）。
+      // 标准 AXTP-TCP（App=physical client=logical client，发 Identify）需显式传 logicalRole:"client"。
       logicalRole: this.options.logicalRole ?? "server",
       defaultTimeoutMs: this.options.defaultTimeoutMs,
       handshakeTimeoutMs: this.options.handshakeTimeoutMs,
@@ -254,6 +256,11 @@ export class AxtpClient {
     return session.emit(event, payload);
   }
 
+  /**
+   * 订阅事件。注意：eventMasks 仅在 connect / 重连握手时注入 Identify；
+   * connect 之后新增的订阅不会立即通知对端（REIDENTIFY 是 spec draft，Phase 1 未实现），
+   * 需等下次重连握手才生效。运行时订阅意图重发参见 {@link updateSubscriptions}。
+   */
   on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void;
   on(event: string, handler: UntypedEventHandler): () => void;
   on(event: string, handler: UntypedEventHandler): () => void {
@@ -272,6 +279,19 @@ export class AxtpClient {
   private computeEventMasks(): string | undefined {
     if (this.subscribedEvents.size === 0) return undefined;
     return computeEventMasks([...this.subscribedEvents]);
+  }
+
+  /**
+   * 重发当前事件订阅意图（eventMasks）给对端。
+   *
+   * Phase 1 未实现 REIDENTIFY（spec draft），无法在握手后动态更新订阅；调用始终抛
+   * NotImplemented。connect 后新增的订阅只能等下次重连握手生效。
+   */
+  updateSubscriptions(): void {
+    throw new AxtpError(
+      ErrorCode.NotImplemented,
+      "updateSubscriptions requires REIDENTIFY (spec draft, not supported in Phase 1)"
+    );
   }
 
   // ===== Stream =====

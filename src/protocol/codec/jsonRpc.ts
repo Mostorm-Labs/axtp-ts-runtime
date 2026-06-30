@@ -1,21 +1,19 @@
-// JSON-RPC codec：处理 unframed-json envelope {sid, op, d}。
-// 这是 WebSocket Unframed JSON profile 的核心编解码。
-// spec 20-core.md:170-227。
+// JSON-RPC codec：处理 envelope {sid, op, d}（framed RPC 的 JSON 编码 + WS Unframed JSON）。
+// spec 20-core.md:170-227。编码无关判别联合 RpcMessage 的 wire 读写：
+// 一次 parse 直出结构化 RpcMessage，一次 stringify 直出 wire，无 bytes 中转/重复编解码。
 //
-// Request:  d = { id, method, params }
-// Response: d = { id, status, result }   (status = uint errorCode; 0=SUCCESS)
-// Event:    d = { event, data }
-// Hello:    d = { axtpVersion }
-// Identify: d = { randomSeed, eventMasks, rpcVersion? }
+// Request:    d = { id, method, params }
+// Response:   d = { id, status, result }   (status = uint errorCode; 0=SUCCESS)
+// Event:      d = { event, data }
+// Hello:      d = { axtpVersion }
+// Identify:   d = { randomSeed, eventMasks }
 // Identified: d = {}   （sid 在外层；对齐 conformance: identified.d == {}）
 //
-// 注意：method/event 在 JSON 恒为字符串名（数字 id 仅 JSON_BINARY，本期不实现）。
+// method/event 在 JSON 恒为字符串名（数字 id 仅 JSON_BINARY，本期不实现）。
 
 import { bytesToText, toBytes, type Bytes } from "../../io/bytes.js";
 import { ErrorCode } from "../../types/error.js";
-import { registry } from "../../types/registry.js";
-import { AXTP_SPEC_VERSION } from "../generated/axtpVersion.js";
-import { RpcEncoding, RpcOp, rpcPayload, type RpcPayload } from "../model.js";
+import { RpcEncoding, RpcOp, type RpcMessage } from "../model.js";
 
 type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
 interface JsonObject {
@@ -52,8 +50,8 @@ function parseRequestIdFromEnvelope(object: JsonObject): number {
   return 0;
 }
 
-/** 把 envelope JSON 文本解码为 RpcPayload。返回 undefined 表示无法解析。 */
-export function decodeJsonRpc(text: Bytes | string): RpcPayload | undefined {
+/** 把 envelope JSON 文本解码为 RpcMessage（判别联合）。返回 undefined 表示无法解析。 */
+export function decodeJsonRpc(text: Bytes | string): RpcMessage | undefined {
   let object: JsonObject;
   try {
     object = JSON.parse(typeof text === "string" ? text : bytesToText(text)) as JsonObject;
@@ -66,146 +64,88 @@ export function decodeJsonRpc(text: Bytes | string): RpcPayload | undefined {
     const d = asObject(object.d);
     switch (op) {
       case RpcOp.Hello:
-        return rpcPayload({
-          op,
-          jsonSid: sid,
-          body: toBytes(JSON.stringify(d)),
-          meta: {}
-        });
+        return { op, sid, axtpVersion: typeof d.axtpVersion === "string" ? d.axtpVersion : "" };
       case RpcOp.Identify: {
         const randomSeed = typeof d.randomSeed === "number" ? d.randomSeed >>> 0 : 0;
-        const eventMasks = typeof d.eventMasks === "string" ? d.eventMasks : "";
-        return rpcPayload({
-          op,
-          jsonSid: sid,
-          body: toBytes(JSON.stringify(d)),
-          meta: { randomSeed, jsonEventMasks: eventMasks }
-        });
+        const eventMasks = typeof d.eventMasks === "string" ? d.eventMasks : undefined;
+        return eventMasks !== undefined
+          ? { op, sid, randomSeed, eventMasks }
+          : { op, sid, randomSeed };
       }
       case RpcOp.Identified:
-        // Identified.d = {}（对齐 conformance）。sid 在外层。
-        return rpcPayload({ op, jsonSid: sid, body: toBytes("{}"), meta: {} });
-      case RpcOp.Event: {
-        const eventName = typeof d.event === "string" ? d.event : "";
-        const eventId = eventName ? (registry.eventId(eventName) ?? 0) : 0;
-        return rpcPayload({
+        return { op, sid };
+      case RpcOp.Event:
+        return {
           op,
-          methodOrEventId: eventId,
-          jsonSid: sid,
-          body: toBytes(JSON.stringify(d.data ?? {})),
-          meta: { jsonMethodOrEventName: eventName }
-        });
-      }
-      case RpcOp.Request: {
-        const requestId = parseRequestIdFromEnvelope(object);
-        const methodName = typeof d.method === "string" ? d.method : "";
-        const methodId = methodName ? (registry.methodId(methodName) ?? 0) : 0;
-        const params = d.params;
-        return rpcPayload({
+          sid,
+          eventName: typeof d.event === "string" ? d.event : "",
+          data: d.data ?? {}
+        };
+      case RpcOp.Request:
+        return {
           op,
-          requestId,
-          methodOrEventId: methodId,
-          jsonSid: sid,
-          body: params === undefined ? toBytes("{}") : toBytes(JSON.stringify(params)),
-          meta: { jsonMethodOrEventName: methodName }
-        });
-      }
+          sid,
+          requestId: parseRequestIdFromEnvelope(object),
+          method: typeof d.method === "string" ? d.method : "",
+          params: d.params ?? {}
+        };
       case RpcOp.RequestResponse: {
-        const requestId = parseRequestIdFromEnvelope(object);
         const status = typeof d.status === "number" ? d.status >>> 0 : ErrorCode.Success;
-        const result = d.result;
-        return rpcPayload({
+        return {
           op,
-          requestId,
-          statusCode: status as ErrorCode,
-          jsonSid: sid,
-          body: result === undefined ? new Uint8Array() : toBytes(JSON.stringify(result)),
-          meta: {}
-        });
+          sid,
+          requestId: parseRequestIdFromEnvelope(object),
+          status: status as ErrorCode,
+          result: d.result
+        };
       }
       default:
-        return rpcPayload({
-          op,
-          jsonSid: sid,
-          body: toBytes(JSON.stringify(d)),
-          meta: {}
-        });
+        return undefined;
     }
   } catch {
     return undefined;
   }
 }
 
-/** 把 RpcPayload 编码为 envelope JSON 字节。 */
-export function encodeJsonRpc(payload: RpcPayload): Bytes {
-  const sid = payload.jsonSid ?? "";
-  switch (payload.op) {
-    case RpcOp.Hello: {
-      const body = safeParseObject(payload.body);
-      if (body.axtpVersion === undefined) body.axtpVersion = AXTP_SPEC_VERSION;
-      return toBytes(JSON.stringify({ sid, op: payload.op, d: body }));
-    }
+/** 把 RpcMessage 编码为 envelope JSON 字节。 */
+export function encodeJsonRpc(msg: RpcMessage): Bytes {
+  switch (msg.op) {
+    case RpcOp.Hello:
+      return toBytes(
+        JSON.stringify({ sid: msg.sid, op: msg.op, d: { axtpVersion: msg.axtpVersion } })
+      );
     case RpcOp.Identify: {
-      const d = safeParseObject(payload.body);
-      if (payload.meta.randomSeed !== undefined) d.randomSeed = payload.meta.randomSeed;
-      if (payload.meta.jsonEventMasks) d.eventMasks = payload.meta.jsonEventMasks;
-      return toBytes(JSON.stringify({ sid, op: payload.op, d }));
+      const d: JsonObject = { randomSeed: msg.randomSeed };
+      if (msg.eventMasks) d.eventMasks = msg.eventMasks;
+      return toBytes(JSON.stringify({ sid: msg.sid, op: msg.op, d }));
     }
     case RpcOp.Identified:
-      // d = {}（对齐 conformance）。sid 在外层。
-      return toBytes(JSON.stringify({ sid, op: payload.op, d: {} }));
+      return toBytes(JSON.stringify({ sid: msg.sid, op: msg.op, d: {} }));
     case RpcOp.Event: {
-      const eventName =
-        payload.meta.jsonMethodOrEventName ?? registry.eventName(payload.methodOrEventId) ?? "";
-      const data = safeParse(payload.body);
-      const d: JsonObject = { event: eventName };
-      if (data !== undefined) d.data = data;
-      return toBytes(JSON.stringify({ sid, op: payload.op, d }));
+      const d: JsonObject = { event: msg.eventName };
+      if (msg.data !== undefined) d.data = msg.data as JsonValue;
+      return toBytes(JSON.stringify({ sid: msg.sid, op: msg.op, d }));
     }
     case RpcOp.Request: {
-      const methodName =
-        payload.meta.jsonMethodOrEventName ??
-        registry.methodName(payload.methodOrEventId) ??
-        String(payload.methodOrEventId);
-      const params = safeParse(payload.body);
-      const d: JsonObject = { id: payload.requestId, method: methodName };
-      if (params !== undefined) d.params = params;
-      return toBytes(JSON.stringify({ sid, op: payload.op, d }));
+      const d: JsonObject = { id: msg.requestId, method: msg.method };
+      if (msg.params !== undefined) d.params = msg.params as JsonValue;
+      return toBytes(JSON.stringify({ sid: msg.sid, op: msg.op, d }));
     }
     case RpcOp.RequestResponse: {
-      const d: JsonObject = { id: payload.requestId, status: payload.statusCode };
-      if (payload.statusCode === ErrorCode.Success) {
-        const result = safeParse(payload.body);
-        if (result !== undefined) d.result = result;
-      }
-      return toBytes(JSON.stringify({ sid, op: payload.op, d }));
+      const d: JsonObject = { id: msg.requestId, status: msg.status };
+      if (msg.status === ErrorCode.Success && msg.result !== undefined)
+        d.result = msg.result as JsonValue;
+      return toBytes(JSON.stringify({ sid: msg.sid, op: msg.op, d }));
     }
-    default:
-      return toBytes(JSON.stringify({ sid, op: payload.op, d: safeParseObject(payload.body) }));
   }
 }
 
-function safeParse(body: Bytes): JsonValue | undefined {
-  if (body.length === 0) return undefined;
-  try {
-    return JSON.parse(bytesToText(body)) as JsonValue;
-  } catch {
-    return undefined;
-  }
-}
-
-function safeParseObject(body: Bytes): JsonObject {
-  const v = safeParse(body);
-  if (v === null || typeof v !== "object" || Array.isArray(v)) return {};
-  return v as JsonObject;
-}
-
-/** 编码 JSON body（统一入口，避免 session 层内联 TextEncoder）。 */
+/** 编码 JSON body（公共 helper）。 */
 export function encodeJsonBody(value: unknown): Bytes {
   return toBytes(JSON.stringify(value ?? {}));
 }
 
-/** 解码 JSON body（统一入口，避免 session 层内联 TextDecoder）。解析失败返回 undefined。 */
+/** 解码 JSON body（公共 helper）。空 body 返回 {}，解析失败返回 undefined。 */
 export function decodeJsonBody(body: Bytes): unknown {
   if (body.length === 0) return {};
   try {

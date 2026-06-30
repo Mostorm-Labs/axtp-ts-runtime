@@ -4,7 +4,7 @@
 //   - CONTROL 状态机：ControlSession（OPEN/ACCEPT/CLOSE/CLOSE_ACK 协商，TLV 校验）
 //   - 出站：MessageFragmenter（按 maxFrameSize 分片）→ FrameEncoder（12B header + payload + 2B CRC）
 //   - 心跳：Heartbeat（CONTROL Heartbeat/Ack）
-// Connection 只看到 RpcPayload/StreamPayload 与链路事件，wire 细节全部封装于此。
+// Connection 只看到 RpcMessage/StreamPayload 与链路事件，wire 细节全部封装于此。
 //
 // 构造无副作用（不发字节）；server 角色等 OPEN，startOpen() 为 no-op。
 
@@ -23,7 +23,7 @@ import {
 import { encodeJsonRpc } from "../../protocol/codec/jsonRpc.js";
 import { PayloadDecoder } from "../../protocol/codec/payload.js";
 import { encodeStream } from "../../protocol/codec/stream.js";
-import type { Message, RpcPayload, StreamPayload } from "../../protocol/model.js";
+import type { Message, RpcMessage, StreamPayload } from "../../protocol/model.js";
 import { PayloadType, RpcEncoding } from "../../protocol/model.js";
 import type { ITransport, PhysicalRole } from "../../transport/transport.js";
 import type { AxtpError } from "../../types/error.js";
@@ -42,7 +42,7 @@ export interface FramedLinkOptions {
 }
 
 export class FramedLink implements Link {
-  readonly onPayload = new EventStream<RpcPayload>();
+  readonly onPayload = new EventStream<RpcMessage>();
   readonly onStream = new EventStream<StreamPayload>();
   readonly onLinkReady = new EventStream<void>();
   readonly onClosing = new EventStream<void>();
@@ -85,7 +85,8 @@ export class FramedLink implements Link {
         onHeartbeat: (cid) => this.sendHeartbeatAck(cid),
         onHeartbeatAck: () => this.heartbeat?.reset(),
         onClosing: () => this.onClosing.emit(undefined),
-        onOpenRejected: (sc) => this.onOpenRejected.emit(sc)
+        onOpenRejected: (sc) => this.onOpenRejected.emit(sc),
+        onError: (err) => this.onError.emit(err)
       },
       defaultOpenParams(options.maxFrameSize, options.heartbeatIntervalMs)
     );
@@ -93,7 +94,8 @@ export class FramedLink implements Link {
     const payloadDecoder = new PayloadDecoder({
       onControl: (body) => this.controlSession.handleControlBody(body),
       onRpc: (p) => this.onPayload.emit(p),
-      onStream: (s) => this.onStream.emit(s)
+      onStream: (s) => this.onStream.emit(s),
+      onError: (err) => this.onError.emit(err)
     });
     const reassembler = new MessageReassembler(
       { onMessage: (m) => payloadDecoder.onMessage(m.payloadType, m.body) },
@@ -107,7 +109,7 @@ export class FramedLink implements Link {
     this.frameDecoder.onBytes(bytes);
   }
 
-  sendRpc(payload: RpcPayload): void {
+  sendRpc(payload: RpcMessage): void {
     // framed-binary RPC：rpcEncoding(1B 前缀，JSON=0x01) + JSON envelope 字节。
     const jsonBytes = encodeJsonRpc(payload);
     const wrapped = new Uint8Array(1 + jsonBytes.length);

@@ -1,7 +1,7 @@
 // AxtpServer：多 client 管理 + 广播/单播（SDK 层，不知 Connection）。
 // 每 client 一个 AxtpSession（内含 Connection），Session 是上层一等对象。
 // handle/on 全局生效：注册到 HandlerRouter，所有 session 委托查询。
-// call(sessionId, ...) 单播；emit(...) 广播。
+// call(localId, ...) 单播；emit(...) 广播。
 //
 // 事件语义：
 // - onConnect: session 握手成功（ready 后触发）
@@ -59,6 +59,8 @@ export class AxtpServer {
     // server 端 transport 已由 IServerTransport accept 建立，包成一次性 factory 供 Connection 首次 attach。
     const session = new AxtpSession(() => Promise.resolve(t), {
       physicalRole: "server",
+      // 默认 logical client（发 Identify）：对应 AXTP-WS-CLOUD-REVERSE（Cloud=physical server=logical client）。
+      // 标准 AXTP-TCP（Device=physical server=logical server，发 Hello）需显式传 logicalRole:"server"。
       logicalRole: this.options.logicalRole ?? "client",
       defaultTimeoutMs: this.options.defaultTimeoutMs ?? 10000,
       handshakeTimeoutMs: this.options.handshakeTimeoutMs,
@@ -71,7 +73,7 @@ export class AxtpServer {
     session.onClose.subscribe(() => {
       // 仅当该 session 确曾 onConnect（已在表中）才发 onDisconnect，避免对握手失败、
       // 从未 onConnect 的 session 触发“幽灵” onDisconnect。
-      if (this.sessions.delete(session.id)) {
+      if (this.sessions.delete(session.localId)) {
         this.onDisconnect.emit(session);
       }
     });
@@ -82,27 +84,27 @@ export class AxtpServer {
 
     // 握手成功后才注册到 sessions 表 + 触发 onConnect
     session.onReady.subscribe(() => {
-      this.sessions.set(session.id, session);
+      this.sessions.set(session.localId, session);
       this.onConnect.emit(session);
     });
   }
 
   call<K extends MethodName>(
-    sessionId: number,
+    localId: number,
     method: K,
     params: MethodRequest<K>,
     options?: CallOptions
   ): Promise<MethodResponse<K>>;
-  call(sessionId: number, method: string, params: unknown, options?: CallOptions): Promise<unknown>;
+  call(localId: number, method: string, params: unknown, options?: CallOptions): Promise<unknown>;
   call(
-    sessionId: number,
+    localId: number,
     method: string,
     params: unknown,
     options?: CallOptions
   ): Promise<unknown> {
-    const session = this.sessions.get(sessionId);
+    const session = this.sessions.get(localId);
     if (session === undefined)
-      return Promise.reject(new AxtpError(ErrorCode.NotFound, `session ${sessionId} not found`));
+      return Promise.reject(new AxtpError(ErrorCode.NotFound, `session ${localId} not found`));
     return session.call(method, params, options);
   }
 
@@ -150,8 +152,17 @@ export class AxtpServer {
     return [...this.sessions.values()];
   }
 
-  getSession(id: number): AxtpSession | undefined {
-    return this.sessions.get(id);
+  /** 按运行时 localId（自增整数）查询 session。 */
+  getSession(localId: number): AxtpSession | undefined {
+    return this.sessions.get(localId);
+  }
+
+  /** 按协议 sid（8 位 hex）查询 session；sid 未分配（握手前）时返回 undefined。 */
+  getSessionBySid(sid: string): AxtpSession | undefined {
+    for (const session of this.sessions.values()) {
+      if (session.sid === sid) return session;
+    }
+    return undefined;
   }
 
   async close(): Promise<void> {

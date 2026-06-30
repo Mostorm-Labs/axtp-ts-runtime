@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { Connection } from "../../src/connection/connection.js";
 import { RpcOp } from "../../src/protocol/generated/axtp_ids_generated.js";
-import type { RpcPayload } from "../../src/protocol/model.js";
-import { rpcPayload } from "../../src/protocol/model.js";
+import type { RpcMessage } from "../../src/protocol/model.js";
+import { requestMsg } from "../../src/protocol/model.js";
 import { createMockTransportPair, MockTransport } from "../../src/transport/mock/mockTransport.js";
 import {
   CloseCode,
@@ -38,8 +38,8 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
     const client = new Connection("client", () => Promise.resolve(left));
     const server = new Connection("server", () => Promise.resolve(right));
 
-    const serverReceived: RpcPayload[] = [];
-    const clientReceived: RpcPayload[] = [];
+    const serverReceived: RpcMessage[] = [];
+    const clientReceived: RpcMessage[] = [];
     server.onPayload.subscribe((p) => serverReceived.push(p));
     client.onPayload.subscribe((p) => clientReceived.push(p));
 
@@ -49,12 +49,7 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
 
     // client -> server RPC
     client.sendRpc(
-      rpcPayload({
-        op: RpcOp.Request,
-        requestId: 1,
-        jsonSid: "abcdef01",
-        meta: { jsonMethodOrEventName: "audio.getAlgorithmConfig" }
-      })
+      requestMsg("abcdef01", 1, "audio.getAlgorithmConfig", {})
     );
     await settle(10);
     expect(serverReceived.length).toBe(1);
@@ -63,12 +58,7 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
 
     // server -> client RPC（反向）
     server.sendRpc(
-      rpcPayload({
-        op: RpcOp.Request,
-        requestId: 2,
-        jsonSid: "abcdef01",
-        meta: { jsonMethodOrEventName: "device.getInfo" }
-      })
+      requestMsg("abcdef01", 2, "device.getInfo", {})
     );
     await settle(10);
     expect(clientReceived.length).toBe(1);
@@ -133,24 +123,19 @@ describe("Connection unframed-json: 直接 linkReady + 双向 RPC", () => {
     const client = new Connection("client", () => Promise.resolve(left));
     const server = new Connection("server", () => Promise.resolve(right));
 
-    const received: RpcPayload[] = [];
+    const received: RpcMessage[] = [];
     server.onPayload.subscribe((p) => received.push(p));
     server.start();
     client.start();
     await settle(10);
 
     client.sendRpc(
-      rpcPayload({
-        op: RpcOp.Request,
-        requestId: 99,
-        jsonSid: "12345678",
-        meta: { jsonMethodOrEventName: "audio.getAlgorithmConfig" }
-      })
+      requestMsg("12345678", 99, "audio.getAlgorithmConfig", {})
     );
     await settle(10);
     expect(received.length).toBe(1);
     expect(received[0].requestId).toBe(99);
-    expect(received[0].meta.jsonMethodOrEventName).toBe("audio.getAlgorithmConfig");
+    expect(received[0]).toMatchObject({ method: "audio.getAlgorithmConfig" });
   });
 });
 
@@ -160,14 +145,14 @@ describe("Connection factory 首次建立（异步 attach）", () => {
     const client = new Connection("client", () => Promise.resolve(left));
     const server = new Connection("server", () => Promise.resolve(right));
 
-    const received: RpcPayload[] = [];
+    const received: RpcMessage[] = [];
     server.onPayload.subscribe((p) => received.push(p));
 
     server.start();
     client.start();
     await settle(10); // factory 异步 attach + unframed 立即 linkReady
 
-    client.sendRpc(rpcPayload({ op: RpcOp.Request, requestId: 1 }));
+    client.sendRpc(requestMsg("", 1, "", {}));
     await settle(10);
     expect(received.length).toBe(1);
     expect(received[0].requestId).toBe(1);
@@ -334,7 +319,7 @@ describe("Connection sendRpc 状态守卫", () => {
   it("idle（未 start）状态 sendRpc 抛 TransportDisconnected", () => {
     const { left } = createMockTransportPair(unframedJsonCapabilities());
     const client = new Connection("client", () => Promise.resolve(left));
-    expect(() => client.sendRpc(rpcPayload({ op: RpcOp.Request, requestId: 1 }))).toThrow();
+    expect(() => client.sendRpc(requestMsg("", 1, "", {}))).toThrow();
   });
 
   it("closed 后 sendRpc 静默丢弃（不抛错）", async () => {
@@ -347,6 +332,6 @@ describe("Connection sendRpc 状态守卫", () => {
     client.close();
     await settle(10);
     expect(client.isClosed).toBe(true);
-    expect(() => client.sendRpc(rpcPayload({ op: RpcOp.Request, requestId: 1 }))).not.toThrow();
+    expect(() => client.sendRpc(requestMsg("", 1, "", {}))).not.toThrow();
   });
 });

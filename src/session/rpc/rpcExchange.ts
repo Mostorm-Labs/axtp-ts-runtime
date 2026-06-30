@@ -1,12 +1,16 @@
 // RpcExchange：RPC 请求/响应/事件 收发（单一职责：call/emit 发起 + dispatcher 匹配 + 入站 Request/Event 路由）。
 // 持有 RpcDispatcher（pending call Promise 匹配）。
 // 通过 SessionIO 发送，通过 HandlerRouter 路由入站。
+// 全程操作编码无关的 RpcMessage——params/result/data 是结构化 JS 值，无 bytes 中转/重复编解码。
 
-import { decodeJsonBody, encodeJsonBody } from "../../protocol/codec/jsonRpc.js";
-import type { RpcPayload } from "../../protocol/model.js";
-import { RpcOp, rpcPayload } from "../../protocol/model.js";
+import type {
+  EventPayload,
+  RequestPayload,
+  ResponsePayload,
+  RpcMessage
+} from "../../protocol/model.js";
+import { RpcOp, eventMsg, requestMsg, responseMsg } from "../../protocol/model.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
-import { registry } from "../../types/registry.js";
 import type { HandlerRouter } from "../handler/handlerRouter.js";
 import type { CallContext, SessionIO } from "../types.js";
 import { RpcDispatcher } from "./rpcDispatcher.js";
@@ -23,64 +27,32 @@ export class RpcExchange {
 
   /** 发起 call。 */
   call(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
-    const methodId = registry.methodId(method) ?? 0;
     const { requestId, promise } = this.dispatcher.request((id) => {
-      const rpc = rpcPayload({
-        op: RpcOp.Request,
-        requestId: id,
-        methodOrEventId: methodId,
-        jsonSid: this.getSid(),
-        body: encodeJsonBody(params),
-        meta: { jsonMethodOrEventName: method }
-      });
-      this.io.sendRpc(rpc);
+      this.io.sendRpc(requestMsg(this.getSid(), id, method, params));
     }, timeoutMs);
 
     return promise.then((payload) => {
-      if (payload.statusCode !== ErrorCode.Success) {
-        throw new AxtpError(
-          payload.statusCode as ErrorCode,
-          `call ${method} failed`,
-          undefined,
-          requestId
-        );
+      if (payload.status !== ErrorCode.Success) {
+        throw new AxtpError(payload.status, `call ${method} failed`, undefined, requestId);
       }
-      // 空 body 返回 {}（与 decodeJsonBody 语义一致，不返回 undefined）
-      const decoded = decodeJsonBody(payload.body);
-      if (decoded === undefined) {
-        throw new AxtpError(
-          ErrorCode.RpcPayloadInvalid,
-          `call ${method} response parse failed`,
-          undefined,
-          requestId
-        );
-      }
-      return decoded;
+      // 无 result 的成功响应返回 {}（与 decodeJsonBody 语义一致，不返回 undefined）。
+      return payload.result ?? {};
     });
   }
 
   /** 发起 emit（事件发送）。同步 fire-and-forget。 */
   emitEvent(event: string, payload: unknown): void {
-    const eventId = registry.eventId(event) ?? 0;
-    const rpc = rpcPayload({
-      op: RpcOp.Event,
-      methodOrEventId: eventId,
-      jsonSid: this.getSid(),
-      body: encodeJsonBody(payload),
-      meta: { jsonMethodOrEventName: event }
-    });
-    this.io.sendRpc(rpc);
+    this.io.sendRpc(eventMsg(this.getSid(), event, payload));
   }
 
   /** 入站 RequestResponse：匹配 dispatcher。 */
-  resolveResponse(payload: RpcPayload): void {
+  resolveResponse(payload: ResponsePayload): void {
     this.dispatcher.resolve(payload);
   }
 
   /** 入站 Request：路由到 handler 执行并回响应。 */
-  dispatchRequest(payload: RpcPayload): void {
-    const methodName = payload.meta.jsonMethodOrEventName ?? "";
-    const handler = this.router.getMethod(methodName);
+  dispatchRequest(payload: RequestPayload): void {
+    const handler = this.router.getMethod(payload.method);
     const ctx = this.makeCallContext(payload.requestId);
 
     if (handler === undefined) {
@@ -88,21 +60,15 @@ export class RpcExchange {
       return;
     }
 
-    const params = decodeJsonBody(payload.body);
-    if (params === undefined) {
-      this.sendResponse(payload.requestId, ErrorCode.RpcPayloadInvalid);
-      return;
-    }
-
     Promise.resolve()
-      .then(() => handler(ctx, params))
+      .then(() => handler(ctx, payload.params))
       .then(
         (result) => {
           // 链路可能在 handler 异步执行期间转入 reconnecting/closed：Connection.sendRpc 此时同步抛。
-          // 结果不可 JSON 序列化时 encodeJsonBody 也会抛。此处不可让异常逃逸为进程级
+          // 结果不可 JSON 序列化时 encodeJsonRpc 也会抛。此处不可让异常逃逸为进程级
           // unhandledRejection——响应无法投递时忽略（对端会重连/超时重试）。
           try {
-            this.sendResponse(payload.requestId, ErrorCode.Success, encodeJsonBody(result));
+            this.sendResponse(payload.requestId, ErrorCode.Success, result);
           } catch {
             /* 链路不可用 / 结果不可序列化：响应无法投递，忽略 */
           }
@@ -119,15 +85,12 @@ export class RpcExchange {
   }
 
   /** 入站 Event：路由到 event handler。单个 handler 抛错静默忽略（不影响其它）。 */
-  dispatchEvent(payload: RpcPayload): void {
-    const eventName = payload.meta.jsonMethodOrEventName ?? "";
-    const handlers = this.router.getEventHandlers(eventName);
+  dispatchEvent(payload: EventPayload): void {
+    const handlers = this.router.getEventHandlers(payload.eventName);
     if (handlers.size === 0) return;
-    const data = decodeJsonBody(payload.body);
-    if (data === undefined) return;
     for (const handler of handlers) {
       try {
-        handler(data);
+        handler(payload.data);
       } catch {
         // 单个 handler 抛错静默忽略（与 stream listener 一致）
       }
@@ -139,23 +102,15 @@ export class RpcExchange {
     this.dispatcher.rejectAll(err);
   }
 
-  /** 未 ready 的业务请求 -> 回 CONTROL_OPEN_REQUIRED。 */
-  respondOpenRequired(payload: RpcPayload): void {
+  /** 未 ready 的业务请求 -> 回 CONTROL_OPEN_REQUIRED。payload 可能是任意 op，仅 Request 回响应。 */
+  respondOpenRequired(payload: RpcMessage): void {
     if (payload.op === RpcOp.Request) {
       this.sendResponse(payload.requestId, ErrorCode.ControlOpenRequired);
     }
   }
 
-  /** 统一构造 + 发送 RequestResponse（消除重复的 rpcPayload 样板）。 */
-  private sendResponse(requestId: number, statusCode: ErrorCode, body?: Uint8Array): void {
-    this.io.sendRpc(
-      rpcPayload({
-        op: RpcOp.RequestResponse,
-        requestId,
-        statusCode,
-        jsonSid: this.getSid(),
-        body
-      })
-    );
+  /** 统一构造 + 发送 RequestResponse。 */
+  private sendResponse(requestId: number, status: ErrorCode, result?: unknown): void {
+    this.io.sendRpc(responseMsg(this.getSid(), requestId, status, result));
   }
 }

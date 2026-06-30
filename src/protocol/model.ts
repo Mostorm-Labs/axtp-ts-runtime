@@ -37,42 +37,59 @@ export interface Message {
   readonly body: Uint8Array;
 }
 
-/** RPC envelope 元信息（编解码辅助）。 */
-export interface PayloadMeta {
-  /** 方法/事件的字符串名（JSON envelope 的 d.method / d.event）。 */
-  jsonMethodOrEventName?: string;
-  /** Identify 携带的 randomSeed。 */
-  randomSeed?: number;
-  /** eventMasks hex 串（Identify 携带）。 */
-  jsonEventMasks?: string;
-}
-
 /**
- * RPC payload：会话层消息（JSON / JSON_BINARY 双轨统一模型）。
+ * RpcMessage：编码无关的 RPC 语义模型（判别联合）—— 内部核心数据通路使用。
  *
- * 本期 JSON-only。methodOrEventId / bodyEncoding 是 spec 20-core.md:218
- * JSON_BINARY 15B fixed header 的合同字段：JSON 路径下 methodOrEventId 仅作
- * encode 时 method/event name 的数字 fallback，bodyEncoding 不读不写。
- * spec:213 称高吞吐 profile SHOULD 实现 JSON_BINARY (0x04)——届时启用这些字段，勿删。
+ * 按 op 区分，每个 op 字段语义清晰、无死字段；业务数据（params/result/data）
+ * 直接持有已 parse 的结构化 JS 值，消除 bytes 中转与重复 JSON 编解码。
+ * method/eventName/randomSeed/eventMasks/axtpVersion 均为一等字段；status（而非
+ * statusCode）与 wire 的 d.status 对齐。
  *
- * wire 的 rpcEncoding(1B) 前缀属于 framed payload（payload.ts / codecPipeline.ts
- * 直接读写 body[0]），不在 envelope 内，故 RpcPayload 不设 encoding 字段。
+ * 编码无关：JSON 路径由 codec 直接 wire↔RpcMessage；未来 JSON_BINARY 由其 codec
+ * 负责映射，本模型不携带 methodOrEventId/bodyEncoding 等编码细节（它们属 codec 内部）。
  */
-export interface RpcPayload {
-  readonly op: RpcOp;
-  /** 分配前 0；Identified 后填 sid（仅 JSON 路径用 jsonSid 字符串）。 */
-  readonly requestId: number;
-  /** JSON_BINARY 合同 method/event id (uint16)；JSON 路径仅作 name fallback。 */
-  readonly methodOrEventId: number;
-  readonly statusCode: ErrorCode;
-  /** JSON_BINARY 合同 body 编码（NONE/TLV8/TLV16，spec:223）；JSON 路径不读写。 */
-  readonly bodyEncoding: RpcBodyEncoding;
-  readonly meta: PayloadMeta;
-  /** 业务 body（JSON 文本字节 / TLV 字节）。 */
-  readonly body: Uint8Array;
-  /** JSON envelope 外层 sid（8 位 hex 或空串）。 */
-  jsonSid?: string;
+export interface HelloPayload {
+  readonly op: RpcOp.Hello;
+  readonly sid: string;
+  readonly axtpVersion: string;
 }
+export interface IdentifyPayload {
+  readonly op: RpcOp.Identify;
+  readonly sid: string;
+  readonly randomSeed: number;
+  readonly eventMasks?: string;
+}
+export interface IdentifiedPayload {
+  readonly op: RpcOp.Identified;
+  readonly sid: string;
+}
+export interface EventPayload {
+  readonly op: RpcOp.Event;
+  readonly sid: string;
+  readonly eventName: string;
+  readonly data: unknown;
+}
+export interface RequestPayload {
+  readonly op: RpcOp.Request;
+  readonly sid: string;
+  readonly requestId: number;
+  readonly method: string;
+  readonly params: unknown;
+}
+export interface ResponsePayload {
+  readonly op: RpcOp.RequestResponse;
+  readonly sid: string;
+  readonly requestId: number;
+  readonly status: ErrorCode;
+  readonly result: unknown;
+}
+export type RpcMessage =
+  | HelloPayload
+  | IdentifyPayload
+  | IdentifiedPayload
+  | EventPayload
+  | RequestPayload
+  | ResponsePayload;
 
 /** CONTROL payload：链路层控制。 */
 export interface ControlPayload {
@@ -93,19 +110,6 @@ export interface StreamPayload {
 
 // 工厂函数（便于构造）。
 
-export function rpcPayload(init: Partial<RpcPayload> & { op: RpcOp }): RpcPayload {
-  return {
-    op: init.op,
-    requestId: init.requestId ?? 0,
-    methodOrEventId: init.methodOrEventId ?? 0,
-    statusCode: init.statusCode ?? ErrorCode.Success,
-    bodyEncoding: init.bodyEncoding ?? RpcBodyEncoding.None,
-    meta: init.meta ?? {},
-    body: init.body ?? new Uint8Array(),
-    jsonSid: init.jsonSid ?? ""
-  };
-}
-
 export function controlPayload(init: {
   opcode: ControlOpcode;
   controlId: number;
@@ -118,4 +122,37 @@ export function controlPayload(init: {
     statusCode: init.statusCode ?? ErrorCode.Success,
     body: init.body ?? new Uint8Array()
   };
+}
+
+// RpcMessage 构造工厂（字段默认值收敛于此；内部核心通路构造用）。
+
+export function helloMsg(sid: string, axtpVersion: string): HelloPayload {
+  return { op: RpcOp.Hello, sid, axtpVersion };
+}
+export function identifyMsg(sid: string, randomSeed: number, eventMasks?: string): IdentifyPayload {
+  return eventMasks !== undefined
+    ? { op: RpcOp.Identify, sid, randomSeed, eventMasks }
+    : { op: RpcOp.Identify, sid, randomSeed };
+}
+export function identifiedMsg(sid: string): IdentifiedPayload {
+  return { op: RpcOp.Identified, sid };
+}
+export function eventMsg(sid: string, eventName: string, data: unknown): EventPayload {
+  return { op: RpcOp.Event, sid, eventName, data };
+}
+export function requestMsg(
+  sid: string,
+  requestId: number,
+  method: string,
+  params: unknown
+): RequestPayload {
+  return { op: RpcOp.Request, sid, requestId, method, params };
+}
+export function responseMsg(
+  sid: string,
+  requestId: number,
+  status: ErrorCode,
+  result?: unknown
+): ResponsePayload {
+  return { op: RpcOp.RequestResponse, sid, requestId, status, result };
 }

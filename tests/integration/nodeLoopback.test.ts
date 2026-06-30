@@ -50,7 +50,7 @@ describe("回环 TCP（framed-binary）真实网络", () => {
   it("client handle -> server call（反向）", async () => {
     client.handle("audio.getAlgorithmConfig", () => ({ reverse: true }));
     await settle(20);
-    const sessionId = server.getSessions()[0].id;
+    const sessionId = server.getSessions()[0].localId;
     const result = await server.call(sessionId, "audio.getAlgorithmConfig", {});
     expect(result).toEqual({ reverse: true });
   });
@@ -85,7 +85,7 @@ describe("回环 WebSocket（unframed-json）真实网络", () => {
     const received: unknown[] = [];
     client.on("audio.algorithmConfigChanged", (p) => received.push(p));
     await settle(20);
-    const sessionId = server.getSessions()[0].id;
+    const sessionId = server.getSessions()[0].localId;
     const session = server.getSession(sessionId);
     await session?.emit("audio.algorithmConfigChanged", { event: "ws" });
     await settle(30);
