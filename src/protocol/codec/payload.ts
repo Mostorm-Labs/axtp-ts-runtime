@@ -1,62 +1,38 @@
-// Payload codec（framed-binary）：message body -> payload。
+// Payload codec（framed-binary）：message body -> payload 的解码逻辑。
 // Standard Framed RPC 在 payload 前置 rpcEncoding(1B)（spec:213），JSON=0x01。
-// 本期 JSON-only：若 rpcEncoding != JSON，按 RpcEncodingUnsupported 处理（不实现 JSON_BINARY）。
-// CONTROL payload 用 control.ts 的 5B header + TLV。
-// STREAM payload 用 stream.ts 的 16B header。
+// 本期 JSON-only：rpcEncoding != JSON -> RpcEncodingUnsupported；malformed envelope -> RpcPayloadInvalid。
+// CONTROL payload 由 control.ts 解析（5B header + TLV）；STREAM payload 由 stream.ts 解析（16B header）。
+// payloadType 分发由 FramedLink 内联（仅一处使用，不再需要 PayloadDecoder 类 + PayloadSink 接口）。
 
-import type { RpcMessage, StreamPayload } from "../model.js";
-import { PayloadType, RpcEncoding } from "../model.js";
+import type { RpcMessage } from "../model.js";
+import { RpcEncoding } from "../model.js";
 import { decodeJsonRpc } from "./jsonRpc.js";
-import { decodeStream } from "./stream.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
 
-/** 入站分发目标。 */
-export interface PayloadSink {
-  /** CONTROL：传原始 body（含 5B header + TLV），由 ControlSession 自行 decodeControl 解析。 */
-  onControl(body: Uint8Array): void;
-  onRpc(payload: RpcMessage): void;
-  onStream(payload: StreamPayload): void;
-  /** decode 失败（非 JSON 编码 / malformed envelope）：上报，不再静默丢弃。 */
-  onError?(err: AxtpError): void;
+/** decodeRpcPayload 的结果：成功返回 payload，失败返回 error，空 body 两者皆空。 */
+export interface DecodedRpc {
+  readonly payload?: RpcMessage;
+  readonly error?: AxtpError;
 }
 
-/** 把重组后的 message body 解码为对应 payload，分发给 sink。 */
-export class PayloadDecoder {
-  constructor(private readonly sink: PayloadSink) {}
-
-  onMessage(payloadType: PayloadType, body: Uint8Array): void {
-    switch (payloadType) {
-      case PayloadType.Control:
-        // CONTROL 传原始 body，由 ControlSession 解析 TLV（保留协商字段）。
-        this.sink.onControl(body);
-        break;
-      case PayloadType.Rpc:
-        this.decodeRpc(body);
-        break;
-      case PayloadType.Stream: {
-        const sp = decodeStream(body);
-        if (sp !== undefined) this.sink.onStream(sp);
-        break;
-      }
-    }
+/**
+ * 解码 framed-binary RPC body（rpcEncoding(1B) + JSON envelope 字节）。
+ * 空 body 返回空结果；非 JSON 编码 / malformed envelope 返回 error（由调用方上报）。
+ */
+export function decodeRpcPayload(body: Uint8Array): DecodedRpc {
+  if (body.length === 0) return {};
+  const rpcEncoding = body[0];
+  if (rpcEncoding !== RpcEncoding.Json) {
+    return {
+      error: new AxtpError(
+        ErrorCode.RpcEncodingUnsupported,
+        `unsupported rpcEncoding: 0x${rpcEncoding.toString(16)}`
+      )
+    };
   }
-
-  /** framed-binary RPC：rpcEncoding(1B) + body。JSON-only，其它编码上报 onError。 */
-  private decodeRpc(body: Uint8Array): void {
-    if (body.length === 0) return;
-    const rpcEncoding = body[0];
-    if (rpcEncoding !== RpcEncoding.Json) {
-      this.sink.onError?.(
-        new AxtpError(
-          ErrorCode.RpcEncodingUnsupported,
-          `unsupported rpcEncoding: 0x${rpcEncoding.toString(16)}`
-        )
-      );
-      return;
-    }
-    const jsonBody = body.slice(1);
-    const payload = decodeJsonRpc(jsonBody);
-    if (payload !== undefined) this.sink.onRpc(payload);
-    else this.sink.onError?.(new AxtpError(ErrorCode.RpcPayloadInvalid, "malformed RPC JSON envelope"));
+  const payload = decodeJsonRpc(body.slice(1));
+  if (payload === undefined) {
+    return { error: new AxtpError(ErrorCode.RpcPayloadInvalid, "malformed RPC JSON envelope") };
   }
+  return { payload };
 }

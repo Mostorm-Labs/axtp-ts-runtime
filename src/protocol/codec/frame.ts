@@ -11,6 +11,7 @@ import { concatBytes, type Bytes } from "../../io/bytes.js";
 import { ByteReader, ByteWriter, crc16CcittFalse } from "../../io/io.js";
 import type { Frame, Message } from "../model.js";
 import { PayloadType } from "../model.js";
+import { AxtpError, ErrorCode } from "../../types/error.js";
 
 export const kMagic0 = 0x41;
 export const kMagic1 = 0x58;
@@ -27,9 +28,17 @@ export class FrameDecoder {
   private buffer: Bytes = new Uint8Array();
 
   constructor(
-    private readonly next: { onFrame(frame: Frame): void },
+    private readonly next: {
+      onFrame(frame: Frame): void;
+      onError?(err: AxtpError): void;
+    },
     private maxFrameSizeValue: number = 4096
   ) {}
+
+  /** 帧校验失败上报（resync 行为不变，仅新增可观测出口）。 */
+  private reportError(code: ErrorCode, detail?: string): void {
+    this.next.onError?.(new AxtpError(code, detail ?? `frame decode error 0x${code.toString(16)}`));
+  }
 
   onBytes(bytes: Bytes): void {
     this.buffer = concatBytes([this.buffer, bytes]);
@@ -77,12 +86,19 @@ export class FrameDecoder {
       const frameCount = reader.readU8Strict();
 
       // 校验 ②version ③payloadType ⑤FrameCount ⑥FrameIndex ④PayloadLength+14<=maxFrameSize
-      if (
-        version !== kAxtpVersion1 ||
-        !isPayloadType(payloadType) ||
-        frameCount === 0 ||
-        frameIndex >= frameCount
-      ) {
+      // 失败按类型上报 ErrorCode（resync 行为不变），均先于 CRC 检查。
+      if (version !== kAxtpVersion1) {
+        this.reportError(ErrorCode.FrameVersionUnsupported);
+        this.consume(1);
+        continue;
+      }
+      if (!isPayloadType(payloadType)) {
+        this.reportError(ErrorCode.FramePayloadTypeInvalid);
+        this.consume(1);
+        continue;
+      }
+      if (frameCount === 0 || frameIndex >= frameCount) {
+        this.reportError(ErrorCode.FrameFragmentInvalid);
         this.consume(1);
         continue;
       }
@@ -90,6 +106,7 @@ export class FrameDecoder {
         payloadLength + kStandardFrameHeaderSize + kStandardFrameCrcSize >
         this.maxFrameSizeValue
       ) {
+        this.reportError(ErrorCode.FrameTooLarge);
         this.consume(1);
         continue;
       }
@@ -103,6 +120,7 @@ export class FrameDecoder {
       // ⑦CRC16-CCITT-FALSE 覆盖 header+payload，不含 CRC 自身
       const actualCrc = crc16CcittFalse(frameBytes.slice(0, totalSize - kStandardFrameCrcSize));
       if (expectedCrc !== actualCrc) {
+        this.reportError(ErrorCode.FrameCrcError);
         this.consume(1);
         continue;
       }
@@ -143,14 +161,17 @@ export class MessageReassembler {
     }
   >();
 
-  /** D3: 未完成 assembly 超时 ms（超过后清理，防 DoS） */
-  private static readonly ASSEMBLY_TIMEOUT_MS = 30000;
-  /** D3: 最大并发未完成 assembly 数量（防内存耗尽） */
+  /** 最大并发未完成 assembly 数量（防内存耗尽） */
   private static readonly MAX_PENDING_ASSEMBLIES = 256;
 
   constructor(
-    private readonly next: { onMessage(message: Message): void },
-    private readonly maxMessageSize: number = 1024 * 1024
+    private readonly next: {
+      onMessage(message: Message): void;
+      onError?(err: AxtpError): void;
+    },
+    private readonly maxMessageSize: number = 1024 * 1024,
+    /** 未完成 assembly 超时 ms（超过后清理 + 上报，防 DoS）。默认 10s（> 默认心跳 1s，留重组余量）。 */
+    private readonly assemblyTimeoutMs: number = 10000
   ) {}
 
   onFrame(frame: Frame): void {
@@ -169,8 +190,11 @@ export class MessageReassembler {
 
     let assembly = this.assemblies.get(frame.header.messageId);
     if (assembly === undefined) {
-      // D3: 超过最大并发数时拒绝新 assembly
+      // 超过最大并发数时拒绝新 assembly（上报，不再静默）
       if (this.assemblies.size >= MessageReassembler.MAX_PENDING_ASSEMBLIES) {
+        this.next.onError?.(
+          new AxtpError(ErrorCode.FrameFragmentMissing, "too many pending assemblies")
+        );
         return;
       }
       assembly = {
@@ -196,6 +220,9 @@ export class MessageReassembler {
     assembly.totalSize += frame.payload.length;
     if (assembly.totalSize > this.maxMessageSize) {
       this.assemblies.delete(frame.header.messageId);
+      this.next.onError?.(
+        new AxtpError(ErrorCode.FrameTooLarge, `message exceeds maxMessageSize ${this.maxMessageSize}`)
+      );
       return;
     }
     assembly.fragments[frame.header.frameIndex] = frame.payload;
@@ -209,13 +236,14 @@ export class MessageReassembler {
     });
   }
 
-  /** D3: 清理超时的未完成 assembly（防止恶意分片永久占内存） */
+  /** 清理超时的未完成 assembly（防恶意分片永久占内存）+ 上报 FrameReassemblyTimeout。 */
   private evictExpired(): void {
     if (this.assemblies.size === 0) return;
     const now = Date.now();
     for (const [id, assembly] of this.assemblies) {
-      if (now - assembly.createdAt > MessageReassembler.ASSEMBLY_TIMEOUT_MS) {
+      if (now - assembly.createdAt > this.assemblyTimeoutMs) {
         this.assemblies.delete(id);
+        this.next.onError?.(new AxtpError(ErrorCode.FrameReassemblyTimeout, `assembly ${id} timed out`));
       }
     }
   }

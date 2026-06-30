@@ -86,6 +86,7 @@ export class ByteReader {
   }
 
   readBytes(size: number): Bytes | undefined {
+    if (size < 0) return undefined;
     if (!this.hasRemaining(size)) return undefined;
     const out = this.data.slice(this.cursor, this.cursor + size);
     this.cursor += size;

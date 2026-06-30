@@ -21,8 +21,8 @@ import {
   MessageReassembler
 } from "../../protocol/codec/frame.js";
 import { encodeJsonRpc } from "../../protocol/codec/jsonRpc.js";
-import { PayloadDecoder } from "../../protocol/codec/payload.js";
-import { encodeStream } from "../../protocol/codec/stream.js";
+import { decodeRpcPayload } from "../../protocol/codec/payload.js";
+import { decodeStream, encodeStream } from "../../protocol/codec/stream.js";
 import type { Message, RpcMessage, StreamPayload } from "../../protocol/model.js";
 import { PayloadType, RpcEncoding } from "../../protocol/model.js";
 import type { ITransport, PhysicalRole } from "../../transport/contract.js";
@@ -94,18 +94,41 @@ export class FramedLink implements Link {
       defaultOpenParams(options.maxFrameSize, options.heartbeatIntervalMs)
     );
 
-    const payloadDecoder = new PayloadDecoder({
-      onControl: (body) => this.controlSession.handleControlBody(body),
-      onRpc: (p) => this.onPayload.emit(p),
-      onStream: (s) => this.onStream.emit(s),
-      onError: (err) => this.onError.emit(err)
-    });
+    // 入站 payload 分发（inline，去掉仅此一处使用的 PayloadDecoder 类 + PayloadSink 接口）。
+    const dispatchPayload = (payloadType: PayloadType, body: Uint8Array): void => {
+      switch (payloadType) {
+        case PayloadType.Control:
+          this.controlSession.handleControlBody(body);
+          break;
+        case PayloadType.Rpc:
+          this.decodeRpc(body);
+          break;
+        case PayloadType.Stream: {
+          const sp = decodeStream(body);
+          if (sp !== undefined) this.onStream.emit(sp);
+          break;
+        }
+      }
+    };
     const reassembler = new MessageReassembler(
-      { onMessage: (m) => payloadDecoder.onMessage(m.payloadType, m.body) },
+      {
+        onMessage: (m) => dispatchPayload(m.payloadType, m.body),
+        onError: (err) => this.onError.emit(err)
+      },
       options.maxFrameSize * 256
     );
-    this.frameDecoder = new FrameDecoder(reassembler, options.maxFrameSize);
+    this.frameDecoder = new FrameDecoder(
+      { onFrame: (f) => reassembler.onFrame(f), onError: (err) => this.onError.emit(err) },
+      options.maxFrameSize
+    );
     this.fragmenter = new MessageFragmenter(options.maxFrameSize);
+  }
+
+  /** framed-binary RPC 解码：rpcEncoding(1B) + envelope。失败上报 onError。 */
+  private decodeRpc(body: Uint8Array): void {
+    const { payload, error } = decodeRpcPayload(body);
+    if (error !== undefined) this.onError.emit(error);
+    else if (payload !== undefined) this.onPayload.emit(payload);
   }
 
   ingest(bytes: Bytes): void {

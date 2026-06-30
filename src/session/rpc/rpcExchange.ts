@@ -22,8 +22,15 @@ export class RpcExchange {
     private readonly io: SessionIO,
     private readonly router: HandlerRouter,
     private readonly getSid: () => string,
-    private readonly makeCallContext: (requestId: number) => CallContext
+    private readonly makeCallContext: (requestId: number) => CallContext,
+    /** 可观测出口：handler 抛错 / 响应投递失败时上报（行为不变，仅新增上报）。 */
+    private readonly onError?: (err: AxtpError) => void
   ) {}
+
+  /** 上报到 Session.onError（可观测出口，不改变控制流）。 */
+  private reportError(code: ErrorCode, message: string, cause?: unknown): void {
+    this.onError?.(new AxtpError(code, message, cause));
+  }
 
   /** 发起 call。 */
   call(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
@@ -66,19 +73,25 @@ export class RpcExchange {
         (result) => {
           // 链路可能在 handler 异步执行期间转入 reconnecting/closed：Connection.sendRpc 此时同步抛。
           // 结果不可 JSON 序列化时 encodeJsonRpc 也会抛。此处不可让异常逃逸为进程级
-          // unhandledRejection——响应无法投递时忽略（对端会重连/超时重试）。
+          // unhandledRejection——响应无法投递时上报后忽略（对端会重连/超时重试）。
           try {
             this.sendResponse(payload.requestId, ErrorCode.Success, result);
-          } catch {
-            /* 链路不可用 / 结果不可序列化：响应无法投递，忽略 */
+          } catch (e) {
+            this.reportError(ErrorCode.RpcExecutionFailed, "response delivery failed", e);
           }
         },
         (err) => {
           const code = err instanceof AxtpError ? err.code : ErrorCode.RpcExecutionFailed;
+          // handler 抛错：上报 server.onError（可观测），再尝试回错误响应。
+          this.reportError(
+            code,
+            `handler threw: ${err instanceof Error ? err.message : String(err)}`,
+            err
+          );
           try {
             this.sendResponse(payload.requestId, code);
           } catch {
-            /* 链路不可用：错误响应无法投递，忽略 */
+            /* 链路不可用：错误响应无法投递，忽略（已上报） */
           }
         }
       );
@@ -91,8 +104,9 @@ export class RpcExchange {
     for (const handler of handlers) {
       try {
         handler(payload.data);
-      } catch {
-        // 单个 handler 抛错静默忽略（与 stream listener 一致）
+      } catch (e) {
+        // 单个 handler 抛错：上报 onError（不影响其它 handler，与 stream listener 一致）
+        this.reportError(ErrorCode.RpcExecutionFailed, "event handler threw", e);
       }
     }
   }

@@ -16,7 +16,7 @@ import {
   MessageFragmenter,
   MessageReassembler
 } from "../../src/protocol/codec/frame.js";
-import { PayloadDecoder } from "../../src/protocol/codec/payload.js";
+import { decodeRpcPayload } from "../../src/protocol/codec/payload.js";
 import { decodeJsonRpc, encodeJsonRpc } from "../../src/protocol/codec/jsonRpc.js";
 import { decodeStream, encodeStream, kStreamHeaderSize } from "../../src/protocol/codec/stream.js";
 import {
@@ -176,31 +176,15 @@ describe("Frame codec", () => {
   });
 });
 
-describe("PayloadDecoder onError（A3：decode 失败上报，不再静默）", () => {
-  it("非 JSON rpcEncoding 上报 onError（RpcEncodingUnsupported）", () => {
-    const errors: AxtpError[] = [];
-    const decoder = new PayloadDecoder({
-      onControl: () => {},
-      onRpc: () => {},
-      onStream: () => {},
-      onError: (e) => errors.push(e)
-    });
-    decoder.onMessage(PayloadType.Rpc, new Uint8Array([0x04, 0x7a, 0x7a])); // 0x04=JSON_BINARY
-    expect(errors).toHaveLength(1);
-    expect(errors[0].code).toBe(ErrorCode.RpcEncodingUnsupported);
+describe("decodeRpcPayload（decode 失败返回 error）", () => {
+  it("非 JSON rpcEncoding 返回 error（RpcEncodingUnsupported）", () => {
+    const r = decodeRpcPayload(new Uint8Array([0x04, 0x7a, 0x7a])); // 0x04=JSON_BINARY
+    expect(r.error?.code).toBe(ErrorCode.RpcEncodingUnsupported);
   });
 
-  it("malformed JSON envelope 上报 onError（RpcPayloadInvalid）", () => {
-    const errors: AxtpError[] = [];
-    const decoder = new PayloadDecoder({
-      onControl: () => {},
-      onRpc: () => {},
-      onStream: () => {},
-      onError: (e) => errors.push(e)
-    });
-    decoder.onMessage(PayloadType.Rpc, new Uint8Array([0x01, 0x7a, 0x7a])); // JSON + "zz"
-    expect(errors).toHaveLength(1);
-    expect(errors[0].code).toBe(ErrorCode.RpcPayloadInvalid);
+  it("malformed JSON envelope 返回 error（RpcPayloadInvalid）", () => {
+    const r = decodeRpcPayload(new Uint8Array([0x01, 0x7a, 0x7a])); // JSON + "zz"
+    expect(r.error?.code).toBe(ErrorCode.RpcPayloadInvalid);
   });
 });
 

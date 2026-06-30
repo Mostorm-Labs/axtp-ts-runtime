@@ -123,7 +123,8 @@ export class AxtpSession {
       this.io,
       this.router,
       () => this.handshakeOrch.sid,
-      (requestId) => this.makeCallContext(requestId)
+      (requestId) => this.makeCallContext(requestId),
+      (err) => this.onError.emit(err)
     );
     this.streamMgr = new StreamManager(this.io);
 
