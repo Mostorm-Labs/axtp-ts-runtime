@@ -29,7 +29,7 @@ const { emitTsFiles } = await import(pathToFileURL(path.join(root, "devtools/gen
 const spec = await loadProtocolSources(specRoot);
 for (const message of validateSpec(spec)) console.log(message);
 
-const outDir = path.join(root, "src/core/protocol/generated");
+const outDir = path.join(root, "src/protocol/generated");
 await emitTsFiles(spec, outDir);
 console.log(`[OK] generated TypeScript artifacts: ${outDir}`);
 NODE

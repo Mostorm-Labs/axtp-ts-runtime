@@ -17,7 +17,11 @@ function isRegistryHighByte(highByte: number): boolean {
 }
 
 function addDomain(mapping: DomainByHighByte, candidate: DomainCandidate): void {
-  if (!Number.isInteger(candidate.highByte) || candidate.highByte < 0x00 || candidate.highByte > 0xff) {
+  if (
+    !Number.isInteger(candidate.highByte) ||
+    candidate.highByte < 0x00 ||
+    candidate.highByte > 0xff
+  ) {
     throw new GeneratorError({
       code: "AXTP-GEN-1004",
       file: candidate.file,
@@ -40,7 +44,11 @@ function addDomain(mapping: DomainByHighByte, candidate: DomainCandidate): void 
   mapping.set(candidate.highByte, candidate.domain);
 }
 
-function addItemDomain(mapping: DomainByHighByte, item: { id: number; name: string; domain: string }, file: string): void {
+function addItemDomain(
+  mapping: DomainByHighByte,
+  item: { id: number; name: string; domain: string },
+  file: string
+): void {
   const highByte = item.id >> 8;
   if (!isRegistryHighByte(highByte)) return;
   addDomain(mapping, {
@@ -51,7 +59,9 @@ function addItemDomain(mapping: DomainByHighByte, item: { id: number; name: stri
   });
 }
 
-export function buildDomainByHighByteFromRegistry(domainRegistry: DomainRange[] | undefined): DomainByHighByte {
+export function buildDomainByHighByteFromRegistry(
+  domainRegistry: DomainRange[] | undefined
+): DomainByHighByte {
   const mapping: DomainByHighByte = new Map();
   for (const range of domainRegistry ?? []) {
     addDomain(mapping, {
@@ -87,14 +97,26 @@ export function buildProtocolDomainByHighByte(model: {
 }): DomainByHighByte {
   const mapping: DomainByHighByte = new Map();
   for (const method of model.methods) {
-    addItemDomain(mapping, { id: method.methodId, name: method.name, domain: method.domain }, "contract/protocol/axtp.protocol.yaml");
+    addItemDomain(
+      mapping,
+      { id: method.methodId, name: method.name, domain: method.domain },
+      "contract/protocol/axtp.protocol.yaml"
+    );
   }
   for (const event of model.events) {
-    addItemDomain(mapping, { id: event.eventId, name: event.name, domain: event.domain }, "contract/protocol/axtp.protocol.yaml");
+    addItemDomain(
+      mapping,
+      { id: event.eventId, name: event.name, domain: event.domain },
+      "contract/protocol/axtp.protocol.yaml"
+    );
   }
   for (const error of model.errors) {
     if (mapping.has(error.code >> 8)) continue;
-    addItemDomain(mapping, { id: error.code, name: error.name, domain: error.category }, "contract/protocol/axtp.protocol.yaml");
+    addItemDomain(
+      mapping,
+      { id: error.code, name: error.name, domain: error.category },
+      "contract/protocol/axtp.protocol.yaml"
+    );
   }
   return mapping;
 }

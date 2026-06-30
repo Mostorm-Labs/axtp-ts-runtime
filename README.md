@@ -18,38 +18,45 @@ maintained in the AXTP main specification repository.
 
 ## Architecture
 
-The repository is layered in the same direction as the C++ runtime: protocol
-facts come from the locked AXTP spec, low-level byte and wire helpers sit below
-the runtime core, and SDK/transports stay above the core contracts.
+The runtime is layered from the locked AXTP spec downward: generated protocol
+facts feed the codec/model layer, byte helpers sit below the protocol layer, and
+the connection / session / SDK layers build on top. Transport implementations sit
+behind a single `ITransport` contract, so Node TCP/WS, mock, and custom transports
+are interchangeable.
 
 ```text
-devtools/generators -> src/core/protocol/generated
-src/core/support/io -> src/core/protocol -> src/core/runtime -> src/sdk
-src/core/runtime/transport -> src/transports
-src/core/runtime -> src/json_rpc
+devtools/generators -> src/protocol/generated
+src/io -> src/protocol -> src/connection -> src/session -> src/sdk
+src/transport  <-  src/connection              (transport contract + implementations)
+src/connection -> src/protocol/codec/jsonRpc   (WebSocket unframed-JSON path)
 ```
+
+The package exposes several entry points (see `package.json` `exports`). The main
+entry `@axtp/runtime` re-exports everything for backward compatibility; the
+subpaths `./node`, `./protocol`, `./transport`, `./mock`, and `./io` let consumers
+import only what they need and keep browser builds free of `node:net` / `ws`.
 
 ## Repository Layout
 
 | Path | Purpose |
-|---|---|
-| `src/index.ts` | Stable package entry that re-exports the public runtime, protocol, SDK, and generated types. |
-| `src/node.ts` | Node-specific package entry for optional Node transports. |
-| `src/core/support/io/` | Byte helpers, readers/writers, sinks, and CRC utilities. |
-| `src/core/protocol/model/` | Protocol value types, payload helpers, frame/message models, and constants. |
-| `src/core/protocol/generated/` | Generated AXTP IDs, registries, and generated version constants. Do not edit by hand. |
-| `src/core/protocol/wire/` | Framed binary and WebSocket JSON-RPC payload codecs plus inbound/outbound processors. |
-| `src/core/runtime/core/` | `AxtpCore`, core events, session state, and request/response coordination. |
-| `src/core/runtime/broker/` | `BasicBroker`, business routing, task/result queues, and handler contracts. |
-| `src/core/runtime/endpoint/` | Endpoint glue between core, broker, and transports. |
-| `src/core/runtime/transport/` | Transport profile and `ITransport` contracts plus mock transport. |
-| `src/sdk/` | Higher-level client/server SDK APIs. |
-| `src/json_rpc/` | Optional WebSocket JSON-RPC adapter layer above the runtime. |
-| `src/transports/` | Optional concrete transports, currently Node TCP. |
-| `tests/` | Unit and integration tests for the runtime layers. |
-| `devtools/generators/` | TypeScript generator that consumes the AXTP spec and emits runtime artifacts. |
+| --- | --- |
+| `src/index.ts` | Main entry: stable SDK API plus re-export of every subpath (backward compatible). |
+| `src/node.ts` | `./node` subpath: Node TCP + WebSocket transports. |
+| `src/protocol.ts` | `./protocol` subpath: payload model, constants, and factories. |
+| `src/transport.ts` | `./transport` subpath: custom `ITransport` contracts and capability factories. |
+| `src/mock.ts` | `./mock` subpath: mock transports for tests. |
+| `src/io.ts` | `./io` subpath: `Bytes` type and byte helpers. |
+| `src/io/` | `Bytes` type, byte helpers, `ByteReader` / `ByteWriter`, CRC16 utilities. |
+| `src/protocol/` | Protocol layer: `model.ts`, `codec/` (frame / control / stream / payload / jsonRpc), and `generated/` (AXTP IDs, registries, version — do not edit by hand). |
+| `src/connection/` | Connection layer: `Connection`, `Heartbeat`, `reconnect/`, and `codec/` (`CodecPipeline`, `ControlSession` link state machine). |
+| `src/session/` | Session layer: `AxtpSession`, `handshake/`, `rpc/`, `stream/`, `handler/`. |
+| `src/transport/` | Transport implementations: `tcp/`, `ws/`, `mock/`. |
+| `src/sdk/` | Higher-level `AxtpClient` and `AxtpServer` SDK APIs. |
+| `src/types/` | Shared types: `registry` (method/event single source of truth), `error`, `events`. |
+| `tests/` | Unit, integration, and public-export snapshot tests (Vitest). |
+| `tests/conformance/` | AXTP conformance cases run against the locked spec (`pnpm test:conformance`). |
+| `devtools/generators/` | TypeScript generator (`axtp-gen`) that consumes the AXTP spec and emits runtime artifacts. |
 | `devtools/scripts/` | Spec lock, generation, versioning, conformance, and release helper scripts. |
-| `devtools/conformance/` | Runtime conformance profile and Vitest conformance runner. |
 
 ## AXTP Spec Compatibility
 
@@ -158,7 +165,7 @@ pnpm --dir devtools/generators test
 pnpm --dir devtools/generators generate:runtime
 ```
 
-Generated TypeScript artifacts are written to `src/core/protocol/generated/`.
+Generated TypeScript artifacts are written to `src/protocol/generated/`.
 
 To move to a later released spec tag:
 
@@ -191,3 +198,26 @@ AXTP Spec updates create automated upgrade PRs. After checks pass, the PR is aut
 
 Each release records runtime version, AXTP Spec tag, AXTP Spec commit, generator
 version, and the generated manifest.
+
+## Installation
+
+`@axtp/runtime` is published to a private Verdaccio registry. Consumers must
+configure registry access before installing. Add the following to a project-level
+or user-level `.npmrc`:
+
+```ini
+@axtp:registry=https://<verdaccio-host>/
+//<verdaccio-host>/:_authToken=<token>
+```
+
+Then install:
+
+```bash
+pnpm add @axtp/runtime
+```
+
+The published version follows the runtime release version derived from the tag
+`vX.Y.Z.R`: a spec upgrade publishes `X.Y.Z` (revision `0`), while a runtime-only
+revision publishes the semver pre-release `X.Y.Z-runtime.R`. The package exposes
+the subpath entry points listed under `exports` (`@axtp/runtime`,
+`@axtp/runtime/node`, `/protocol`, `/transport`, `/mock`, `/io`).

@@ -5,7 +5,15 @@ import YAML from "yaml";
 import { GeneratorError } from "./errors.js";
 import { loadSpec, resolveContractRoot } from "./loader.js";
 import type { ProtocolSourceModel } from "./sourceModel.js";
-import type { Capability, ErrorCode, Event, Field, LegacyMapping, Method, Schema } from "./models.js";
+import type {
+  Capability,
+  ErrorCode,
+  Event,
+  Field,
+  LegacyMapping,
+  Method,
+  Schema
+} from "./models.js";
 import { normalizeId } from "./util.js";
 
 async function loadYamlFile(filePath: string): Promise<any> {
@@ -27,7 +35,7 @@ async function listYamlFiles(dir: string): Promise<string[]> {
   const files: string[] = [];
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) files.push(...await listYamlFiles(fullPath));
+    if (entry.isDirectory()) files.push(...(await listYamlFiles(fullPath)));
     if (entry.isFile() && /\.ya?ml$/i.test(entry.name)) files.push(fullPath);
   }
   return files.sort();
@@ -113,9 +121,15 @@ function mapLegacy(item: any, file: string): LegacyMapping {
   }
   return {
     legacyProtocol: item.legacy_protocol ?? item.legacyProtocol,
-    legacyCmdValue: normalizeId(item.legacy_cmd_value ?? item.legacyCmdValue, `${file}:${item.legacy_name ?? item.legacyName}`),
+    legacyCmdValue: normalizeId(
+      item.legacy_cmd_value ?? item.legacyCmdValue,
+      `${file}:${item.legacy_name ?? item.legacyName}`
+    ),
     legacyName: item.legacy_name ?? item.legacyName,
-    axtpMethodId: normalizeId(item.axtp_method_id ?? item.axtpMethodId, `${file}:${item.legacy_name ?? item.legacyName}`),
+    axtpMethodId: normalizeId(
+      item.axtp_method_id ?? item.axtpMethodId,
+      `${file}:${item.legacy_name ?? item.legacyName}`
+    ),
     axtpMethodName: item.axtp_method_name ?? item.axtpMethodName,
     direction: item.direction,
     statusMapping
@@ -123,10 +137,13 @@ function mapLegacy(item: any, file: string): LegacyMapping {
 }
 
 function mapField(item: any, file: string, schemaName: string): Field {
-  const array = item.array === undefined ? undefined : {
-    itemType: item.array.item_type ?? item.array.itemType,
-    itemSchema: item.array.item_schema ?? item.array.itemSchema
-  };
+  const array =
+    item.array === undefined
+      ? undefined
+      : {
+          itemType: item.array.item_type ?? item.array.itemType,
+          itemSchema: item.array.item_schema ?? item.array.itemSchema
+        };
   return {
     id: normalizeId(item.id ?? item.field_id ?? item.fieldId, `${file}:${schemaName}.${item.name}`),
     name: String(item.name),
@@ -172,7 +189,11 @@ export async function loadProtocolSources(specRoot: string): Promise<ProtocolSou
   const domainRegistryPath = path.join(registryDir, "core", "domain_registry.yaml");
   const protocolMeta = await loadYamlFile(protocolMetaPath);
   const domainFiles = await listYamlFiles(path.join(registryDir, "domains"));
-  const sourceFiles = [protocolMetaPath, ...(existsSync(domainRegistryPath) ? [domainRegistryPath] : []), ...domainFiles];
+  const sourceFiles = [
+    protocolMetaPath,
+    ...(existsSync(domainRegistryPath) ? [domainRegistryPath] : []),
+    ...domainFiles
+  ];
   const profiles: Array<Record<string, unknown>> = [];
 
   for (const file of domainFiles) {
@@ -181,8 +202,12 @@ export async function loadProtocolSources(specRoot: string): Promise<ProtocolSou
     spec.methods.push(...asArray(doc.methods).map((item) => mapMethod(item, file, defaultDomain)));
     spec.events.push(...asArray(doc.events).map((item) => mapEvent(item, file, defaultDomain)));
     spec.errors.push(...asArray(doc.errors).map((item) => mapErrorCode(item, file, defaultDomain)));
-    spec.capabilities.push(...asArray(doc.capabilities).map((item) => mapCapability(item, file, defaultDomain)));
-    spec.legacyMappings.push(...asArray(doc.legacyMappings ?? doc.legacy_mappings).map((item) => mapLegacy(item, file)));
+    spec.capabilities.push(
+      ...asArray(doc.capabilities).map((item) => mapCapability(item, file, defaultDomain))
+    );
+    spec.legacyMappings.push(
+      ...asArray(doc.legacyMappings ?? doc.legacy_mappings).map((item) => mapLegacy(item, file))
+    );
     spec.schemas.push(...mapSchemas(doc, file));
     profiles.push(...asArray(doc.profiles));
   }

@@ -1,4 +1,11 @@
-export type ProtocolStatus = "draft" | "experimental" | "mvp" | "stable" | "deprecated" | "reserved" | string;
+export type ProtocolStatus =
+  | "draft"
+  | "experimental"
+  | "mvp"
+  | "stable"
+  | "deprecated"
+  | "reserved"
+  | string;
 
 export interface ProtocolMetadata {
   name: string;

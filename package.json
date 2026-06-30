@@ -2,8 +2,10 @@
   "name": "@axtp/runtime",
   "version": "0.11.0",
   "description": "TypeScript runtime / SDK for AXTP, with optional Node.js and Browser adapters.",
-  "private": true,
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,17 +14,46 @@
     "./node": {
       "types": "./dist/node.d.ts",
       "default": "./dist/node.js"
+    },
+    "./protocol": {
+      "types": "./dist/protocol.d.ts",
+      "default": "./dist/protocol.js"
+    },
+    "./transport": {
+      "types": "./dist/transport.d.ts",
+      "default": "./dist/transport.js"
+    },
+    "./mock": {
+      "types": "./dist/mock.d.ts",
+      "default": "./dist/mock.js"
+    },
+    "./io": {
+      "types": "./dist/io.d.ts",
+      "default": "./dist/io.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "lint": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "lint:types": "tsc -p tsconfig.json --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
-    "test:conformance": "vitest run --config devtools/conformance/vitest.config.ts"
+    "test:conformance": "vitest run tests/conformance/",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@eslint/js": "^9.17.0",
     "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.4.2",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
     "vitest": "^2.1.8"
   },
   "axtp": {

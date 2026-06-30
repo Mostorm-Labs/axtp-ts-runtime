@@ -27,20 +27,24 @@ export async function emitAll(spec: SpecModel, outDir: string): Promise<void> {
 export { emitMarkdown, emitMarkdownFiles, emitTestVectors, emitTestVectorFiles };
 
 export async function emitProtocolDocs(model: ProtocolModel, outDir: string): Promise<void> {
-  await Promise.all([
-    emitProtocolJson(model, outDir),
-    emitProtocolMarkdown(model, outDir)
-  ]);
+  await Promise.all([emitProtocolJson(model, outDir), emitProtocolMarkdown(model, outDir)]);
 }
 
-export async function emitRepositoryArtifacts(spec: SpecModel, model: ProtocolModel, repoRoot: string): Promise<void> {
+export async function emitRepositoryArtifacts(
+  spec: SpecModel,
+  model: ProtocolModel,
+  repoRoot: string
+): Promise<void> {
   await Promise.all([
     emitProtocolDocs(model, path.join(repoRoot, "docs", "generated")),
     emitRepositoryRegistryArtifacts(spec, repoRoot)
   ]);
 }
 
-export async function emitRepositoryRegistryArtifacts(spec: SpecModel, repoRoot: string): Promise<void> {
+export async function emitRepositoryRegistryArtifacts(
+  spec: SpecModel,
+  repoRoot: string
+): Promise<void> {
   await Promise.all([
     emitMarkdownFiles(spec, path.join(repoRoot, "docs", "generated")),
     emitJsonFiles(spec, path.join(repoRoot, "tooling", "mcp")),
