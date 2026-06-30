@@ -75,7 +75,7 @@ export class ReconnectCoordinator {
   }
 
   /**
-   * 重连链路建立成功后调用（Connection 在 onNegotiatedLinkReady/fireLinkReady 调此重置全部状态）。
+   * 重连链路建立成功后调用（Connection 在 handleLinkReady/fireLinkReady 调此重置全部状态）。
    * 合并原 reset() + notifySuccess()：同时重置 active=false + attempts=0 + 清 timer，
    * 确保下次断连的 start() 能生效。
    */

@@ -2,7 +2,7 @@
 // Connection 持有一个 Link 实例（按 transport.capabilities 工厂派发），自身不再分支 profile。
 // 每个 Link 自持 Heartbeat，把成帧 vs 直发、CONTROL 协商 vs 即时 ready、
 // CONTROL Heartbeat vs 原生 keepalive 的差异封装在各自实现里：
-//   - FramedLink       (TCP)：CodecPipeline（帧 + ControlSession）+ CONTROL 心跳
+//   - FramedLink       (TCP)：帧编解码 + ControlSession + CONTROL 心跳（吸收原 CodecPipeline）
 //   - UnframedJsonLink (WS) ：JSON envelope 直收直发 + 原生 keepalive
 //
 // 对 Session 层完全透明——Session 仍通过 Connection 的 onPayload/onStream/onLinkReady 消费。

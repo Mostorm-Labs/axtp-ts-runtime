@@ -34,7 +34,7 @@ class TcpTransport implements ITransport {
   constructor(private readonly socket: net.Socket) {
     socket.on("data", (data: Buffer) => {
       // 拷贝而非别名：Node 的 Buffer 共享内部池 ArrayBuffer，部分帧会跨多次 'data' 事件
-      // 在 CodecPipeline 中缓冲拼接；若零拷贝建视图，下一次读会覆盖池内存，重组帧被静默损坏。
+      // 在 framed 链路（FramedLink）中缓冲拼接；若零拷贝建视图，下一次读会覆盖池内存，重组帧被静默损坏。
       const bytes = new Uint8Array(data);
       if (!this.attached) {
         this.buffered.push(bytes);

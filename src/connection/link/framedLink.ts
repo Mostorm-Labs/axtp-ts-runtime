@@ -1,18 +1,35 @@
-// FramedLink：framed-binary 链路（TCP）。
-// 内聚现 Connection 的 framed 路径：CodecPipeline（帧解码/重组/payload 分发 + ControlSession 状态机）
-// + Heartbeat（CONTROL Heartbeat/Ack）。sendRpc 内部 encode+成帧，ingest 帧解码，OPEN/ACCEPT 协商与
-// CONTROL 心跳全部在此完成。Connection 只看到 RpcPayload/StreamPayload 与链路事件。
+// FramedLink：framed-binary 链路（TCP），Link 的 framed 实现。
+// 完整内聚 framed 链路的全部职责（吸收原 CodecPipeline 的胶合层）：
+//   - 入站：FrameDecoder（magic resync + 8 项校验）→ MessageReassembler（分片重组）→ PayloadDecoder（分发）
+//   - CONTROL 状态机：ControlSession（OPEN/ACCEPT/CLOSE/CLOSE_ACK 协商，TLV 校验）
+//   - 出站：MessageFragmenter（按 maxFrameSize 分片）→ FrameEncoder（12B header + payload + 2B CRC）
+//   - 心跳：Heartbeat（CONTROL Heartbeat/Ack）
+// Connection 只看到 RpcPayload/StreamPayload 与链路事件，wire 细节全部封装于此。
 //
 // 构造无副作用（不发字节）；server 角色等 OPEN，startOpen() 为 no-op。
 
 import type { Bytes } from "../../io/bytes.js";
+import {
+  defaultOpenParams,
+  encodeHeartbeat,
+  encodeHeartbeatAck
+} from "../../protocol/codec/control.js";
+import {
+  FrameDecoder,
+  FrameEncoder,
+  MessageFragmenter,
+  MessageReassembler
+} from "../../protocol/codec/frame.js";
 import { encodeJsonRpc } from "../../protocol/codec/jsonRpc.js";
-import type { RpcPayload, StreamPayload } from "../../protocol/model.js";
+import { PayloadDecoder } from "../../protocol/codec/payload.js";
+import { encodeStream } from "../../protocol/codec/stream.js";
+import type { Message, RpcPayload, StreamPayload } from "../../protocol/model.js";
+import { PayloadType, RpcEncoding } from "../../protocol/model.js";
 import type { ITransport, PhysicalRole } from "../../transport/transport.js";
 import type { AxtpError } from "../../types/error.js";
 import { EventStream } from "../../types/events.js";
-import { CodecPipeline } from "../codec/codecPipeline.js";
 import { Heartbeat } from "../heartbeat.js";
+import { ControlSession } from "./controlSession.js";
 import type { Link } from "./link.js";
 
 export interface FramedLinkOptions {
@@ -37,7 +54,11 @@ export class FramedLink implements Link {
   /** 协商后的心跳间隔（start() 使用）；link ready 前为 undefined。 */
   private negotiatedIntervalMs: number | undefined;
 
-  private readonly pipeline: CodecPipeline;
+  private readonly transport: ITransport;
+  private readonly controlSession: ControlSession;
+  private readonly frameDecoder: FrameDecoder;
+  private readonly fragmenter: MessageFragmenter;
+  private readonly frameEncoder = new FrameEncoder();
   private readonly fallbackIntervalMs: number;
   private readonly heartbeatTimeoutMs: number | undefined;
 
@@ -46,49 +67,66 @@ export class FramedLink implements Link {
     transport: ITransport,
     options: FramedLinkOptions
   ) {
+    this.transport = transport;
     this.fallbackIntervalMs = options.heartbeatIntervalMs;
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs;
 
-    this.pipeline = new CodecPipeline(
+    this.controlSession = new ControlSession(
       physicalRole,
-      transport,
-      { maxFrameSize: options.maxFrameSize, heartbeatIntervalMs: options.heartbeatIntervalMs },
       {
-        onRpc: (p) => this.onPayload.emit(p),
-        onStream: (s) => this.onStream.emit(s),
-        onControlHeartbeat: (cid) => this.pipeline.sendHeartbeatAck(cid),
-        onControlHeartbeatAck: () => this.heartbeat?.reset(),
-        onControlClosing: () => this.onClosing.emit(undefined),
-        onControlOpenRejected: (sc) => this.onOpenRejected.emit(sc),
+        onSendBytes: (body) => this.send(PayloadType.Control, body),
         onLinkReady: (neg) => {
           if (!neg.accepted) return;
-          this.pipeline.setMaxFrameSize(neg.maxFrameSize);
+          this.frameDecoder.setMaxFrameSize(neg.maxFrameSize);
+          this.fragmenter.setMaxFrameSize(neg.maxFrameSize);
           this.negotiatedIntervalMs = neg.heartbeatIntervalMs;
           this.onLinkReady.emit(undefined);
-        }
-      }
+        },
+        onHeartbeat: (cid) => this.sendHeartbeatAck(cid),
+        onHeartbeatAck: () => this.heartbeat?.reset(),
+        onClosing: () => this.onClosing.emit(undefined),
+        onOpenRejected: (sc) => this.onOpenRejected.emit(sc)
+      },
+      defaultOpenParams(options.maxFrameSize, options.heartbeatIntervalMs)
     );
+
+    const payloadDecoder = new PayloadDecoder({
+      onControl: (body) => this.controlSession.handleControlBody(body),
+      onRpc: (p) => this.onPayload.emit(p),
+      onStream: (s) => this.onStream.emit(s)
+    });
+    const reassembler = new MessageReassembler(
+      { onMessage: (m) => payloadDecoder.onMessage(m.payloadType, m.body) },
+      options.maxFrameSize * 256
+    );
+    this.frameDecoder = new FrameDecoder(reassembler, options.maxFrameSize);
+    this.fragmenter = new MessageFragmenter(options.maxFrameSize);
   }
 
   ingest(bytes: Bytes): void {
-    this.pipeline.onBytes(bytes);
+    this.frameDecoder.onBytes(bytes);
   }
 
   sendRpc(payload: RpcPayload): void {
-    this.pipeline.sendRpc(encodeJsonRpc(payload));
+    // framed-binary RPC：rpcEncoding(1B 前缀，JSON=0x01) + JSON envelope 字节。
+    const jsonBytes = encodeJsonRpc(payload);
+    const wrapped = new Uint8Array(1 + jsonBytes.length);
+    wrapped[0] = RpcEncoding.Json;
+    wrapped.set(jsonBytes, 1);
+    this.send(PayloadType.Rpc, wrapped);
   }
 
   sendStream(payload: StreamPayload): void {
-    this.pipeline.sendStreamPayload(payload);
+    this.send(PayloadType.Stream, encodeStream(payload));
   }
 
   startOpen(): void {
-    // 仅 Physical Client 主动发 OPEN；server 构造后等待对端 OPEN（CodecPipeline 构造无副作用）。
-    if (this.physicalRole === "client") this.pipeline.sendOpen();
+    // 仅 Physical Client 主动发 OPEN；server 构造后等待对端 OPEN（构造无副作用）。
+    if (this.physicalRole === "client") this.controlSession.sendOpen();
   }
 
   sendClose(): void {
-    this.pipeline.sendClose();
+    this.controlSession.sendClose();
   }
 
   start(): void {
@@ -98,8 +136,8 @@ export class FramedLink implements Link {
       intervalMs: interval,
       timeoutMs: timeout,
       onTick: () => {
-        const cid = this.pipeline.allocControlId();
-        this.pipeline.sendHeartbeat(cid);
+        const cid = this.controlSession.allocControlId();
+        this.send(PayloadType.Control, encodeHeartbeat(cid));
       },
       onTimeout: () => this.onHeartbeatTimeout.emit(undefined)
     });
@@ -112,6 +150,19 @@ export class FramedLink implements Link {
   }
 
   get isOpen(): boolean {
-    return this.pipeline.controlSessionIsOpen;
+    return this.controlSession.isOpen;
+  }
+
+  /** 发送 CONTROL HeartbeatAck（回显对端 controlId）。 */
+  private sendHeartbeatAck(controlId: number): void {
+    this.send(PayloadType.Control, encodeHeartbeatAck(controlId));
+  }
+
+  /** 内部：分片 + 成帧 + transport.send。 */
+  private send(payloadType: PayloadType, body: Bytes): void {
+    const message: Message = { messageId: 0, payloadType, body };
+    for (const frame of this.fragmenter.fragment(message)) {
+      this.transport.send(this.frameEncoder.encode(frame));
+    }
   }
 }
