@@ -115,7 +115,7 @@ function emitRegistryMap(spec: SpecModel): string {
       const response = tsName(method.responseSchema || "Empty");
       const status = quote(method.status);
       const bit = method.bitOffset ?? 0;
-      return `  ${quote(method.name)}: { id: ${hex(method.id, 4)}, status: ${status}, bitOffset: ${bit}, request: null as unknown as AxtpSchemas.${request}, response: null as unknown as AxtpSchemas.${response} },`;
+      return `  ${quote(method.name)}: { id: ${hex(method.id, 4)}, status: ${status}, bitOffset: ${bit}, request: typeOnly<AxtpSchemas.${request}>(), response: typeOnly<AxtpSchemas.${response}>() },`;
     })
     .join("\n");
   const eventRows = sortById(spec.events)
@@ -123,7 +123,7 @@ function emitRegistryMap(spec: SpecModel): string {
       const payload = tsName(event.eventSchema || "Empty");
       const status = quote(event.status);
       const bit = event.bitOffset ?? 0;
-      return `  ${quote(event.name)}: { id: ${hex(event.id, 4)}, status: ${status}, bitOffset: ${bit}, payload: null as unknown as AxtpSchemas.${payload} },`;
+      return `  ${quote(event.name)}: { id: ${hex(event.id, 4)}, status: ${status}, bitOffset: ${bit}, payload: typeOnly<AxtpSchemas.${payload}>() },`;
     })
     .join("\n");
   return `${banner}
@@ -131,6 +131,10 @@ function emitRegistryMap(spec: SpecModel): string {
 // 类型（MethodName/EventName 等）直接 keyof typeof 推导自下方 const，
 // 与运行时注册集合同源，不可漂移。
 import type * as AxtpSchemas from "./schemas_generated.js";
+
+// 类型占位：运行时不持有值，仅用于 keyof typeof 类型推导。集中 cast 到此一处 helper，
+// 保持"类型名集合与运行时注册集合物理同源、不可漂移"的设计（杜绝旧 method_map 双轨生成 BUG）。
+const typeOnly = <T>(): T => null as unknown as T;
 
 export type MethodStatus = "stable" | "draft" | "mvp" | "deprecated" | "reserved";
 export type EventStatus = "stable" | "draft" | "mvp" | "deprecated" | "reserved";
