@@ -37,10 +37,10 @@ export type ServerOptions = CommonOptions;
 export class AxtpServer {
   private readonly sessions = new Map<number, AxtpSession>();
   private readonly handlers = new HandlerRouter();
-  private readonly onConnectStream = new EventStream<AxtpSession>();
-  private readonly onDisconnectStream = new EventStream<AxtpSession>();
-  private readonly onErrorStream = new EventStream<AxtpError>();
-  private readonly onCloseStream = new EventStream<void>();
+  readonly onConnect = new EventStream<AxtpSession>();
+  readonly onDisconnect = new EventStream<AxtpSession>();
+  readonly onError = new EventStream<AxtpError>();
+  readonly onClose = new EventStream<void>();
   private closed = false;
 
   constructor(
@@ -50,7 +50,7 @@ export class AxtpServer {
 
   async listen(): Promise<void> {
     this.transport.onConnection.subscribe((t) => this.adoptConnection(t));
-    this.transport.onError.subscribe((err) => this.onErrorStream.emit(err));
+    this.transport.onError.subscribe((err) => this.onError.emit(err));
     await this.transport.listen();
   }
 
@@ -72,39 +72,19 @@ export class AxtpServer {
       // 仅当该 session 确曾 onConnect（已在表中）才发 onDisconnect，避免对握手失败、
       // 从未 onConnect 的 session 触发“幽灵” onDisconnect。
       if (this.sessions.delete(session.id)) {
-        this.onDisconnectStream.emit(session);
+        this.onDisconnect.emit(session);
       }
     });
 
     session.onError.subscribe((err) => {
-      this.onErrorStream.emit(err);
+      this.onError.emit(err);
     });
 
     // 握手成功后才注册到 sessions 表 + 触发 onConnect
     session.onReady.subscribe(() => {
       this.sessions.set(session.id, session);
-      this.onConnectStream.emit(session);
+      this.onConnect.emit(session);
     });
-  }
-
-  /** session 握手成功（ready 后触发）。 */
-  get onConnect(): EventStream<AxtpSession> {
-    return this.onConnectStream;
-  }
-
-  /** 单个 client session 断开时触发。 */
-  get onDisconnect(): EventStream<AxtpSession> {
-    return this.onDisconnectStream;
-  }
-
-  /** Server 错误（session 内部错误/握手失败等）。 */
-  get onError(): EventStream<AxtpError> {
-    return this.onErrorStream;
-  }
-
-  /** Server 整体关闭时触发。 */
-  get onClose(): EventStream<void> {
-    return this.onCloseStream;
   }
 
   call<K extends MethodName>(
@@ -180,10 +160,10 @@ export class AxtpServer {
     for (const session of this.sessions.values()) session.close();
     this.sessions.clear();
     await this.transport.close();
-    this.onCloseStream.emit(undefined);
-    this.onConnectStream.close();
-    this.onDisconnectStream.close();
-    this.onErrorStream.close();
+    this.onClose.emit(undefined);
+    this.onConnect.close();
+    this.onDisconnect.close();
+    this.onError.close();
   }
 
   get isClosed(): boolean {
