@@ -7,7 +7,7 @@
 
 import type { ITransport, TransportFactory } from "../../transport/transport.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
-import { nextDelay, resolvePolicy, type ReconnectPolicy } from "./reconnect.js";
+import { nextDelay, type resolvePolicy } from "./reconnect.js";
 
 export class ReconnectCoordinator {
   private attempts = 0;
@@ -21,24 +21,6 @@ export class ReconnectCoordinator {
     private readonly onFailed: () => void,
     private readonly onError: (err: AxtpError) => void
   ) {}
-
-  static fromPolicy(
-    policy: ReconnectPolicy | undefined,
-    transportFactory: TransportFactory,
-    callbacks: {
-      onReconnected: (transport: ITransport) => void;
-      onFailed: () => void;
-      onError: (err: AxtpError) => void;
-    }
-  ): ReconnectCoordinator {
-    return new ReconnectCoordinator(
-      resolvePolicy(policy),
-      transportFactory,
-      callbacks.onReconnected,
-      callbacks.onFailed,
-      callbacks.onError
-    );
-  }
 
   /** 开始重连编排。若已 active 则忽略（防止重复触发）。 */
   start(): void {
@@ -108,4 +90,3 @@ export class ReconnectCoordinator {
     }
   }
 }
-

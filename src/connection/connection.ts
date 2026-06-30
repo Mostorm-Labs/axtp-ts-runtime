@@ -79,14 +79,12 @@ export class Connection {
 
     const policy = resolvePolicy(options.reconnect);
     if (policy.enabled) {
-      this.reconnectCoordinator = ReconnectCoordinator.fromPolicy(
-        options.reconnect,
+      this.reconnectCoordinator = new ReconnectCoordinator(
+        policy,
         transportFactory,
-        {
-          onReconnected: (t) => this.handleReconnected(t),
-          onFailed: () => this.handleReconnectFailed(),
-          onError: (err) => this.onError.emit(err)
-        }
+        (t) => this.handleReconnected(t),
+        () => this.handleReconnectFailed(),
+        (err) => this.onError.emit(err)
       );
     }
   }
@@ -209,7 +207,11 @@ export class Connection {
         this.setState("reconnecting");
         this.reconnectCoordinator.start();
       } else {
-        this.terminate({ code: CloseCode.Reconnect, reason: "initial connect failed", remote: false });
+        this.terminate({
+          code: CloseCode.Reconnect,
+          reason: "initial connect failed",
+          remote: false
+        });
       }
     }
   }
@@ -227,7 +229,10 @@ export class Connection {
   sendRpc(payload: RpcPayload): void {
     if (this.connState === "closed") return;
     if (this.connState !== "link_ready")
-      throw new AxtpError(ErrorCode.TransportDisconnected, `connection not ready: ${this.connState}`);
+      throw new AxtpError(
+        ErrorCode.TransportDisconnected,
+        `connection not ready: ${this.connState}`
+      );
     const jsonBytes = encodeJsonRpc(payload);
     if (this.capabilities.supportsControl) {
       this.pipeline?.sendRpc(jsonBytes);
@@ -239,7 +244,10 @@ export class Connection {
   sendStream(payload: StreamPayload): void {
     if (this.connState === "closed") return;
     if (this.connState !== "link_ready")
-      throw new AxtpError(ErrorCode.TransportDisconnected, `connection not ready: ${this.connState}`);
+      throw new AxtpError(
+        ErrorCode.TransportDisconnected,
+        `connection not ready: ${this.connState}`
+      );
     if (!this.capabilities.supportsControl) {
       throw new AxtpError(ErrorCode.NotSupported, "STREAM not supported on this transport");
     }
@@ -309,10 +317,7 @@ export class Connection {
 
   private handleReconnectFailed(): void {
     this.transport?.close();
-    this.terminate(
-      { code: CloseCode.Reconnect, reason: "reconnect failed", remote: false },
-      true
-    );
+    this.terminate({ code: CloseCode.Reconnect, reason: "reconnect failed", remote: false }, true);
   }
 
   // ===== 内部 =====
