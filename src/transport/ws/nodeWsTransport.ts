@@ -18,7 +18,7 @@ import {
   type ITransport
 } from "../transport.js";
 
-interface WsClientOptions {
+export interface WsClientOptions {
   url: string;
   /** 协议子列表（可选）。 */
   protocols?: string | string[];
@@ -120,7 +120,7 @@ class WsTransport implements ITransport {
   }
 }
 
-interface WsServerOptions {
+export interface WsServerOptions {
   port: number;
   host?: string;
 }

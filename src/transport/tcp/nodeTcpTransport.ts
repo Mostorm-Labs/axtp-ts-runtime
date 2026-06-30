@@ -15,7 +15,7 @@ import {
   type ITransport
 } from "../transport.js";
 
-interface TcpOptions {
+export interface TcpOptions {
   host?: string;
   port: number;
 }
