@@ -1,0 +1,132 @@
+name: Publish npm package
+
+# Publishes @axtp/runtime to a private Verdaccio registry.
+#
+# Triggered automatically by any `v*` runtime tag, which covers both the
+# AXTP Spec upgrade path (upgrade-axtp-spec -> auto-release-on-merge -> tag)
+# and the runtime-only revision path (release-runtime-revision -> merge -> tag).
+# Also runnable manually with optional ref / version override / dry-run.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref/commit to publish from (e.g. v0.11.0.0); defaults to the workflow ref
+        required: false
+        type: string
+      package_version:
+        description: Optional npm version override (semver, e.g. 0.11.0). Omit to use package.json version.
+        required: false
+        type: string
+      dry_run:
+        description: Run pnpm publish --dry-run without publishing
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish @axtp/runtime
+    runs-on: ubuntu-latest
+    env:
+      NODE_VERSION: 22
+      PNPM_VERSION: 11.3.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build package
+        # dist/ is gitignored, so it must be regenerated before publishing.
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm lint:types
+
+      - name: Resolve package version
+        id: pkgver
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.package_version }}
+        run: |
+          set -euo pipefail
+          # package.json version is always a valid npm semver:
+          #   spec upgrade -> X.Y.Z, runtime revision -> X.Y.Z-runtime.R
+          VERSION="$(node -e "console.log(require('./package.json').version)")"
+          if [[ -n "$INPUT_VERSION" ]]; then
+            VERSION="$INPUT_VERSION"
+          fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Package version must be semver, e.g. 0.11.0; got: $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Override package version (manual only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.package_version != '' }}
+        env:
+          TARGET: ${{ inputs.package_version }}
+        run: pnpm version "$TARGET" --no-git-tag-version
+
+      - name: Configure Verdaccio registry auth
+        env:
+          NPM_REGISTRY_URL: ${{ secrets.NPM_REGISTRY_URL }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$NPM_REGISTRY_URL" ]]; then
+            echo "Missing required secret: NPM_REGISTRY_URL" >&2
+            exit 1
+          fi
+          if [[ -z "$NPM_TOKEN" ]]; then
+            echo "Missing required secret: NPM_TOKEN" >&2
+            exit 1
+          fi
+
+          REGISTRY_URL="${NPM_REGISTRY_URL%/}"
+          REGISTRY_HOST="${REGISTRY_URL#http://}"
+          REGISTRY_HOST="${REGISTRY_HOST#https://}"
+
+          {
+            echo "registry=${REGISTRY_URL}/"
+            echo "@auditoryworks:registry=${REGISTRY_URL}/"
+            echo "//${REGISTRY_HOST}/:_authToken=${NPM_TOKEN}"
+            echo "always-auth=true"
+            echo "strict-ssl=false"
+          } >> ~/.npmrc
+
+          pnpm config set registry "$REGISTRY_URL/"
+
+      - name: Publish package to Verdaccio
+        env:
+          NPM_REGISTRY_URL: ${{ secrets.NPM_REGISTRY_URL }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          REGISTRY_URL="${NPM_REGISTRY_URL%/}/"
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            pnpm publish --registry "$REGISTRY_URL" --no-git-checks --dry-run
+          else
+            pnpm publish --registry "$REGISTRY_URL" --no-git-checks
+          fi

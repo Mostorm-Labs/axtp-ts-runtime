@@ -198,3 +198,26 @@ AXTP Spec updates create automated upgrade PRs. After checks pass, the PR is aut
 
 Each release records runtime version, AXTP Spec tag, AXTP Spec commit, generator
 version, and the generated manifest.
+
+## Installation
+
+`@axtp/runtime` is published to a private Verdaccio registry. Consumers must
+configure registry access before installing. Add the following to a project-level
+or user-level `.npmrc`:
+
+```ini
+@axtp:registry=https://<verdaccio-host>/
+//<verdaccio-host>/:_authToken=<token>
+```
+
+Then install:
+
+```bash
+pnpm add @axtp/runtime
+```
+
+The published version follows the runtime release version derived from the tag
+`vX.Y.Z.R`: a spec upgrade publishes `X.Y.Z` (revision `0`), while a runtime-only
+revision publishes the semver pre-release `X.Y.Z-runtime.R`. The package exposes
+the subpath entry points listed under `exports` (`@axtp/runtime`,
+`@axtp/runtime/node`, `/protocol`, `/transport`, `/mock`, `/io`).
