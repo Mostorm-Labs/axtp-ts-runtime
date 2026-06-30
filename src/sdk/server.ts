@@ -53,7 +53,8 @@ export class AxtpServer {
 
   /** 新连接到达：建 Session（内含 Connection），握手成功后 onConnect 触发。 */
   private adoptConnection(t: ITransport): void {
-    const session = new AxtpSession(t, {
+    // server 端 transport 已由 IServerTransport accept 建立，包成一次性 factory 供 Connection 首次 attach。
+    const session = new AxtpSession(() => Promise.resolve(t), {
       physicalRole: "server",
       logicalRole: this.options.logicalRole ?? "client",
       defaultTimeoutMs: this.options.defaultTimeoutMs ?? 10000,

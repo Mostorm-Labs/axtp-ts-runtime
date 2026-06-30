@@ -15,7 +15,7 @@ import type {
   TransportCapabilities,
   TransportFactory
 } from "../transport/transport.js";
-import { CloseCode } from "../transport/transport.js";
+import { CloseCode, framedBinaryCapabilities } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import { CodecPipeline } from "./codec/codecPipeline.js";
@@ -52,8 +52,9 @@ export class Connection {
   readonly onReconnect = new EventStream<ReconnectInfo>();
   readonly onReconnectFailed = new EventStream<void>();
 
-  private transport: ITransport;
-  private capabilities: TransportCapabilities;
+  private transport: ITransport | undefined;
+  private capabilities: TransportCapabilities = framedBinaryCapabilities();
+  private readonly transportFactory: TransportFactory;
   private readonly physicalRole: PhysicalRole;
   private readonly options: ConnectionOptions;
 
@@ -65,20 +66,19 @@ export class Connection {
 
   private connState: ConnectionState = "idle";
   private started = false;
-  private pendingBytes: Bytes[] = [];
   private nextHeartbeatControlId = 0x100;
 
   constructor(
     physicalRole: PhysicalRole,
-    transport: ITransport,
-    options: ConnectionOptions = {},
-    transportFactory?: TransportFactory
+    transportFactory: TransportFactory,
+    options: ConnectionOptions = {}
   ) {
     this.physicalRole = physicalRole;
     this.options = options;
+    this.transportFactory = transportFactory;
 
     const policy = resolvePolicy(options.reconnect);
-    if (policy.enabled && transportFactory !== undefined) {
+    if (policy.enabled) {
       this.reconnectCoordinator = ReconnectCoordinator.fromPolicy(
         options.reconnect,
         transportFactory,
@@ -89,11 +89,6 @@ export class Connection {
         }
       );
     }
-    // reconnect enabled but no transportFactory: 延迟到 start() 检查（此时订阅者已就绪）
-
-    this.capabilities = transport.capabilities;
-    this.transport = transport;
-    this.attachTransport(transport);
   }
 
   /** 统一状态转换入口。 */
@@ -168,10 +163,6 @@ export class Connection {
     this.transportUnsubs.push(
       transport.onMessage.subscribe((bytes) => {
         if (this.connState === "closed") return;
-        if (!this.started) {
-          this.pendingBytes.push(bytes);
-          return;
-        }
         this.onTransportBytes(bytes);
       })
     );
@@ -186,27 +177,41 @@ export class Connection {
   start(): void {
     if (this.started) return;
     this.started = true;
-
-    // 延迟检查：reconnect enabled 但无 transportFactory（构造期无法 emit，此时订阅者已就绪）
-    const policy = resolvePolicy(this.options.reconnect);
-    if (policy.enabled && this.reconnectCoordinator === undefined) {
-      this.onError.emit(
-        new AxtpError(
-          ErrorCode.InvalidState,
-          "reconnect enabled but no transportFactory provided; reconnect disabled"
-        )
-      );
-    }
-
     this.setState("link_connecting");
-    this.flushPendingAndStartLink();
+    void this.openInitialLink();
   }
 
-  private flushPendingAndStartLink(): void {
-    const buffered = this.pendingBytes.splice(0);
-    for (const bytes of buffered) this.onTransportBytes(bytes);
-
-    this.startLinkHandshake();
+  /**
+   * 首次建立 transport 并启动链路。factory 失败时：
+   *   - 有重连策略 → 进入 reconnecting，交给同一 ReconnectCoordinator（与断开重连统一）
+   *   - 无重连策略 → terminate（server / disabled 场景）
+   * 首次连接失败即协调器的第 1 次重连尝试，与传输断开重连共用同一路径。
+   */
+  private async openInitialLink(): Promise<void> {
+    if (this.isClosed) return;
+    try {
+      const transport = await this.transportFactory();
+      if (this.isClosed) {
+        transport.close();
+        return;
+      }
+      this.transport = transport;
+      this.attachTransport(transport);
+      this.startLinkHandshake();
+    } catch (err) {
+      if (this.isClosed) return;
+      this.onError.emit(
+        err instanceof AxtpError
+          ? err
+          : new AxtpError(ErrorCode.TransportDisconnected, "initial connect failed", err)
+      );
+      if (this.reconnectCoordinator !== undefined) {
+        this.setState("reconnecting");
+        this.reconnectCoordinator.start();
+      } else {
+        this.terminate({ code: CloseCode.Reconnect, reason: "initial connect failed", remote: false });
+      }
+    }
   }
 
   /** 链路握手启动：framed 发 OPEN（client）/ 等 OPEN（server）；WS 直接 linkReady + 心跳。 */
@@ -221,20 +226,20 @@ export class Connection {
 
   sendRpc(payload: RpcPayload): void {
     if (this.connState === "closed") return;
-    if (this.connState === "reconnecting")
-      throw new AxtpError(ErrorCode.TransportDisconnected, "connection reconnecting");
+    if (this.connState !== "link_ready")
+      throw new AxtpError(ErrorCode.TransportDisconnected, `connection not ready: ${this.connState}`);
     const jsonBytes = encodeJsonRpc(payload);
     if (this.capabilities.supportsControl) {
       this.pipeline?.sendRpc(jsonBytes);
     } else {
-      this.transport.send(jsonBytes);
+      this.transport?.send(jsonBytes);
     }
   }
 
   sendStream(payload: StreamPayload): void {
     if (this.connState === "closed") return;
-    if (this.connState === "reconnecting")
-      throw new AxtpError(ErrorCode.TransportDisconnected, "connection reconnecting");
+    if (this.connState !== "link_ready")
+      throw new AxtpError(ErrorCode.TransportDisconnected, `connection not ready: ${this.connState}`);
     if (!this.capabilities.supportsControl) {
       throw new AxtpError(ErrorCode.NotSupported, "STREAM not supported on this transport");
     }
@@ -254,7 +259,7 @@ export class Connection {
     // 且因 close() 已 stop() 协调器（active=false），handleTransportClose→start() 反而重新武装
     // 重连，定时器到期后 handleReconnected 不检查 closed → “复活”已关闭的连接。
     this.terminate({ code, reason, remote: false });
-    this.transport.close();
+    this.transport?.close();
   }
 
   /** 统一收尾：setState(closed) + emit onClose (+可选 onReconnectFailed) + cleanupStreams。 */
@@ -292,7 +297,6 @@ export class Connection {
     this.transportUnsubs = [];
 
     this.transport = newTransport;
-    this.pendingBytes = [];
 
     const attempt = this.reconnectCoordinator?.attemptCount ?? 0;
     this.onReconnect.emit({ attempt });
@@ -304,7 +308,7 @@ export class Connection {
   }
 
   private handleReconnectFailed(): void {
-    this.transport.close();
+    this.transport?.close();
     this.terminate(
       { code: CloseCode.Reconnect, reason: "reconnect failed", remote: false },
       true
@@ -365,10 +369,10 @@ export class Connection {
       this.heartbeat = new Heartbeat({
         intervalMs: interval,
         timeoutMs: timeout,
-        onTick: () => t.sendKeepalive?.(),
+        onTick: () => t?.sendKeepalive?.(),
         onTimeout: () => this.close(CloseCode.HeartbeatTimeout, "heartbeat timeout")
       });
-      this.keepaliveUnsub = t.onKeepaliveAck?.(() => this.heartbeat?.reset());
+      this.keepaliveUnsub = t?.onKeepaliveAck?.(() => this.heartbeat?.reset());
     } else {
       this.onError.emit(
         new AxtpError(

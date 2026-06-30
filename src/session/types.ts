@@ -8,8 +8,7 @@ import type { RpcPayload } from "../protocol/model.js";
 import type {
   CloseCode,
   LogicalRole,
-  PhysicalRole,
-  TransportFactory
+  PhysicalRole
 } from "../transport/transport.js";
 import type {
   EventName,
@@ -90,7 +89,6 @@ export interface SessionOptions extends CommonOptions {
 export interface SessionInternalConfig {
   physicalRole?: PhysicalRole;
   globalHandlers?: GlobalHandlerSource;
-  transportFactory?: TransportFactory;
   handshakeSeed?: number;
   /** client 在 Identify 携带的 eventMasks（订阅意图，hex 编码）。由 SDK 用 computeEventMasks 计算。 */
   eventMasks?: string;

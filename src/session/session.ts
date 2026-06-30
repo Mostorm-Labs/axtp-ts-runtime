@@ -9,7 +9,7 @@
 import { Connection, type ConnectionOptions } from "../connection/connection.js";
 import type { RpcPayload } from "../protocol/model.js";
 import { RpcOp } from "../protocol/model.js";
-import type { CloseReason, ITransport } from "../transport/transport.js";
+import type { CloseReason, TransportFactory } from "../transport/transport.js";
 import { CloseCode } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
@@ -89,7 +89,7 @@ export class AxtpSession {
   /** 公开 id */
   readonly id: number;
 
-  constructor(transport: ITransport, config: SessionConfig) {
+  constructor(transportFactory: TransportFactory, config: SessionConfig) {
     const physicalRole = config.physicalRole ?? "client";
     this.defaultTimeoutMs = config.defaultTimeoutMs ?? 10000;
     this.id = nextSessionId++;
@@ -101,7 +101,7 @@ export class AxtpSession {
       maxFrameSize: config.maxFrameSize,
       reconnect: config.reconnect
     };
-    this.conn = new Connection(physicalRole, transport, connOptions, config.transportFactory);
+    this.conn = new Connection(physicalRole, transportFactory, connOptions);
 
     // SessionIO
     this.io = {

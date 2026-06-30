@@ -5,10 +5,33 @@ import {
   MockClientTransport,
   MockServerTransport
 } from "../../src/transport/mock/mockTransport.js";
+import type { IClientTransport, ITransport, TransportCapabilities } from "../../src/transport/transport.js";
 import { unframedJsonCapabilities } from "../../src/transport/transport.js";
+import { AxtpError, ErrorCode } from "../../src/types/error.js";
+import { EventStream } from "../../src/types/events.js";
 
 function settle(ms = 20): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** 可编程 client transport：前 failFirst 次 connect() reject，之后对接到 server 成功。用于验证首次连接重连。 */
+class ScriptedClientTransport implements IClientTransport {
+  readonly onClose = new EventStream<void>();
+  private connectCalls = 0;
+  constructor(
+    readonly capabilities: TransportCapabilities,
+    private readonly server: MockServerTransport,
+    private readonly failFirst: number
+  ) {}
+  connect(): Promise<ITransport> {
+    this.connectCalls += 1;
+    if (this.connectCalls <= this.failFirst) {
+      return Promise.reject(
+        new AxtpError(ErrorCode.Unavailable, `scripted fail #${this.connectCalls}`)
+      );
+    }
+    return new MockClientTransport(this.capabilities, this.server).connect();
+  }
 }
 
 // 跟踪创建的 client/server，afterEach 统一关闭，避免 Connection/Heartbeat 定时器在测试结束后继续存活。
@@ -215,6 +238,117 @@ describe("AxtpClient 重连机制", () => {
 
     expect(reconnectFailed).toBe(true);
     expect(client.isReady).toBe(false);
+  });
+
+  it("首次连接失败 + reconnect enabled → 退避重试至成功", async () => {
+    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const server = new AxtpServer(serverTransport, { logicalRole: "server" });
+    await server.listen();
+    server.handle("audio.getAlgorithmConfig", () => ({ ok: 1 }));
+    createdServers.push(server);
+
+    const clientTransport = new ScriptedClientTransport(unframedJsonCapabilities(), serverTransport, 2);
+    const client = new AxtpClient(clientTransport, {
+      reconnect: { enabled: true, initialDelayMs: 5, maxDelayMs: 20, jitter: false },
+      logicalRole: "client"
+    });
+    createdClients.push(client);
+
+    const errors: AxtpError[] = [];
+    client.onError.subscribe((e) => errors.push(e));
+
+    await client.connect(); // 前 2 次失败，第 3 次成功
+
+    expect(client.isReady).toBe(true);
+    expect(errors.length).toBe(2); // 前 2 次失败上报 onError
+    const result = await client.call("audio.getAlgorithmConfig", {});
+    expect(result).toEqual({ ok: 1 });
+  });
+
+  it("首次连接失败 + maxAttempts 耗尽 → onReconnectFailed + closed", async () => {
+    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const clientTransport = new ScriptedClientTransport(
+      unframedJsonCapabilities(),
+      serverTransport,
+      Number.POSITIVE_INFINITY
+    );
+    const client = new AxtpClient(clientTransport, {
+      reconnect: { enabled: true, initialDelayMs: 5, maxDelayMs: 5, maxAttempts: 3, jitter: false },
+      logicalRole: "client"
+    });
+    createdClients.push(client);
+
+    let failed = false;
+    client.onReconnectFailed.subscribe(() => (failed = true));
+
+    await expect(client.connect()).rejects.toThrow();
+    expect(failed).toBe(true);
+    expect(client.isClosed).toBe(true);
+  });
+
+  it("首次连接失败 + reconnect disabled → closed（保持原行为）", async () => {
+    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const clientTransport = new ScriptedClientTransport(unframedJsonCapabilities(), serverTransport, 1);
+    const client = new AxtpClient(clientTransport, { logicalRole: "client" }); // 无 reconnect
+    createdClients.push(client);
+
+    let failed = false;
+    client.onReconnectFailed.subscribe(() => (failed = true));
+
+    await expect(client.connect()).rejects.toThrow();
+    expect(client.isClosed).toBe(true);
+    expect(failed).toBe(false); // disabled 不 emit onReconnectFailed
+  });
+
+  it("重试中 close() → 立即中断，不再重试", async () => {
+    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const clientTransport = new ScriptedClientTransport(
+      unframedJsonCapabilities(),
+      serverTransport,
+      Number.POSITIVE_INFINITY
+    );
+    const client = new AxtpClient(clientTransport, {
+      reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 500, jitter: false },
+      logicalRole: "client"
+    });
+    createdClients.push(client);
+
+    let failed = false;
+    client.onReconnectFailed.subscribe(() => (failed = true));
+
+    const connectPromise = client.connect();
+    await settle(50); // 首次失败，进入退避（500ms）
+    await client.close(); // 退避中关闭
+    await connectPromise; // connectAborted → 静默 resolve（不 throw）
+    await settle(50);
+
+    expect(client.isClosed).toBe(true);
+    expect(failed).toBe(false); // 未耗尽，未 onReconnectFailed
+  });
+
+  it("首次重试成功后再断连，仍走 Connection 层重连", async () => {
+    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const server = new AxtpServer(serverTransport, { logicalRole: "server" });
+    await server.listen();
+    createdServers.push(server);
+
+    const clientTransport = new ScriptedClientTransport(unframedJsonCapabilities(), serverTransport, 1);
+    const client = new AxtpClient(clientTransport, {
+      reconnect: { enabled: true, initialDelayMs: 5, maxDelayMs: 20, jitter: false },
+      logicalRole: "client"
+    });
+    createdClients.push(client);
+
+    await client.connect(); // 首次失败，第 2 次成功
+
+    let reconnected = false;
+    client.onReconnect.subscribe(() => (reconnected = true));
+
+    server.getSessions()[0]?.close(); // 触发断连
+    await settle(100); // 等 Connection 层重连（退避 5ms）
+
+    expect(reconnected).toBe(true);
+    expect(client.isReady).toBe(true);
   });
 });
 

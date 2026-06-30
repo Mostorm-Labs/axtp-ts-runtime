@@ -26,8 +26,8 @@ async function makePair(
   const caps = wire === "ws" ? unframedJsonCapabilities() : framedBinaryCapabilities();
   const { left, right } = createMockTransportPair(caps);
   // 经典场景：server 暴露能力（Logical Server），client 消费（Logical Client）
-  const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
-  const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
+  const server = new AxtpSession(() => Promise.resolve(right), { physicalRole: "server", logicalRole: "server" });
+  const client = new AxtpSession(() => Promise.resolve(left), { physicalRole: "client", logicalRole: "client" });
   createdSessions.push(client, server);
   // onReady 现在是 EventStream，await 首次 emit
   await Promise.all([
@@ -120,7 +120,7 @@ describe("AxtpSession 事件（双向）", () => {
 describe("AxtpSession 未 ready 拒绝", () => {
   it("未握手时 call 抛 InvalidState", async () => {
     const { left } = createMockTransportPair(unframedJsonCapabilities());
-    const session = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
+    const session = new AxtpSession(() => Promise.resolve(left), { physicalRole: "client", logicalRole: "client" });
     expect(() => session.call("audio.getAlgorithmConfig", {})).toThrow();
     session.close();
   });

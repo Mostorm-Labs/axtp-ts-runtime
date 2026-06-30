@@ -22,8 +22,8 @@ afterEach(() => {
 describe("STREAM P0 端到端（framed-binary）", () => {
   it("client openStream -> server 返回 streamId", async () => {
     const { left, right } = createMockTransportPair(framedBinaryCapabilities());
-    const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
-    const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
+    const server = new AxtpSession(() => Promise.resolve(right), { physicalRole: "server", logicalRole: "server" });
+    const client = new AxtpSession(() => Promise.resolve(left), { physicalRole: "client", logicalRole: "client" });
     await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
     createdSessions.push(client, server);
 
@@ -41,8 +41,8 @@ describe("STREAM P0 端到端（framed-binary）", () => {
 
   it("断连时 stream 被 abort（onClose 触发）", async () => {
     const { left, right } = createMockTransportPair(framedBinaryCapabilities());
-    const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
-    const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
+    const server = new AxtpSession(() => Promise.resolve(right), { physicalRole: "server", logicalRole: "server" });
+    const client = new AxtpSession(() => Promise.resolve(left), { physicalRole: "client", logicalRole: "client" });
     await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
     createdSessions.push(client, server);
 
@@ -61,8 +61,8 @@ describe("STREAM P0 端到端（framed-binary）", () => {
 
   it("双向：client send -> server onStreamReady 收到数据", async () => {
     const { left, right } = createMockTransportPair(framedBinaryCapabilities());
-    const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
-    const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
+    const server = new AxtpSession(() => Promise.resolve(right), { physicalRole: "server", logicalRole: "server" });
+    const client = new AxtpSession(() => Promise.resolve(left), { physicalRole: "client", logicalRole: "client" });
     await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
     createdSessions.push(client, server);
 
@@ -91,8 +91,8 @@ describe("STREAM P0 端到端（framed-binary）", () => {
 describe("STREAM 在 WS 模式下拒绝", () => {
   it("WS 模式 openStream 抛 NotSupported", async () => {
     const { left, right } = createMockTransportPair(unframedJsonCapabilities());
-    const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
-    const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
+    const server = new AxtpSession(() => Promise.resolve(right), { physicalRole: "server", logicalRole: "server" });
+    const client = new AxtpSession(() => Promise.resolve(left), { physicalRole: "client", logicalRole: "client" });
     await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
     createdSessions.push(client, server);
 

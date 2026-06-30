@@ -16,8 +16,8 @@ function settle(ms = 10): Promise<void> {
 describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
   it("client OPEN -> server ACCEPT -> 双方 linkReady", async () => {
     const { left, right } = createMockTransportPair(framedBinaryCapabilities());
-    const client = new Connection("client", left);
-    const server = new Connection("server", right);
+    const client = new Connection("client", () => Promise.resolve(left));
+    const server = new Connection("server", () => Promise.resolve(right));
 
     let clientLinkReady = false;
     let serverLinkReady = false;
@@ -34,8 +34,8 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
 
   it("link ready 后双方可互发 RPC（framed-binary 双向）", async () => {
     const { left, right } = createMockTransportPair(framedBinaryCapabilities());
-    const client = new Connection("client", left);
-    const server = new Connection("server", right);
+    const client = new Connection("client", () => Promise.resolve(left));
+    const server = new Connection("server", () => Promise.resolve(right));
 
     const serverReceived: RpcPayload[] = [];
     const clientReceived: RpcPayload[] = [];
@@ -76,8 +76,8 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
 
   it("close 触发双方 onClose", async () => {
     const { left, right } = createMockTransportPair(framedBinaryCapabilities());
-    const client = new Connection("client", left);
-    const server = new Connection("server", right);
+    const client = new Connection("client", () => Promise.resolve(left));
+    const server = new Connection("server", () => Promise.resolve(right));
     server.start();
     client.start();
     await settle(20);
@@ -94,8 +94,8 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
 describe("Connection unframed-json: 直接 linkReady + 双向 RPC", () => {
   it("WS 模式连接即 linkReady（无 CONTROL）", async () => {
     const { left, right } = createMockTransportPair(unframedJsonCapabilities());
-    const client = new Connection("client", left);
-    const server = new Connection("server", right);
+    const client = new Connection("client", () => Promise.resolve(left));
+    const server = new Connection("server", () => Promise.resolve(right));
 
     let ready = false;
     client.onLinkReady.subscribe(() => (ready = true));
@@ -107,8 +107,8 @@ describe("Connection unframed-json: 直接 linkReady + 双向 RPC", () => {
 
   it("WS 双向 JSON RPC", async () => {
     const { left, right } = createMockTransportPair(unframedJsonCapabilities());
-    const client = new Connection("client", left);
-    const server = new Connection("server", right);
+    const client = new Connection("client", () => Promise.resolve(left));
+    const server = new Connection("server", () => Promise.resolve(right));
 
     const received: RpcPayload[] = [];
     server.onPayload.subscribe((p) => received.push(p));
@@ -131,25 +131,26 @@ describe("Connection unframed-json: 直接 linkReady + 双向 RPC", () => {
   });
 });
 
-describe("Connection start() 缓冲", () => {
-  it("未 start 时消息被缓冲，start 后 flush 收到", async () => {
+describe("Connection factory 首次建立（异步 attach）", () => {
+  it("start 后异步建立 transport，link ready 后可收发 RPC", async () => {
     const { left, right } = createMockTransportPair(unframedJsonCapabilities());
-    const client = new Connection("client", left);
-    const server = new Connection("server", right);
+    const client = new Connection("client", () => Promise.resolve(left));
+    const server = new Connection("server", () => Promise.resolve(right));
 
     const received: RpcPayload[] = [];
     server.onPayload.subscribe((p) => received.push(p));
 
-    // server 未 start，client 已 start 并发消息 -> server 缓冲（不丢失）
+    server.start();
     client.start();
-    client.sendRpc(rpcPayload({ op: RpcOp.Request, requestId: 1 }));
-    await settle(10);
-    expect(received.length).toBe(0); // server 未 start，缓冲中
+    await settle(10); // factory 异步 attach + unframed 立即 linkReady
 
-    server.start(); // flush 缓冲
+    client.sendRpc(rpcPayload({ op: RpcOp.Request, requestId: 1 }));
     await settle(10);
     expect(received.length).toBe(1);
     expect(received[0].requestId).toBe(1);
+
+    client.close();
+    server.close();
   });
 });
 
@@ -157,11 +158,11 @@ describe("Connection 心跳（framed）", () => {
   it("link ready 后启动心跳定时器", async () => {
     vi.useFakeTimers();
     const { left, right } = createMockTransportPair(framedBinaryCapabilities());
-    const client = new Connection("client", left, {
+    const client = new Connection("client", () => Promise.resolve(left), {
       heartbeatIntervalMs: 1000,
       heartbeatTimeoutMs: 5000
     });
-    const server = new Connection("server", right, {
+    const server = new Connection("server", () => Promise.resolve(right), {
       heartbeatIntervalMs: 1000,
       heartbeatTimeoutMs: 5000
     });
@@ -189,7 +190,7 @@ describe("Connection 心跳（WS unframed-json）", () => {
     const serverTransport = new NodeWsServerTransport({ port });
     serverTransport.onConnection.subscribe((t) => {
       // server 侧 Connection 启动心跳
-      const conn = new Connection("server", t, {
+      const conn = new Connection("server", () => Promise.resolve(t), {
         heartbeatIntervalMs: 50,
         heartbeatTimeoutMs: 5000
       });
@@ -207,7 +208,7 @@ describe("Connection 心跳（WS unframed-json）", () => {
     );
 
     // client 端 Connection 启动（WS 模式 fireLinkReady + startHeartbeat）
-    const clientConnection = new Connection("client", clientConn, {
+    const clientConnection = new Connection("client", () => Promise.resolve(clientConn), {
       heartbeatIntervalMs: 50,
       heartbeatTimeoutMs: 5000
     });
@@ -226,22 +227,17 @@ describe("Connection 心跳（WS unframed-json）", () => {
 
 describe("Connection 重连修复回归", () => {
   it("本地 close() 不误发 onDisconnect、不武装重连复活（framed/unframed 通用）", async () => {
-    const { left, right } = createMockTransportPair(unframedJsonCapabilities());
-    const server = new Connection("server", right);
-    server.start();
-
     let factoryCalls = 0;
     const client = new Connection(
       "client",
-      left,
-      { reconnect: { enabled: true, initialDelayMs: 5, jitter: false } },
       () => {
         factoryCalls += 1;
         return Promise.resolve(new MockTransport(unframedJsonCapabilities()));
-      }
+      },
+      { reconnect: { enabled: true, initialDelayMs: 5, jitter: false } }
     );
     client.start();
-    await settle(10); // unframed 立即 linkReady -> onSuccess（active=false）
+    await settle(10); // 首次 factory -> attach -> unframed 立即 linkReady -> onSuccess（active=false）
 
     let disconnectCount = 0;
     client.onDisconnect.subscribe(() => {
@@ -251,10 +247,11 @@ describe("Connection 重连修复回归", () => {
     client.close(); // 本地主动关闭
     await settle(20);
 
-    // 修复后：本地关闭不发 onDisconnect；transport.close() 同步触发 onClose 时 connState 已 closed，
-    // handleTransportClose 提前返回，不会在已 stop 的协调器上重新武装重连（“复活”已关闭连接）。
+    // 本地关闭不发 onDisconnect；close() 已 stop 协调器，transport.close() 同步触发 onClose 时
+    // connState 已 closed，handleTransportClose 提前返回，不会在已 stop 的协调器上重新武装重连（“复活”）。
+    // factory 仅被首次连接调用一次（close 未触发额外重连）。
     expect(disconnectCount).toBe(0);
-    expect(factoryCalls).toBe(0);
+    expect(factoryCalls).toBe(1);
     expect(client.isClosed).toBe(true);
   });
 
@@ -262,22 +259,24 @@ describe("Connection 重连修复回归", () => {
     vi.useFakeTimers();
     try {
       const { left, right } = createMockTransportPair(framedBinaryCapabilities());
-      const server = new Connection("server", right);
+      const server = new Connection("server", () => Promise.resolve(right));
       server.start();
 
       let factoryCalls = 0;
       const client = new Connection(
         "client",
-        left,
-        { reconnect: { enabled: true, initialDelayMs: 1, maxAttempts: 5, jitter: false } },
         () => {
           factoryCalls += 1;
+          if (factoryCalls === 1) {
+            // 首次连接：正常 transport（与 right 对接，framed 握手可完成 -> onSuccess）
+            return Promise.resolve(left);
+          }
+          // 后续重连：孤立 transport，attach 后立即关闭（link 永不会 ready）—— 原 bug 的卡死窗口
           const t = new MockTransport(framedBinaryCapabilities());
-          // 新 transport 不连任何对端（OPEN 得不到 ACCEPT，link 永不会 ready），
-          // 并在 attach 之后、link-ready 之前关闭 —— 正是原 bug 的卡死窗口。
           setTimeout(() => t.close(), 0);
           return Promise.resolve(t);
-        }
+        },
+        { reconnect: { enabled: true, initialDelayMs: 1, maxAttempts: 5, jitter: false } }
       );
       client.start();
       await vi.advanceTimersByTimeAsync(20); // 初始 framed 握手完成 -> onSuccess

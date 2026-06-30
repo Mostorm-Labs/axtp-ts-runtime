@@ -73,10 +73,11 @@ export class MockTransport implements ITransport {
       this.pending.push(bytes);
       return;
     }
-    // 异步投递：真实传输有延迟，且避免 sender 在 send 调用栈内同步触发 receiver
-    // （否则 receiver 在未完成订阅注册前可能收到消息）。
+    // 宏任务投递：真实传输有网络延迟；用 setTimeout(0) 让对端 Connection 的 async attach
+    // （factory 模式下 await transportFactory 后的 attach，微任务）先于消息到达，
+    // 避免 attach 前消息因无 subscriber 丢失。
     const snapshot = bytes.slice();
-    queueMicrotask(() => {
+    setTimeout(() => {
       if (!this.connected) return;
       this.onMessage.emit(snapshot);
     });

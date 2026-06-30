@@ -3,7 +3,7 @@
 // connect() 带超时保护，避免握手卡住永久 hang。
 // 订阅 session.onStateChange 驱动 client 状态 + emit 对应事件。
 
-import type { ReconnectPolicy } from "../connection/reconnect/reconnect.js";
+import { resolvePolicy, type ReconnectPolicy } from "../connection/reconnect/reconnect.js";
 import {
   AxtpSession,
   type CallContext,
@@ -47,6 +47,8 @@ export class AxtpClient {
   private clientState: ClientState = "idle";
   /** 首次 onReady 是否已收到（用于区分 onConnect vs onReconnect）。 */
   private firstReady = true;
+  /** connect() 被 close() 中断标志：置位后 connect() 静默退出不 throw。 */
+  private connectAborted = false;
   /** 已注册的事件名（用于计算 eventMasks 订阅意图，在 connect/重连时注入 Identify）。 */
   private readonly subscribedEvents = new Set<string>();
 
@@ -94,51 +96,64 @@ export class AxtpClient {
 
   // ===== 连接 =====
 
-  /** 首次连接。带超时保护——transport 连接 + 握手超时后 reject。 */
+  /**
+   * 首次连接。transport 建立与重连统一交给 Connection（factory 模式）：
+   *   - reconnect 启用：首次失败也按策略退避重试（无硬超时，持续到 ready 或 maxAttempts 耗尽）
+   *   - reconnect 未启用：transport 连接 + 握手超时后 reject
+   */
   async connect(timeoutMs: number = DEFAULT_CONNECT_TIMEOUT_MS): Promise<void> {
     if (this.clientState !== "idle") {
       throw new AxtpError(ErrorCode.InvalidState, `cannot connect from state ${this.clientState}`);
     }
+    this.connectAborted = false;
     this.setState("connecting");
 
+    const policy = resolvePolicy(this.options.reconnect);
+    this.session = new AxtpSession(() => this.transport.connect(), {
+      physicalRole: "client",
+      logicalRole: this.options.logicalRole ?? "server",
+      defaultTimeoutMs: this.options.defaultTimeoutMs,
+      handshakeTimeoutMs: this.options.handshakeTimeoutMs,
+      reconnect: this.options.reconnect,
+      heartbeatIntervalMs: this.options.heartbeatIntervalMs,
+      heartbeatTimeoutMs: this.options.heartbeatTimeoutMs,
+      maxFrameSize: this.options.maxFrameSize,
+      eventMasks: this.computeEventMasks()
+    });
+    this.wireSessionEvents();
+
     try {
-      const transport = await this.transport.connect();
-      this.session = new AxtpSession(transport, {
-        physicalRole: "client",
-        logicalRole: this.options.logicalRole ?? "server",
-        defaultTimeoutMs: this.options.defaultTimeoutMs,
-        handshakeTimeoutMs: this.options.handshakeTimeoutMs,
-        reconnect: this.options.reconnect,
-        heartbeatIntervalMs: this.options.heartbeatIntervalMs,
-        heartbeatTimeoutMs: this.options.heartbeatTimeoutMs,
-        maxFrameSize: this.options.maxFrameSize,
-        transportFactory: () => this.transport.connect(),
-        eventMasks: this.computeEventMasks()
-      });
-
-      // 订阅 session 事件
-      this.session.onStateChange.subscribe((s) => this.onSessionStateChange(s));
-      this.session.onClose.subscribe((info) => this.onDisconnect.emit(info));
-      this.session.onReconnect.subscribe((info) => this.onReconnect.emit(info));
-      this.session.onReconnectFailed.subscribe(() => this.onReconnectFailed.emit(undefined));
-      this.session.onError.subscribe((err) => this.onError.emit(err));
-
-      // 等待首次 ready（带超时）
-      await this.waitForReady(timeoutMs);
+      await this.waitForReady(policy.enabled ? Number.POSITIVE_INFINITY : timeoutMs);
       this.setState("ready");
       this.onConnect.emit(undefined);
     } catch (err) {
-      // 关闭已创建的 session（含 Connection/心跳定时器/transport），避免握手卡住超时后资源泄漏。
+      // 关闭已创建的 session（含 Connection/心跳定时器/transport），避免资源泄漏。
       this.session?.close();
       this.session = undefined;
       this.setState("closed");
+      if (this.connectAborted) return; // 用户 close() 中断，静默退出
       throw err instanceof AxtpError
         ? err
         : new AxtpError(ErrorCode.TransportDisconnected, "connect failed", err);
     }
   }
 
-  /** 等待 session 首次 ready，带超时。 */
+  /** 订阅 session 事件并转发为 client 事件流。 */
+  private wireSessionEvents(): void {
+    const session = this.session;
+    if (session === undefined) return;
+    session.onStateChange.subscribe((s) => this.onSessionStateChange(s));
+    session.onClose.subscribe((info) => this.onDisconnect.emit(info));
+    session.onReconnect.subscribe((info) => this.onReconnect.emit(info));
+    session.onReconnectFailed.subscribe(() => this.onReconnectFailed.emit(undefined));
+    session.onError.subscribe((err) => this.onError.emit(err));
+  }
+
+  /**
+   * 等待 session 首次 ready。
+   * timeoutMs=Infinity（reconnect 启用）：不武装超时，持续等到 ready 或 session 关闭（重连耗尽）。
+   * 否则：超时后 reject，保护首次 transport 连接 + 握手。
+   */
   private waitForReady(timeoutMs: number): Promise<void> {
     const session = this.session;
     if (session === undefined) {
@@ -147,22 +162,28 @@ export class AxtpClient {
     if (session.isReady) return Promise.resolve();
 
     return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        unsub();
-        closeUnsub();
-        reject(new AxtpError(ErrorCode.Timeout, `connect timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
+      const armed = timeoutMs !== Number.POSITIVE_INFINITY;
+      const timer = armed
+        ? setTimeout(() => {
+            unsub();
+            closeUnsub();
+            reject(new AxtpError(ErrorCode.Timeout, `connect timed out after ${timeoutMs}ms`));
+          }, timeoutMs)
+        : undefined;
+      const clear = (): void => {
+        if (timer !== undefined) clearTimeout(timer);
+      };
 
       const unsub = session.onReady.subscribe(() => {
-        clearTimeout(timer);
+        clear();
         unsub();
         closeUnsub();
         resolve();
       });
 
-      // 如果 session 在等待期间关闭，reject
+      // session 关闭（重连耗尽 / 被动关闭 / 用户 close）→ reject
       const closeUnsub = session.onClose.subscribe(() => {
-        clearTimeout(timer);
+        clear();
         unsub();
         closeUnsub();
         reject(new AxtpError(ErrorCode.TransportDisconnected, "session closed before ready"));
@@ -276,8 +297,9 @@ export class AxtpClient {
     return session.onStream(method, handler);
   }
 
-  /** 主动关闭，不再重连。await session 关闭完成。 */
+  /** 主动关闭，不再重连。中断进行中的 connect()（connectAborted 使其静默退出）。 */
   async close(): Promise<void> {
+    this.connectAborted = true;
     const session = this.session;
     this.setState("closed");
     session?.close();

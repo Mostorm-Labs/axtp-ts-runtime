@@ -29,8 +29,8 @@ afterEach(() => {
 async function makePair(): Promise<{ client: AxtpSession; server: AxtpSession }> {
   const { left, right } = createMockTransportPair(unframedJsonCapabilities());
   // 经典场景：server=Logical Server, client=Logical Client
-  const client = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
-  const server = new AxtpSession(right, { physicalRole: "server", logicalRole: "server" });
+  const client = new AxtpSession(() => Promise.resolve(left), { physicalRole: "client", logicalRole: "client" });
+  const server = new AxtpSession(() => Promise.resolve(right), { physicalRole: "server", logicalRole: "server" });
   createdSessions.push(client, server);
   await Promise.all([new Promise<void>((r) => client.onReady.subscribe(() => r())), new Promise<void>((r) => server.onReady.subscribe(() => r()))]);
   return { client, server };
@@ -66,7 +66,7 @@ describe("conformance: session.request_before_identified", () => {
     // 验证：Session 在未 ready 时，call 抛 InvalidState（requireReady 守卫）；
     // 且 codec 层能正确编码 ControlOpenRequired 响应（wire conformance）。
     const { left } = createMockTransportPair(unframedJsonCapabilities());
-    const session = new AxtpSession(left, { physicalRole: "client", logicalRole: "client" });
+    const session = new AxtpSession(() => Promise.resolve(left), { physicalRole: "client", logicalRole: "client" });
     // 未握手时 call 必须被拒绝
     expect(() => session.call("audio.getAlgorithmConfig", {})).toThrow();
     session.close();
