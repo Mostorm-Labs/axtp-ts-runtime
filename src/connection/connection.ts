@@ -1,26 +1,24 @@
-// Connection：传输连接 + 链路层编排 + 传输重连（连接语义，不导出）。
-// 持有 transport + CodecPipeline(framed) + Heartbeat + ReconnectCoordinator。
-// 解码后把 RpcPayload/StreamPayload 上交给 Session。
+// Connection：传输连接 + 链路生命周期编排 + 传输重连（连接语义，不导出）。
+// 持有 transport + Link（framed/unframed 按 capabilities 工厂派发）+ ReconnectCoordinator。
+// Link 内聚成帧/编解码/CONTROL 协商/心跳；Connection 只做生命周期状态机 + 重连编排 + 事件转发，
+// 不再按 profile 分支（唯一的 capabilities 分支收敛在 createLink 工厂）。
 //
 // 重连：transport.onClose → ReconnectCoordinator → 新 transport → attachTransport(统一重置) → 链路启动。
-// 心跳：framed 用 CONTROL Heartbeat/Ack；WS 用原生 keepalive。
+// 心跳：由 Link 自持（framed=CONTROL Heartbeat/Ack，WS=原生 keepalive），onHeartbeatTimeout → close。
 
-import type { Bytes } from "../io/bytes.js";
-import { decodeJsonRpc, encodeJsonRpc } from "../protocol/codec/jsonRpc.js";
 import type { RpcPayload, StreamPayload } from "../protocol/model.js";
 import type {
   CloseReason,
   ITransport,
   PhysicalRole,
-  TransportCapabilities,
   TransportFactory
 } from "../transport/transport.js";
-import { CloseCode, framedBinaryCapabilities } from "../transport/transport.js";
+import { CloseCode } from "../transport/transport.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
-import { CodecPipeline } from "./codec/codecPipeline.js";
-import { type NegotiatedLink } from "./codec/controlSession.js";
-import { Heartbeat } from "./heartbeat.js";
+import { FramedLink } from "./link/framedLink.js";
+import type { Link } from "./link/link.js";
+import { UnframedJsonLink } from "./link/unframedJsonLink.js";
 import { resolvePolicy, type ReconnectInfo, type ReconnectPolicy } from "./reconnect/reconnect.js";
 import { ReconnectCoordinator } from "./reconnect/reconnectCoordinator.js";
 
@@ -53,15 +51,11 @@ export class Connection {
   readonly onReconnectFailed = new EventStream<void>();
 
   private transport: ITransport | undefined;
-  private capabilities: TransportCapabilities = framedBinaryCapabilities();
   private readonly transportFactory: TransportFactory;
   private readonly physicalRole: PhysicalRole;
   private readonly options: ConnectionOptions;
-
-  private pipeline: CodecPipeline | undefined;
-  private heartbeat: Heartbeat | undefined;
+  private link: Link | undefined;
   private reconnectCoordinator: ReconnectCoordinator | undefined;
-  private keepaliveUnsub: (() => void) | undefined;
   private transportUnsubs: Array<() => void> = [];
 
   private connState: ConnectionState = "idle";
@@ -108,56 +102,27 @@ export class Connection {
   }
 
   /**
-   * 绑定一条 transport：统一重置所有 transport 相关可变状态 + 订阅事件。
-   * 构造和重连都调此方法。确保重连时 pipeline/heartbeat/controlId 完全重置。
+   * 绑定一条 transport：统一重置所有 transport 相关可变状态 + 创建 Link + 订阅事件。
+   * 构造和重连都调此方法。确保重连时 Link/pipeline/controlId/心跳完全重置（Link 整体重建）。
    */
   private attachTransport(transport: ITransport): void {
     // 1. detach 旧 transport 订阅
     for (const unsub of this.transportUnsubs) unsub();
     this.transportUnsubs = [];
 
-    // 2. 清理旧 keepalive 监听
-    this.keepaliveUnsub?.();
-    this.keepaliveUnsub = undefined;
+    // 2. 停旧 Link（含心跳/keepalive 监听）
+    this.link?.stop();
+    this.link = undefined;
 
-    // 3. 停旧心跳
-    this.heartbeat?.stop();
-    this.heartbeat = undefined;
+    // 3. 工厂派发创建新 Link（唯一的 capabilities 分支）+ 订阅其事件
+    this.link = createLink(this.physicalRole, transport, this.options);
+    this.wireLink(this.link);
 
-    // 4. 刷新 capabilities
-    this.capabilities = transport.capabilities;
-
-    // 5. 重建 pipeline（framed only）——完全新实例，无旧状态泄漏
-    this.pipeline = undefined;
-    if (this.capabilities.supportsControl) {
-      this.pipeline = new CodecPipeline(
-        this.physicalRole,
-        transport,
-        {
-          maxFrameSize: this.options.maxFrameSize ?? DEFAULT_MAX_FRAME_SIZE,
-          heartbeatIntervalMs: this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
-        },
-        {
-          onRpc: (p) => this.onPayload.emit(p),
-          onStream: (s) => this.onStream.emit(s),
-          onControlHeartbeat: (cid) => this.pipeline?.sendHeartbeatAck(cid),
-          onControlHeartbeatAck: () => this.heartbeat?.reset(),
-          onControlClosing: () => this.close(CloseCode.Normal, "remote close"),
-          onControlOpenRejected: (sc) =>
-            this.close(
-              CloseCode.HandshakeFailed,
-              `link rejected: 0x${sc.toString(16).padStart(4, "0")}`
-            ),
-          onLinkReady: (neg) => this.onNegotiatedLinkReady(neg)
-        }
-      );
-    }
-
-    // 6. 订阅 transport 事件
+    // 4. 订阅 transport 事件
     this.transportUnsubs.push(
       transport.onMessage.subscribe((bytes) => {
         if (this.connState === "closed") return;
-        this.onTransportBytes(bytes);
+        this.link?.ingest(bytes);
       })
     );
     this.transportUnsubs.push(
@@ -166,6 +131,21 @@ export class Connection {
     this.transportUnsubs.push(transport.onError.subscribe((err) => this.onError.emit(err)));
 
     transport.attach?.();
+  }
+
+  /** 订阅 Link 入站事件，转发为 Connection 事件 / 驱动关闭。 */
+  private wireLink(link: Link): void {
+    link.onPayload.subscribe((p) => this.onPayload.emit(p));
+    link.onStream.subscribe((s) => this.onStream.emit(s));
+    link.onLinkReady.subscribe(() => this.handleLinkReady());
+    link.onClosing.subscribe(() => this.close(CloseCode.Normal, "remote close"));
+    link.onOpenRejected.subscribe((sc) =>
+      this.close(CloseCode.HandshakeFailed, `link rejected: 0x${sc.toString(16).padStart(4, "0")}`)
+    );
+    link.onHeartbeatTimeout.subscribe(() =>
+      this.close(CloseCode.HeartbeatTimeout, "heartbeat timeout")
+    );
+    link.onError.subscribe((err) => this.onError.emit(err));
   }
 
   start(): void {
@@ -212,14 +192,9 @@ export class Connection {
     }
   }
 
-  /** 链路握手启动：framed 发 OPEN（client）/ 等 OPEN（server）；WS 直接 linkReady + 心跳。 */
+  /** 链路握手启动：委托 Link（framed client 发 OPEN / framed server 等 OPEN / WS 即时 ready）。 */
   private startLinkHandshake(): void {
-    if (this.capabilities.supportsControl) {
-      if (this.physicalRole === "client") this.pipeline?.sendOpen();
-    } else {
-      this.fireLinkReady();
-      this.startHeartbeat(this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
-    }
+    this.link?.startOpen();
   }
 
   /**
@@ -238,26 +213,19 @@ export class Connection {
 
   sendRpc(payload: RpcPayload): void {
     if (!this.assertLinkReady()) return;
-    const jsonBytes = encodeJsonRpc(payload);
-    if (this.capabilities.supportsControl) {
-      this.pipeline?.sendRpc(jsonBytes);
-    } else {
-      this.transport?.send(jsonBytes);
-    }
+    this.link?.sendRpc(payload);
   }
 
   sendStream(payload: StreamPayload): void {
     if (!this.assertLinkReady()) return;
-    if (!this.capabilities.supportsControl) {
-      throw new AxtpError(ErrorCode.NotSupported, "STREAM not supported on this transport");
-    }
-    this.pipeline?.sendStreamPayload(payload);
+    // unframed Link 在此抛 NotSupported（spec：WS 不承载 STREAM）。
+    this.link?.sendStream(payload);
   }
 
   close(code: CloseCode = CloseCode.Normal, reason = "local close"): void {
     if (this.connState === "closed") return;
     this.reconnectCoordinator?.stop();
-    this.heartbeat?.stop();
+    this.link?.stop();
     // 死连接（心跳超时 / 传输错误 / 重连失败）：对端已无响应，发 CONTROL CLOSE 帧也收不到 ACK；
     // 此时跳过 sendClose 并用 transport.terminate() 强制断开，避免 ws.close(1000) 在死连接上悬空
     // 等待 close timer。主动优雅关闭（Normal / HandshakeFailed）仍走 sendClose + transport.close()。
@@ -265,9 +233,7 @@ export class Connection {
       code === CloseCode.HeartbeatTimeout ||
       code === CloseCode.TransportError ||
       code === CloseCode.Reconnect;
-    if (!force && this.capabilities.supportsControl && this.pipeline?.controlSessionIsOpen) {
-      this.pipeline.sendClose();
-    }
+    if (!force && this.link?.isOpen) this.link.sendClose();
     // 先 terminate（置 connState=closed + emit onClose + cleanupStreams），再断 transport。
     // TCP/WS 的 close()/terminate() 同步 emit onClose → handleTransportClose；此时 connState 已为
     // closed，命中其 `if (connState === "closed") return` 提前返回。否则本地关闭会误发 onDisconnect，
@@ -291,8 +257,7 @@ export class Connection {
 
   private handleTransportClose(reason: CloseReason): void {
     if (this.connState === "closed") return;
-    this.heartbeat?.stop();
-    this.heartbeat = undefined;
+    this.link?.stop();
 
     // 任何断连都通知上层（Session 据此 reject pending calls + abort streams）
     this.onDisconnect.emit(reason);
@@ -309,7 +274,7 @@ export class Connection {
   }
 
   private handleReconnected(newTransport: ITransport): void {
-    // 先立即 detach 旧 transport 订阅，防止旧 transport 的异步投递字节进入新 pipeline
+    // 先立即 detach 旧 transport 订阅，防止旧 transport 的异步投递字节进入新 Link
     for (const unsub of this.transportUnsubs) unsub();
     this.transportUnsubs = [];
 
@@ -332,23 +297,14 @@ export class Connection {
     this.terminate({ code: CloseCode.Reconnect, reason: "reconnect failed", remote: false }, true);
   }
 
-  // ===== 内部 =====
+  // ===== 链路就绪（Link.onLinkReady 统一入口）=====
 
-  private onTransportBytes(bytes: Bytes): void {
+  private handleLinkReady(): void {
     if (this.connState === "closed") return;
-    if (this.capabilities.supportsControl) {
-      this.pipeline?.onBytes(bytes);
-    } else {
-      const payload = decodeJsonRpc(bytes);
-      if (payload !== undefined) this.onPayload.emit(payload);
-    }
-  }
-
-  private onNegotiatedLinkReady(neg: NegotiatedLink): void {
-    if (!neg.accepted) return;
-    this.pipeline?.setMaxFrameSize(neg.maxFrameSize);
     this.fireLinkReady();
-    this.startHeartbeat(neg.heartbeatIntervalMs);
+    // 心跳由 Link 自持：interval 在 Link 内部（framed=协商值，unframed=options）。
+    this.link?.start();
+    // 统一重置重连协调器（framed/unframed 共用此入口，避免 active 永真）。
     this.reconnectCoordinator?.onSuccess();
   }
 
@@ -356,48 +312,6 @@ export class Connection {
     if (this.connState === "link_ready") return;
     this.setState("link_ready");
     this.onLinkReady.emit(undefined);
-    if (!this.capabilities.supportsControl) {
-      this.reconnectCoordinator?.onSuccess();
-    }
-  }
-
-  private startHeartbeat(negotiatedIntervalMs: number): void {
-    this.keepaliveUnsub?.();
-    this.keepaliveUnsub = undefined;
-    this.heartbeat?.stop();
-
-    const interval =
-      negotiatedIntervalMs || this.options.heartbeatIntervalMs || DEFAULT_HEARTBEAT_INTERVAL_MS;
-    const timeout = this.options.heartbeatTimeoutMs ?? Math.max(interval * 2, 10000);
-
-    if (this.capabilities.supportsControl) {
-      this.heartbeat = new Heartbeat({
-        intervalMs: interval,
-        timeoutMs: timeout,
-        onTick: () => {
-          const cid = this.pipeline?.allocControlId() ?? 0;
-          this.pipeline?.sendHeartbeat(cid);
-        },
-        onTimeout: () => this.close(CloseCode.HeartbeatTimeout, "heartbeat timeout")
-      });
-    } else if (this.capabilities.supportsKeepalive) {
-      const t = this.transport;
-      this.heartbeat = new Heartbeat({
-        intervalMs: interval,
-        timeoutMs: timeout,
-        onTick: () => t?.sendKeepalive?.(),
-        onTimeout: () => this.close(CloseCode.HeartbeatTimeout, "heartbeat timeout")
-      });
-      this.keepaliveUnsub = t?.onKeepaliveAck?.(() => this.heartbeat?.reset());
-    } else {
-      this.onError.emit(
-        new AxtpError(
-          ErrorCode.NotSupported,
-          "Transport supports neither CONTROL heartbeat nor native keepalive"
-        )
-      );
-    }
-    this.heartbeat?.start();
   }
 
   private cleanupStreams(): void {
@@ -410,4 +324,27 @@ export class Connection {
     this.onDisconnect.close();
     this.onClose.close();
   }
+}
+
+/**
+ * 按 transport 能力派发 Link 实现。这是 Connection 中唯一读取 capabilities 的地方（工厂派发，非行为分支）。
+ */
+function createLink(
+  physicalRole: PhysicalRole,
+  transport: ITransport,
+  options: ConnectionOptions
+): Link {
+  const maxFrameSize = options.maxFrameSize ?? DEFAULT_MAX_FRAME_SIZE;
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+  if (transport.capabilities.supportsControl) {
+    return new FramedLink(physicalRole, transport, {
+      maxFrameSize,
+      heartbeatIntervalMs,
+      heartbeatTimeoutMs: options.heartbeatTimeoutMs
+    });
+  }
+  return new UnframedJsonLink(transport, {
+    heartbeatIntervalMs,
+    heartbeatTimeoutMs: options.heartbeatTimeoutMs
+  });
 }
