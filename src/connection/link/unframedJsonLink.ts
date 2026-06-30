@@ -5,8 +5,8 @@
 
 import type { Bytes } from "../../io/bytes.js";
 import { decodeJsonRpc, encodeJsonRpc } from "../../protocol/codec/jsonRpc.js";
-import type { RpcMessage, StreamPayload } from "../../protocol/model.js";
-import type { ITransport } from "../../transport/transport.js";
+import type { RpcMessage } from "../../protocol/model.js";
+import type { KeepaliveTransport } from "../../transport/contract.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
 import { EventStream } from "../../types/events.js";
 import { Heartbeat } from "../heartbeat.js";
@@ -20,12 +20,8 @@ export interface UnframedJsonLinkOptions {
 }
 
 export class UnframedJsonLink implements Link {
-  // onClosing / onOpenRejected 是接口契约的一部分，但 unframed 无 CONTROL，永不 emit。
   readonly onPayload = new EventStream<RpcMessage>();
-  readonly onStream = new EventStream<StreamPayload>();
   readonly onLinkReady = new EventStream<void>();
-  readonly onClosing = new EventStream<void>();
-  readonly onOpenRejected = new EventStream<number>();
   readonly onHeartbeatTimeout = new EventStream<void>();
   readonly onError = new EventStream<AxtpError>();
 
@@ -34,7 +30,7 @@ export class UnframedJsonLink implements Link {
   private stopped = false;
 
   constructor(
-    private readonly transport: ITransport,
+    private readonly transport: KeepaliveTransport,
     private readonly options: UnframedJsonLinkOptions
   ) {}
 
@@ -48,38 +44,22 @@ export class UnframedJsonLink implements Link {
     this.transport.send(encodeJsonRpc(payload));
   }
 
-  sendStream(_payload: StreamPayload): void {
-    throw new AxtpError(ErrorCode.NotSupported, "STREAM not supported on unframed-JSON transport");
-  }
-
   startOpen(): void {
     // 无 CONTROL 协商：连接已建立即 link ready。
     this.onLinkReady.emit(undefined);
   }
 
-  sendClose(): void {
-    // 无 CONTROL CLOSE 帧；优雅关闭由 transport.close() 处理。
-  }
-
   start(): void {
-    if (!this.transport.capabilities.supportsKeepalive) {
-      this.onError.emit(
-        new AxtpError(
-          ErrorCode.NotSupported,
-          "Transport supports neither CONTROL heartbeat nor native keepalive"
-        )
-      );
-      return;
-    }
+    // transport 已是 KeepaliveTransport（createLink 保证 unframed profile 的 transport 实现原生 keepalive）。
     const interval = this.options.heartbeatIntervalMs;
     const timeout = this.options.heartbeatTimeoutMs ?? Math.max(interval * 2, 10000);
     this.heartbeat = new Heartbeat({
       intervalMs: interval,
       timeoutMs: timeout,
-      onTick: () => this.transport.sendKeepalive?.(),
+      onTick: () => this.transport.sendKeepalive(),
       onTimeout: () => this.onHeartbeatTimeout.emit(undefined)
     });
-    this.keepaliveUnsub = this.transport.onKeepaliveAck?.(() => this.heartbeat?.reset());
+    this.keepaliveUnsub = this.transport.onKeepaliveAck(() => this.heartbeat?.reset());
     this.heartbeat.start();
   }
 

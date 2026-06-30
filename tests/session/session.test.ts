@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AxtpSession } from "../../src/session/session.js";
 import { createMockTransportPair } from "../../src/transport/mock/mockTransport.js";
 import {
-  framedBinaryCapabilities,
-  unframedJsonCapabilities
-} from "../../src/transport/transport.js";
+  framedBinaryProfile,
+  unframedJsonProfile
+} from "../../src/transport/contract.js";
 import { ErrorCode } from "../../src/types/error.js";
 
 function settle(ms = 20): Promise<void> {
@@ -23,7 +23,7 @@ afterEach(() => {
 async function makePair(
   wire: "ws" | "framed"
 ): Promise<{ client: AxtpSession; server: AxtpSession }> {
-  const caps = wire === "ws" ? unframedJsonCapabilities() : framedBinaryCapabilities();
+  const caps = wire === "ws" ? unframedJsonProfile() : framedBinaryProfile();
   const { left, right } = createMockTransportPair(caps);
   // 经典场景：server 暴露能力（Logical Server），client 消费（Logical Client）
   const server = new AxtpSession(() => Promise.resolve(right), { physicalRole: "server", logicalRole: "server" });
@@ -119,7 +119,7 @@ describe("AxtpSession 事件（双向）", () => {
 
 describe("AxtpSession 未 ready 拒绝", () => {
   it("未握手时 call 抛 InvalidState", async () => {
-    const { left } = createMockTransportPair(unframedJsonCapabilities());
+    const { left } = createMockTransportPair(unframedJsonProfile());
     const session = new AxtpSession(() => Promise.resolve(left), { physicalRole: "client", logicalRole: "client" });
     expect(() => session.call("audio.getAlgorithmConfig", {})).toThrow();
     session.close();

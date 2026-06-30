@@ -5,8 +5,8 @@ import {
   MockClientTransport,
   MockServerTransport
 } from "../../src/transport/mock/mockTransport.js";
-import type { IClientTransport, ITransport, TransportCapabilities } from "../../src/transport/transport.js";
-import { unframedJsonCapabilities } from "../../src/transport/transport.js";
+import type { IClientTransport, ITransport, TransportProfile } from "../../src/transport/contract.js";
+import { unframedJsonProfile } from "../../src/transport/contract.js";
 import { AxtpError, ErrorCode } from "../../src/types/error.js";
 import { EventStream } from "../../src/types/events.js";
 
@@ -19,7 +19,7 @@ class ScriptedClientTransport implements IClientTransport {
   readonly onClose = new EventStream<void>();
   private connectCalls = 0;
   constructor(
-    readonly capabilities: TransportCapabilities,
+    readonly profile: TransportProfile,
     private readonly server: MockServerTransport,
     private readonly failFirst: number
   ) {}
@@ -30,7 +30,7 @@ class ScriptedClientTransport implements IClientTransport {
         new AxtpError(ErrorCode.Unavailable, `scripted fail #${this.connectCalls}`)
       );
     }
-    return new MockClientTransport(this.capabilities, this.server).connect();
+    return new MockClientTransport(this.profile, this.server).connect();
   }
 }
 
@@ -52,11 +52,11 @@ async function makeServerClient(): Promise<{
 }> {
   // 经典场景：server 暴露能力（Logical Server），client 消费（Logical Client）。
   // 显式传 logicalRole 覆盖 Cloud Reverse 默认值，保持本组测试的经典语义意图。
-  const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+  const serverTransport = new MockServerTransport(unframedJsonProfile());
   const server = new AxtpServer(serverTransport, { logicalRole: "server" });
   await server.listen();
 
-  const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+  const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
   const client = new AxtpClient(clientTransport, { logicalRole: "client" });
   createdClients.push(client);
   createdServers.push(server);
@@ -68,7 +68,7 @@ async function makeServerClient(): Promise<{
 describe("AxtpServer 多 client + 全局 handle", () => {
   it("server 接受多个 client，各自独立 session", async () => {
     const { server, serverTransport } = await makeServerClient();
-    const client2Transport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const client2Transport = new MockClientTransport(unframedJsonProfile(), serverTransport);
     const client2 = new AxtpClient(client2Transport, { logicalRole: "client" });
     await client2.connect();
     await settle(10);
@@ -87,7 +87,7 @@ describe("AxtpServer 多 client + 全局 handle", () => {
   it("新连接自动应用已有全局 handler", async () => {
     const { server, serverTransport } = await makeServerClient();
     server.handle("audio.getAlgorithmConfig", () => ({ late: true }));
-    const client2Transport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const client2Transport = new MockClientTransport(unframedJsonProfile(), serverTransport);
     const client2 = new AxtpClient(client2Transport, { logicalRole: "client" });
     await client2.connect();
     await settle(10);
@@ -112,7 +112,7 @@ describe("AxtpServer 多 client + 全局 handle", () => {
 
   it("广播 emit 给所有 APP_READY session", async () => {
     const { server, client, serverTransport } = await makeServerClient();
-    const client2Transport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const client2Transport = new MockClientTransport(unframedJsonProfile(), serverTransport);
     const client2 = new AxtpClient(client2Transport, { logicalRole: "client" });
     await client2.connect();
     await settle(10);
@@ -131,7 +131,7 @@ describe("AxtpServer 多 client + 全局 handle", () => {
 
   it("广播 filter 定向", async () => {
     const { server, client, serverTransport } = await makeServerClient();
-    const client2Transport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const client2Transport = new MockClientTransport(unframedJsonProfile(), serverTransport);
     const client2 = new AxtpClient(client2Transport, { logicalRole: "client" });
     await client2.connect();
     await settle(10);
@@ -157,12 +157,12 @@ describe("AxtpServer 多 client + 全局 handle", () => {
 
 describe("AxtpClient 重连机制", () => {
   it("断连后自动重连，handler 迁移", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const serverTransport = new MockServerTransport(unframedJsonProfile());
     const server = new AxtpServer(serverTransport, { logicalRole: "server" });
     await server.listen();
     server.handle("audio.getAlgorithmConfig", () => ({ reconnected: true }));
 
-    const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
     const client = new AxtpClient(clientTransport, {
       reconnect: { enabled: true, initialDelayMs: 10, maxDelayMs: 50 },
       logicalRole: "client"
@@ -187,10 +187,10 @@ describe("AxtpClient 重连机制", () => {
   });
 
   it("断连后 call 抛错（不启用重连）", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const serverTransport = new MockServerTransport(unframedJsonProfile());
     const server = new AxtpServer(serverTransport, { logicalRole: "server" });
     await server.listen();
-    const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
     const client = new AxtpClient(clientTransport, {
       logicalRole: "client"
     });
@@ -212,11 +212,11 @@ describe("AxtpClient 重连机制", () => {
   });
 
   it("重连失败：maxAttempts 耗尽 -> onReconnectFailed", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const serverTransport = new MockServerTransport(unframedJsonProfile());
     const server = new AxtpServer(serverTransport, { logicalRole: "server" });
     await server.listen();
 
-    const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
     const client = new AxtpClient(clientTransport, {
       logicalRole: "client",
       reconnect: { enabled: true, initialDelayMs: 10, maxDelayMs: 10, maxAttempts: 2 }
@@ -241,13 +241,13 @@ describe("AxtpClient 重连机制", () => {
   });
 
   it("首次连接失败 + reconnect enabled → 退避重试至成功", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const serverTransport = new MockServerTransport(unframedJsonProfile());
     const server = new AxtpServer(serverTransport, { logicalRole: "server" });
     await server.listen();
     server.handle("audio.getAlgorithmConfig", () => ({ ok: 1 }));
     createdServers.push(server);
 
-    const clientTransport = new ScriptedClientTransport(unframedJsonCapabilities(), serverTransport, 2);
+    const clientTransport = new ScriptedClientTransport(unframedJsonProfile(), serverTransport, 2);
     const client = new AxtpClient(clientTransport, {
       reconnect: { enabled: true, initialDelayMs: 5, maxDelayMs: 20, jitter: false },
       logicalRole: "client"
@@ -266,9 +266,9 @@ describe("AxtpClient 重连机制", () => {
   });
 
   it("首次连接失败 + maxAttempts 耗尽 → onReconnectFailed + closed", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const serverTransport = new MockServerTransport(unframedJsonProfile());
     const clientTransport = new ScriptedClientTransport(
-      unframedJsonCapabilities(),
+      unframedJsonProfile(),
       serverTransport,
       Number.POSITIVE_INFINITY
     );
@@ -287,8 +287,8 @@ describe("AxtpClient 重连机制", () => {
   });
 
   it("首次连接失败 + reconnect disabled → closed（保持原行为）", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
-    const clientTransport = new ScriptedClientTransport(unframedJsonCapabilities(), serverTransport, 1);
+    const serverTransport = new MockServerTransport(unframedJsonProfile());
+    const clientTransport = new ScriptedClientTransport(unframedJsonProfile(), serverTransport, 1);
     const client = new AxtpClient(clientTransport, { logicalRole: "client" }); // 无 reconnect
     createdClients.push(client);
 
@@ -301,9 +301,9 @@ describe("AxtpClient 重连机制", () => {
   });
 
   it("重试中 close() → 立即中断，不再重试", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const serverTransport = new MockServerTransport(unframedJsonProfile());
     const clientTransport = new ScriptedClientTransport(
-      unframedJsonCapabilities(),
+      unframedJsonProfile(),
       serverTransport,
       Number.POSITIVE_INFINITY
     );
@@ -327,12 +327,12 @@ describe("AxtpClient 重连机制", () => {
   });
 
   it("首次重试成功后再断连，仍走 Connection 层重连", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const serverTransport = new MockServerTransport(unframedJsonProfile());
     const server = new AxtpServer(serverTransport, { logicalRole: "server" });
     await server.listen();
     createdServers.push(server);
 
-    const clientTransport = new ScriptedClientTransport(unframedJsonCapabilities(), serverTransport, 1);
+    const clientTransport = new ScriptedClientTransport(unframedJsonProfile(), serverTransport, 1);
     const client = new AxtpClient(clientTransport, {
       reconnect: { enabled: true, initialDelayMs: 5, maxDelayMs: 20, jitter: false },
       logicalRole: "client"
@@ -376,12 +376,12 @@ describe("Cloud Reverse 默认场景（发起连接方=Logical Server）", () =>
   // 对应 spec Cloud Reverse：设备主动连云，设备是 Logical Server。
 
   it("默认 options：client（发起连接）发 Hello，server（接受连接）收 Hello", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const serverTransport = new MockServerTransport(unframedJsonProfile());
     // 默认 logicalRole：server 端="client"，client 端="server"
     const server = new AxtpServer(serverTransport);
     await server.listen();
 
-    const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
     const client = new AxtpClient(clientTransport);
     await client.connect();
     await settle(10);
@@ -396,11 +396,11 @@ describe("Cloud Reverse 默认场景（发起连接方=Logical Server）", () =>
   });
 
   it("Cloud Reverse：client 注册 handler（能力提供方），server 主动 call", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const serverTransport = new MockServerTransport(unframedJsonProfile());
     const server = new AxtpServer(serverTransport); // 默认 logicalRole="client"
     await server.listen();
 
-    const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
     const client = new AxtpClient(clientTransport); // 默认 logicalRole="server"
     await client.connect();
     await settle(10);
@@ -415,11 +415,11 @@ describe("Cloud Reverse 默认场景（发起连接方=Logical Server）", () =>
   });
 
   it("Cloud Reverse：client 主动 emit 事件，server 收", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonCapabilities());
+    const serverTransport = new MockServerTransport(unframedJsonProfile());
     const server = new AxtpServer(serverTransport); // 默认 logicalRole="client"
     await server.listen();
 
-    const clientTransport = new MockClientTransport(unframedJsonCapabilities(), serverTransport);
+    const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
     const client = new AxtpClient(clientTransport); // 默认 logicalRole="server"
     await client.connect();
     await settle(10);

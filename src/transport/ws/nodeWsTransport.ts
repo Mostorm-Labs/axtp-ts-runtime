@@ -3,7 +3,7 @@
 // 多连接：每个 ws 连接产出一个 ITransport 经 onConnection 上报。
 //
 // 心跳：WS 用原生 ping/pong（spec 明确 WS 不走 CONTROL），
-// 通过 ITransport.sendKeepalive/onKeepaliveAck 暴露（capabilities.supportsKeepalive=true）。
+// 通过 KeepaliveTransport.sendKeepalive/onKeepaliveAck 暴露（keepaliveMode=native-keepalive）。
 
 import { WebSocket, WebSocketServer } from "ws";
 import { bytesToText, type Bytes } from "../../io/bytes.js";
@@ -11,12 +11,16 @@ import { AxtpError, ErrorCode } from "../../types/error.js";
 import { EventStream } from "../../types/events.js";
 import {
   CloseCode,
-  unframedJsonCapabilities,
   type CloseReason,
   type IClientTransport,
   type IServerTransport,
-  type ITransport
-} from "../transport.js";
+  type ITransport,
+  type KeepaliveTransport
+} from "../contract.js";
+import { unframedJsonProfile } from "../profile.js";
+import { AttachedMessageBuffer } from "../internal/attachBuffer.js";
+import { SettleGuard } from "../internal/connectGuard.js";
+import { gateServerError } from "../internal/listenGuard.js";
 
 export interface WsClientOptions {
   url: string;
@@ -27,15 +31,14 @@ export interface WsClientOptions {
 }
 
 /** 一条已建立的 WS 连接。 */
-class WsTransport implements ITransport {
+class WsTransport implements KeepaliveTransport {
   readonly onMessage = new EventStream<Bytes>();
   readonly onClose = new EventStream<CloseReason>();
   readonly onError = new EventStream<AxtpError>();
-  readonly capabilities = unframedJsonCapabilities();
+  readonly profile = unframedJsonProfile();
   private connected = true;
   /** attach 前的消息缓冲（防止 ws message 在 Connection 订阅前到达丢失）。 */
-  private attached = false;
-  private readonly buffered: Bytes[] = [];
+  private readonly attachBuffer = new AttachedMessageBuffer(this.onMessage);
 
   constructor(private readonly ws: WebSocket) {
     ws.on("message", (data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
@@ -57,11 +60,7 @@ class WsTransport implements ITransport {
         // 到 buffered[] 期间内存可能被复用，导致后续解码的 JSON envelope 被改写）。
         bytes = new Uint8Array(data);
       }
-      if (!this.attached) {
-        this.buffered.push(bytes);
-        return;
-      }
-      this.onMessage.emit(bytes);
+      this.attachBuffer.push(bytes);
     });
     ws.on("error", (err: Error) => {
       this.onError.emit(new AxtpError(ErrorCode.TransportDisconnected, err.message, err));
@@ -124,13 +123,9 @@ class WsTransport implements ITransport {
     this.onError.close();
   }
 
-
   /** Connection 接管：停止缓冲，flush 已缓冲消息到 onMessage。 */
   attach(): void {
-    if (this.attached) return;
-    this.attached = true;
-    const buffered = this.buffered.splice(0);
-    for (const bytes of buffered) this.onMessage.emit(bytes);
+    this.attachBuffer.attach();
   }
 }
 
@@ -144,7 +139,7 @@ export class NodeWsServerTransport implements IServerTransport {
   readonly onConnection = new EventStream<ITransport>();
   readonly onClose = new EventStream<void>();
   readonly onError = new EventStream<AxtpError>();
-  readonly capabilities = unframedJsonCapabilities();
+  readonly profile = unframedJsonProfile();
   private wss: WebSocketServer | undefined;
   private listening = false;
 
@@ -156,14 +151,15 @@ export class NodeWsServerTransport implements IServerTransport {
         port: this.options.port,
         host: this.options.host
       });
-      this.wss.on("error", (err) => {
-        if (!this.listening) {
-          reject(err);
-          return;
-        }
+      this.wss.on(
+        "error",
         // listen 成功后的 server 错误：reject 对已 resolve 的 promise 是 no-op，经 onError 显式上抛。
-        this.onError.emit(new AxtpError(ErrorCode.TransportDisconnected, err.message, err));
-      });
+        gateServerError({
+          isListening: () => this.listening,
+          reject,
+          onError: (e) => this.onError.emit(e)
+        })
+      );
       this.wss.on("connection", (ws: WebSocket) => {
         this.onConnection.emit(new WsTransport(ws));
       });
@@ -173,7 +169,6 @@ export class NodeWsServerTransport implements IServerTransport {
       });
     });
   }
-
 
   async close(): Promise<void> {
     this.listening = false;
@@ -190,7 +185,7 @@ export class NodeWsServerTransport implements IServerTransport {
 /** WS client：发起单连接。 */
 export class NodeWsClientTransport implements IClientTransport {
   readonly onClose = new EventStream<void>();
-  readonly capabilities = unframedJsonCapabilities();
+  readonly profile = unframedJsonProfile();
   private available = true;
 
   constructor(private readonly options: WsClientOptions) {}
@@ -199,23 +194,20 @@ export class NodeWsClientTransport implements IClientTransport {
     if (!this.available)
       return Promise.reject(new AxtpError(ErrorCode.Unavailable, "transport unavailable"));
     return new Promise((resolve, reject) => {
-      let settled = false; // B3: resolve/reject 互斥
+      const settle = new SettleGuard(); // resolve/reject 互斥
       const ws = new WebSocket(this.options.url, this.options.protocols, {
         headers: this.options.headers
       });
       ws.once("open", () => {
-        if (settled) return;
-        settled = true;
+        if (!settle.trySettle()) return;
         const transport = new WsTransport(ws);
         transport.onClose.subscribe(() => this.onClose.emit(undefined));
         resolve(transport);
       });
       ws.once("error", (err) => {
-        if (settled) return;
-        settled = true;
+        if (!settle.trySettle()) return;
         reject(err);
       });
     });
   }
-
 }

@@ -17,7 +17,7 @@ import {
   type UntypedEventHandler,
   type UntypedMethodHandler
 } from "../session/session.js";
-import type { IServerTransport, ITransport } from "../transport/transport.js";
+import type { IServerTransport, ITransport } from "../transport/contract.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {

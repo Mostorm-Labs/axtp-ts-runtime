@@ -30,7 +30,7 @@ describe("public exports: 主入口聚合 SDK 核心 + 子入口", () => {
     expect(main.requestMsg).toBeDefined();
     // ./transport
     expect(main.CloseCode).toBeDefined();
-    expect(main.framedBinaryCapabilities).toBeDefined();
+    expect(main.framedBinaryProfile).toBeDefined();
     // ./mock
     expect(main.createMockTransportPair).toBeDefined();
     // ./io
@@ -53,7 +53,7 @@ describe("public exports: 主入口聚合 SDK 核心 + 子入口", () => {
 
   it("./transport 子入口", () => {
     expect(transportEntry.CloseCode).toBeDefined();
-    expect(transportEntry.framedBinaryCapabilities).toBeDefined();
+    expect(transportEntry.framedBinaryProfile).toBeDefined();
   });
 
   it("./mock 子入口", () => {

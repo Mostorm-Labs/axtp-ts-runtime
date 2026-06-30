@@ -25,8 +25,8 @@ import { PayloadDecoder } from "../../protocol/codec/payload.js";
 import { encodeStream } from "../../protocol/codec/stream.js";
 import type { Message, RpcMessage, StreamPayload } from "../../protocol/model.js";
 import { PayloadType, RpcEncoding } from "../../protocol/model.js";
-import type { ITransport, PhysicalRole } from "../../transport/transport.js";
-import type { AxtpError } from "../../types/error.js";
+import type { ITransport, PhysicalRole } from "../../transport/contract.js";
+import { AxtpError, ErrorCode } from "../../types/error.js";
 import { EventStream } from "../../types/events.js";
 import { Heartbeat } from "../heartbeat.js";
 import { ControlSession } from "./controlSession.js";
@@ -53,6 +53,8 @@ export class FramedLink implements Link {
   private heartbeat: Heartbeat | undefined;
   /** 协商后的心跳间隔（start() 使用）；link ready 前为 undefined。 */
   private negotiatedIntervalMs: number | undefined;
+  /** 协商出的 RPC 编码（sendRpc 使用）；link ready 前为 undefined（回落 JSON）。 */
+  private negotiatedRpcEncoding: RpcEncoding | undefined;
 
   private readonly transport: ITransport;
   private readonly controlSession: ControlSession;
@@ -80,6 +82,7 @@ export class FramedLink implements Link {
           this.frameDecoder.setMaxFrameSize(neg.maxFrameSize);
           this.fragmenter.setMaxFrameSize(neg.maxFrameSize);
           this.negotiatedIntervalMs = neg.heartbeatIntervalMs;
+          this.negotiatedRpcEncoding = neg.selectedRpcEncoding;
           this.onLinkReady.emit(undefined);
         },
         onHeartbeat: (cid) => this.sendHeartbeatAck(cid),
@@ -110,10 +113,21 @@ export class FramedLink implements Link {
   }
 
   sendRpc(payload: RpcMessage): void {
-    // framed-binary RPC：rpcEncoding(1B 前缀，JSON=0x01) + JSON envelope 字节。
+    // framed-binary RPC：rpcEncoding(1B 前缀) + envelope 字节。用协商出的 selectedRpcEncoding
+    //（ControlSession 协商结果），Phase 1 恒为 JSON；非 JSON 上报 onError（为未来 JSON_BINARY 留受控路径）。
+    const enc = this.negotiatedRpcEncoding ?? RpcEncoding.Json;
+    if (enc !== RpcEncoding.Json) {
+      this.onError.emit(
+        new AxtpError(
+          ErrorCode.RpcEncodingUnsupported,
+          `rpcEncoding 0x${enc.toString(16)} not implemented`
+        )
+      );
+      return;
+    }
     const jsonBytes = encodeJsonRpc(payload);
     const wrapped = new Uint8Array(1 + jsonBytes.length);
-    wrapped[0] = RpcEncoding.Json;
+    wrapped[0] = enc;
     wrapped.set(jsonBytes, 1);
     this.send(PayloadType.Rpc, wrapped);
   }

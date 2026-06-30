@@ -1,11 +1,25 @@
 // Layer 2 transport：纯净的连接抽象。
 // ITransport = 一条已建立连接（client 侧 / server 接受的每条）。
 // IServerTransport.onConnection 每接受一个 client 产出一个新 ITransport——多 client 根基。
-// 接口刻意不含心跳/WS 特有字段（WS 的 ping/pong 在构造 Connection 时闭包注入，不污染 ITransport）。
+// 接口刻意不含心跳/WS 特有字段（WS 的 ping/pong 在 KeepaliveTransport 声明，不污染 ITransport）。
 
 import type { Bytes } from "../io/bytes.js";
 import type { AxtpError } from "../types/error.js";
 import type { EventStream } from "../types/events.js";
+import type { TransportProfile } from "./profile.js";
+
+// profile 模型——能力与心跳的单一事实来源（取代旧的 TransportCapabilities）。
+export {
+  framedBinaryProfile,
+  keepaliveMode,
+  supportsControl,
+  supportsStream,
+  unframedJsonProfile,
+  type FrameMode,
+  type KeepaliveMode,
+  type TransportProfile,
+  type TransportProfileId
+} from "./profile.js";
 
 /**
  * Physical 角色：谁发起传输连接（TCP/WS socket）。
@@ -24,14 +38,6 @@ export type PhysicalRole = "client" | "server";
  * 下二者分离，需分别指定。
  */
 export type LogicalRole = "client" | "server";
-
-/** 传输能力声明。 */
-export interface TransportCapabilities {
-  /** framed=true（存在 CONTROL OPEN/ACCEPT/HEARTBEAT），WS=false。 */
-  readonly supportsControl: boolean;
-  /** 是否支持原生保活探测（WS=true 用 sendKeepalive/onKeepaliveAck；framed=false 走 CONTROL Heartbeat）。 */
-  readonly supportsKeepalive: boolean;
-}
 
 /** 连接关闭原因。 */
 export interface CloseReason {
@@ -54,7 +60,8 @@ export type CloseCode = (typeof CloseCode)[keyof typeof CloseCode];
 
 /** 单条已建立连接的传输接口。 */
 export interface ITransport {
-  readonly capabilities: TransportCapabilities;
+  /** Transport profile——frameMode/能力/心跳的单一事实来源。 */
+  readonly profile: TransportProfile;
   /** 发送原始字节。framed-binary 为帧字节，unframed-json 为 JSON 文本字节。 */
   send(bytes: Bytes): void;
   /** 入站字节流（事件驱动，无需 poll）。 */
@@ -71,15 +78,24 @@ export interface ITransport {
   terminate?(): void;
   /** Connection 接管：停止内部缓冲，flush 已缓冲消息（真实 transport 实现，mock 可选）。 */
   attach?(): void;
-  /** 发送保活探测（supportsKeepalive=true 时实现）。 */
-  sendKeepalive?(): void;
-  /** 订阅保活确认到达（supportsKeepalive=true 时实现）。 */
-  onKeepaliveAck?(listener: () => void): () => void;
+}
+
+/**
+ * 原生 keepalive 能力。仅由 keepaliveMode(profile)==="native-keepalive" 的 transport 实现
+ * （unframed-json：WS ping/pong）。把原本散落在 ITransport 上的可选 sendKeepalive?/onKeepaliveAck?
+ * 收敛为独立接口的必需方法——声明 unframed profile 但未实现它的 transport 在编译时即暴露，
+ * 而非心跳启动时才运行时报错。
+ */
+export interface KeepaliveTransport extends ITransport {
+  /** 发送保活探测（WS 映射到 ws.ping()）。 */
+  sendKeepalive(): void;
+  /** 订阅保活确认到达（WS 映射到 pong 事件）。返回退订函数。 */
+  onKeepaliveAck(listener: () => void): () => void;
 }
 
 /** server 侧：接受多连接。 */
 export interface IServerTransport {
-  readonly capabilities: TransportCapabilities;
+  readonly profile: TransportProfile;
   /** 开始监听；onConnection 每接受一个 client 产出一个新 ITransport。 */
   listen(): Promise<void>;
   readonly onConnection: EventStream<ITransport>;
@@ -91,7 +107,7 @@ export interface IServerTransport {
 
 /** client 侧：发起单连接。 */
 export interface IClientTransport {
-  readonly capabilities: TransportCapabilities;
+  readonly profile: TransportProfile;
   /** 发起连接，成功后返回一条已建立的 ITransport。 */
   connect(): Promise<ITransport>;
   readonly onClose: EventStream<void>;
@@ -99,18 +115,3 @@ export interface IClientTransport {
 
 /** transport 工厂：返回一条已建立的传输连接。供 Connection 重连使用。 */
 export type TransportFactory = () => Promise<ITransport>;
-
-/** 默认能力工厂，供具体 transport 复用。 */
-export function framedBinaryCapabilities(): TransportCapabilities {
-  return {
-    supportsControl: true,
-    supportsKeepalive: false
-  };
-}
-
-export function unframedJsonCapabilities(): TransportCapabilities {
-  return {
-    supportsControl: false,
-    supportsKeepalive: true
-  };
-}

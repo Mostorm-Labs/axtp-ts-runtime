@@ -1,7 +1,7 @@
 // Connection：传输连接 + 链路生命周期编排 + 传输重连（连接语义，不导出）。
-// 持有 transport + Link（framed/unframed 按 capabilities 工厂派发）+ ReconnectCoordinator。
+// 持有 transport + Link（framed/unframed 按 profile.frameMode 工厂派发）+ ReconnectCoordinator。
 // Link 内聚成帧/编解码/CONTROL 协商/心跳；Connection 只做生命周期状态机 + 重连编排 + 事件转发，
-// 不再按 profile 分支（唯一的 capabilities 分支收敛在 createLink 工厂）。
+// 不再按 profile 分支（唯一的 frameMode 分支收敛在 createLink 工厂）。
 //
 // 重连：transport.onClose → ReconnectCoordinator → 新 transport → attachTransport(统一重置) → 链路启动。
 // 心跳：由 Link 自持（framed=CONTROL Heartbeat/Ack，WS=原生 keepalive），onHeartbeatTimeout → close。
@@ -10,10 +10,12 @@ import type { RpcMessage, StreamPayload } from "../protocol/model.js";
 import type {
   CloseReason,
   ITransport,
+  KeepaliveTransport,
   PhysicalRole,
   TransportFactory
-} from "../transport/transport.js";
-import { CloseCode } from "../transport/transport.js";
+} from "../transport/contract.js";
+import { CloseCode } from "../transport/contract.js";
+import { supportsControl, supportsStream } from "../transport/profile.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import { FramedLink } from "./link/framedLink.js";
@@ -101,6 +103,11 @@ export class Connection {
     return this.connState === "reconnecting";
   }
 
+  /** 是否承载 STREAM（派生自当前 transport profile；attach 前为 false）。 */
+  get supportsStream(): boolean {
+    return this.transport !== undefined && supportsStream(this.transport.profile);
+  }
+
   /**
    * 绑定一条 transport：统一重置所有 transport 相关可变状态 + 创建 Link + 订阅事件。
    * 构造和重连都调此方法。确保重连时 Link/pipeline/controlId/心跳完全重置（Link 整体重建）。
@@ -114,7 +121,7 @@ export class Connection {
     this.link?.stop();
     this.link = undefined;
 
-    // 3. 工厂派发创建新 Link（唯一的 capabilities 分支）+ 订阅其事件
+    // 3. 工厂派发创建新 Link（唯一的 frameMode 分支）+ 订阅其事件
     this.link = createLink(this.physicalRole, transport, this.options);
     this.wireLink(this.link);
 
@@ -136,16 +143,22 @@ export class Connection {
   /** 订阅 Link 入站事件，转发为 Connection 事件 / 驱动关闭。 */
   private wireLink(link: Link): void {
     link.onPayload.subscribe((p) => this.onPayload.emit(p));
-    link.onStream.subscribe((s) => this.onStream.emit(s));
     link.onLinkReady.subscribe(() => this.handleLinkReady());
-    link.onClosing.subscribe(() => this.close(CloseCode.Normal, "remote close"));
-    link.onOpenRejected.subscribe((sc) =>
-      this.close(CloseCode.HandshakeFailed, `link rejected: 0x${sc.toString(16).padStart(4, "0")}`)
-    );
     link.onHeartbeatTimeout.subscribe(() =>
       this.close(CloseCode.HeartbeatTimeout, "heartbeat timeout")
     );
     link.onError.subscribe((err) => this.onError.emit(err));
+    // framed 专有事件（STREAM / CONTROL CLOSE / OPEN 拒绝）；unframed 链路无这些。
+    if (isFramedLink(link)) {
+      link.onStream.subscribe((s) => this.onStream.emit(s));
+      link.onClosing.subscribe(() => this.close(CloseCode.Normal, "remote close"));
+      link.onOpenRejected.subscribe((sc) =>
+        this.close(
+          CloseCode.HandshakeFailed,
+          `link rejected: 0x${sc.toString(16).padStart(4, "0")}`
+        )
+      );
+    }
   }
 
   start(): void {
@@ -218,8 +231,12 @@ export class Connection {
 
   sendStream(payload: StreamPayload): void {
     if (!this.assertLinkReady()) return;
-    // unframed Link 在此抛 NotSupported（spec：WS 不承载 STREAM）。
-    this.link?.sendStream(payload);
+    const link = this.link;
+    if (link === undefined || !isFramedLink(link)) {
+      // spec：unframed-json 不承载 STREAM。守卫把 NotSupported 提到连接层（类型安全，非深层运行时抛）。
+      throw new AxtpError(ErrorCode.NotSupported, "STREAM not supported on unframed transport");
+    }
+    link.sendStream(payload);
   }
 
   close(code: CloseCode = CloseCode.Normal, reason = "local close"): void {
@@ -233,7 +250,8 @@ export class Connection {
       code === CloseCode.HeartbeatTimeout ||
       code === CloseCode.TransportError ||
       code === CloseCode.Reconnect;
-    if (!force && this.link?.isOpen) this.link.sendClose();
+    const link = this.link;
+    if (!force && link !== undefined && isFramedLink(link) && link.isOpen) link.sendClose();
     // 先 terminate（置 connState=closed + emit onClose + cleanupStreams），再断 transport。
     // TCP/WS 的 close()/terminate() 同步 emit onClose → handleTransportClose；此时 connState 已为
     // closed，命中其 `if (connState === "closed") return` 提前返回。否则本地关闭会误发 onDisconnect，
@@ -327,7 +345,15 @@ export class Connection {
 }
 
 /**
- * 按 transport 能力派发 Link 实现。这是 Connection 中唯一读取 capabilities 的地方（工厂派发，非行为分支）。
+ * framed 链路类型守卫：收窄到 FramedLink 类以访问 STREAM / CONTROL CLOSE 等专有成员。
+ * instanceof 编译时收窄，无需 FramedLink 接口。
+ */
+function isFramedLink(link: Link): link is FramedLink {
+  return link instanceof FramedLink;
+}
+
+/**
+ * 按 transport profile 派发 Link 实现（工厂派发，非行为分支）。
  */
 function createLink(
   physicalRole: PhysicalRole,
@@ -336,14 +362,16 @@ function createLink(
 ): Link {
   const maxFrameSize = options.maxFrameSize ?? DEFAULT_MAX_FRAME_SIZE;
   const heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
-  if (transport.capabilities.supportsControl) {
+  if (supportsControl(transport.profile)) {
     return new FramedLink(physicalRole, transport, {
       maxFrameSize,
       heartbeatIntervalMs,
       heartbeatTimeoutMs: options.heartbeatTimeoutMs
     });
   }
-  return new UnframedJsonLink(transport, {
+  // unframed-json：transport 必须实现 KeepaliveTransport（WS ping/pong）。
+  // keepaliveMode(profile)==="native-keepalive" 由 frameMode 派生；WsTransport/mock 满足此契约。
+  return new UnframedJsonLink(transport as KeepaliveTransport, {
     heartbeatIntervalMs,
     heartbeatTimeoutMs: options.heartbeatTimeoutMs
   });

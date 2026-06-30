@@ -9,8 +9,8 @@
 import { Connection, type ConnectionOptions } from "../connection/connection.js";
 import type { RpcMessage } from "../protocol/model.js";
 import { RpcOp } from "../protocol/model.js";
-import type { CloseReason, TransportFactory } from "../transport/transport.js";
-import { CloseCode } from "../transport/transport.js";
+import type { CloseReason, TransportFactory } from "../transport/contract.js";
+import { CloseCode } from "../transport/contract.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {
@@ -172,6 +172,11 @@ export class AxtpSession {
     return this.sessionState === "reconnecting";
   }
 
+  /** 是否承载 STREAM（派生自 transport profile；unframed-json 为 false）。 */
+  get supportsStream(): boolean {
+    return this.conn.supportsStream;
+  }
+
   get sid(): string {
     return this.handshakeOrch.sid;
   }
@@ -224,6 +229,10 @@ export class AxtpSession {
     options?: CallOptions
   ): Promise<{ streamId: number; response: unknown; stream: Stream }> {
     this.requireReady();
+    if (!this.supportsStream) {
+      // spec：unframed-json 不承载 STREAM。预检把 NotSupported 提到入口（同步早失败，不发 RPC）。
+      throw new AxtpError(ErrorCode.NotSupported, "STREAM not supported on this transport profile");
+    }
     return this.streamMgr.openStream(
       (m, p) => this.rpc.call(m, p, options?.timeoutMs ?? this.defaultTimeoutMs),
       method,
@@ -236,8 +245,8 @@ export class AxtpSession {
     handler: (ctx: CallContext, params: unknown, stream: Stream) => unknown | Promise<unknown>
   ): () => void {
     return this.handle(method, (async (ctx: unknown, params: unknown) => {
-      const { result } = await this.streamMgr.wrapStreamHandler(
-        async (p, stream) => handler(ctx as CallContext, p, stream)
+      const { result } = await this.streamMgr.wrapStreamHandler(async (p, stream) =>
+        handler(ctx as CallContext, p, stream)
       )(ctx, params);
       return result;
     }) as UntypedMethodHandler);

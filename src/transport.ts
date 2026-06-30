@@ -1,17 +1,24 @@
 // @axtp/runtime/transport：自定义 transport 契约子入口。
-// 实现 ITransport / IServerTransport 所需的全部类型、能力工厂与 CloseCode。
+// ITransport / IServerTransport 全部类型、TransportProfile 能力模型与 CloseCode。
 export {
   CloseCode,
-  framedBinaryCapabilities,
-  unframedJsonCapabilities
-} from "./transport/transport.js";
+  framedBinaryProfile,
+  keepaliveMode,
+  supportsControl,
+  supportsStream,
+  unframedJsonProfile
+} from "./transport/contract.js";
 export type {
   CloseReason,
+  FrameMode,
   IClientTransport,
   IServerTransport,
   ITransport,
+  KeepaliveMode,
+  KeepaliveTransport,
   LogicalRole,
   PhysicalRole,
-  TransportCapabilities,
-  TransportFactory
-} from "./transport/transport.js";
+  TransportFactory,
+  TransportProfile,
+  TransportProfileId
+} from "./transport/contract.js";

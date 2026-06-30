@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RpcOp } from "../../src/protocol/generated/axtp_ids_generated.js";
 import { AxtpSession } from "../../src/session/session.js";
 import { createMockTransportPair } from "../../src/transport/mock/mockTransport.js";
-import { unframedJsonCapabilities } from "../../src/transport/transport.js";
+import { unframedJsonProfile } from "../../src/transport/contract.js";
 import { ErrorCode } from "../../src/types/error.js";
 import {
   buildErrorResponseJson,
@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 async function makePair(): Promise<{ client: AxtpSession; server: AxtpSession }> {
-  const { left, right } = createMockTransportPair(unframedJsonCapabilities());
+  const { left, right } = createMockTransportPair(unframedJsonProfile());
   // 经典场景：server=Logical Server, client=Logical Client
   const client = new AxtpSession(() => Promise.resolve(left), { physicalRole: "client", logicalRole: "client" });
   const server = new AxtpSession(() => Promise.resolve(right), { physicalRole: "server", logicalRole: "server" });
@@ -66,7 +66,7 @@ describe("conformance: session.request_before_identified", () => {
     // 新架构下 Session 封装了 Connection，wire 级行为由 codec 保证。
     // 验证：Session 在未 ready 时，call 抛 InvalidState（requireReady 守卫）；
     // 且 codec 层能正确编码 ControlOpenRequired 响应（wire conformance）。
-    const { left } = createMockTransportPair(unframedJsonCapabilities());
+    const { left } = createMockTransportPair(unframedJsonProfile());
     const session = new AxtpSession(() => Promise.resolve(left), { physicalRole: "client", logicalRole: "client" });
     // 未握手时 call 必须被拒绝
     expect(() => session.call("audio.getAlgorithmConfig", {})).toThrow();
@@ -184,7 +184,7 @@ describe("conformance: event.subscribe_event / unsubscribe_event", () => {
   });
 
   it("带 eventMasks 的 client 握手成功（Identify 携带订阅意图）", async () => {
-    const { left, right } = createMockTransportPair(unframedJsonCapabilities());
+    const { left, right } = createMockTransportPair(unframedJsonProfile());
     const client = new AxtpSession(() => Promise.resolve(left), {
       physicalRole: "client",
       logicalRole: "client",

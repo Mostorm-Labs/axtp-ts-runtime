@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { Connection } from "../../src/connection/connection.js";
 import { RpcOp } from "../../src/protocol/generated/axtp_ids_generated.js";
-import type { RpcMessage } from "../../src/protocol/model.js";
+import type { RpcMessage, RequestPayload } from "../../src/protocol/model.js";
 import { requestMsg } from "../../src/protocol/model.js";
 import { createMockTransportPair, MockTransport } from "../../src/transport/mock/mockTransport.js";
 import {
   CloseCode,
-  framedBinaryCapabilities,
-  unframedJsonCapabilities
-} from "../../src/transport/transport.js";
+  framedBinaryProfile,
+  unframedJsonProfile
+} from "../../src/transport/contract.js";
 
 function settle(ms = 10): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -16,7 +16,7 @@ function settle(ms = 10): Promise<void> {
 
 describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
   it("client OPEN -> server ACCEPT -> 双方 linkReady", async () => {
-    const { left, right } = createMockTransportPair(framedBinaryCapabilities());
+    const { left, right } = createMockTransportPair(framedBinaryProfile());
     const client = new Connection("client", () => Promise.resolve(left));
     const server = new Connection("server", () => Promise.resolve(right));
 
@@ -34,7 +34,7 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
   });
 
   it("link ready 后双方可互发 RPC（framed-binary 双向）", async () => {
-    const { left, right } = createMockTransportPair(framedBinaryCapabilities());
+    const { left, right } = createMockTransportPair(framedBinaryProfile());
     const client = new Connection("client", () => Promise.resolve(left));
     const server = new Connection("server", () => Promise.resolve(right));
 
@@ -54,7 +54,7 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
     await settle(10);
     expect(serverReceived.length).toBe(1);
     expect(serverReceived[0].op).toBe(RpcOp.Request);
-    expect(serverReceived[0].requestId).toBe(1);
+    expect((serverReceived[0] as RequestPayload).requestId).toBe(1);
 
     // server -> client RPC（反向）
     server.sendRpc(
@@ -62,11 +62,11 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
     );
     await settle(10);
     expect(clientReceived.length).toBe(1);
-    expect(clientReceived[0].requestId).toBe(2);
+    expect((clientReceived[0] as RequestPayload).requestId).toBe(2);
   });
 
   it("close 触发双方 onClose", async () => {
-    const { left, right } = createMockTransportPair(framedBinaryCapabilities());
+    const { left, right } = createMockTransportPair(framedBinaryProfile());
     const client = new Connection("client", () => Promise.resolve(left));
     const server = new Connection("server", () => Promise.resolve(right));
     server.start();
@@ -82,7 +82,7 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
   });
 
   it("close(HeartbeatTimeout) 经 transport.terminate 强制断开（非 close 握手）", async () => {
-    const { left } = createMockTransportPair(framedBinaryCapabilities());
+    const { left } = createMockTransportPair(framedBinaryProfile());
     const client = new Connection("client", () => Promise.resolve(left));
     client.start();
     await settle(20);
@@ -92,7 +92,7 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
   });
 
   it("close(Normal) 经 transport.close 优雅关闭，不调 terminate", async () => {
-    const { left } = createMockTransportPair(framedBinaryCapabilities());
+    const { left } = createMockTransportPair(framedBinaryProfile());
     const client = new Connection("client", () => Promise.resolve(left));
     client.start();
     await settle(20);
@@ -106,7 +106,7 @@ describe("Connection framed-binary: 链路 OPEN/ACCEPT", () => {
 
 describe("Connection unframed-json: 直接 linkReady + 双向 RPC", () => {
   it("WS 模式连接即 linkReady（无 CONTROL）", async () => {
-    const { left, right } = createMockTransportPair(unframedJsonCapabilities());
+    const { left, right } = createMockTransportPair(unframedJsonProfile());
     const client = new Connection("client", () => Promise.resolve(left));
     const server = new Connection("server", () => Promise.resolve(right));
 
@@ -119,7 +119,7 @@ describe("Connection unframed-json: 直接 linkReady + 双向 RPC", () => {
   });
 
   it("WS 双向 JSON RPC", async () => {
-    const { left, right } = createMockTransportPair(unframedJsonCapabilities());
+    const { left, right } = createMockTransportPair(unframedJsonProfile());
     const client = new Connection("client", () => Promise.resolve(left));
     const server = new Connection("server", () => Promise.resolve(right));
 
@@ -134,14 +134,14 @@ describe("Connection unframed-json: 直接 linkReady + 双向 RPC", () => {
     );
     await settle(10);
     expect(received.length).toBe(1);
-    expect(received[0].requestId).toBe(99);
+    expect((received[0] as RequestPayload).requestId).toBe(99);
     expect(received[0]).toMatchObject({ method: "audio.getAlgorithmConfig" });
   });
 });
 
 describe("Connection factory 首次建立（异步 attach）", () => {
   it("start 后异步建立 transport，link ready 后可收发 RPC", async () => {
-    const { left, right } = createMockTransportPair(unframedJsonCapabilities());
+    const { left, right } = createMockTransportPair(unframedJsonProfile());
     const client = new Connection("client", () => Promise.resolve(left));
     const server = new Connection("server", () => Promise.resolve(right));
 
@@ -155,7 +155,7 @@ describe("Connection factory 首次建立（异步 attach）", () => {
     client.sendRpc(requestMsg("", 1, "", {}));
     await settle(10);
     expect(received.length).toBe(1);
-    expect(received[0].requestId).toBe(1);
+    expect((received[0] as RequestPayload).requestId).toBe(1);
 
     client.close();
     server.close();
@@ -165,7 +165,7 @@ describe("Connection factory 首次建立（异步 attach）", () => {
 describe("Connection 心跳（framed）", () => {
   it("link ready 后启动心跳定时器", async () => {
     vi.useFakeTimers();
-    const { left, right } = createMockTransportPair(framedBinaryCapabilities());
+    const { left, right } = createMockTransportPair(framedBinaryProfile());
     const client = new Connection("client", () => Promise.resolve(left), {
       heartbeatIntervalMs: 1000,
       heartbeatTimeoutMs: 5000
@@ -240,7 +240,7 @@ describe("Connection 重连修复回归", () => {
       "client",
       () => {
         factoryCalls += 1;
-        return Promise.resolve(new MockTransport(unframedJsonCapabilities()));
+        return Promise.resolve(new MockTransport(unframedJsonProfile()));
       },
       { reconnect: { enabled: true, initialDelayMs: 5, jitter: false } }
     );
@@ -266,7 +266,7 @@ describe("Connection 重连修复回归", () => {
   it("重连交还的新 transport 在 link-ready 前断开 -> 继续重连至 maxAttempts，不永久卡死", async () => {
     vi.useFakeTimers();
     try {
-      const { left, right } = createMockTransportPair(framedBinaryCapabilities());
+      const { left, right } = createMockTransportPair(framedBinaryProfile());
       const server = new Connection("server", () => Promise.resolve(right));
       server.start();
 
@@ -280,7 +280,7 @@ describe("Connection 重连修复回归", () => {
             return Promise.resolve(left);
           }
           // 后续重连：孤立 transport，attach 后立即关闭（link 永不会 ready）—— 原 bug 的卡死窗口
-          const t = new MockTransport(framedBinaryCapabilities());
+          const t = new MockTransport(framedBinaryProfile());
           setTimeout(() => t.close(), 0);
           return Promise.resolve(t);
         },
@@ -317,13 +317,13 @@ describe("Connection 重连修复回归", () => {
 
 describe("Connection sendRpc 状态守卫", () => {
   it("idle（未 start）状态 sendRpc 抛 TransportDisconnected", () => {
-    const { left } = createMockTransportPair(unframedJsonCapabilities());
+    const { left } = createMockTransportPair(unframedJsonProfile());
     const client = new Connection("client", () => Promise.resolve(left));
     expect(() => client.sendRpc(requestMsg("", 1, "", {}))).toThrow();
   });
 
   it("closed 后 sendRpc 静默丢弃（不抛错）", async () => {
-    const { left, right } = createMockTransportPair(unframedJsonCapabilities());
+    const { left, right } = createMockTransportPair(unframedJsonProfile());
     const client = new Connection("client", () => Promise.resolve(left));
     const server = new Connection("server", () => Promise.resolve(right));
     server.start();
@@ -333,5 +333,24 @@ describe("Connection sendRpc 状态守卫", () => {
     await settle(10);
     expect(client.isClosed).toBe(true);
     expect(() => client.sendRpc(requestMsg("", 1, "", {}))).not.toThrow();
+  });
+});
+
+describe("Connection.supportsStream（profile 派生）", () => {
+  it("attach 前 false；attach 后 framed=true / unframed=false", async () => {
+    const framedLeft = createMockTransportPair(framedBinaryProfile()).left;
+    const framed = new Connection("client", () => Promise.resolve(framedLeft));
+    expect(framed.supportsStream).toBe(false); // transport 未 attach
+    framed.start();
+    await settle(10);
+    expect(framed.supportsStream).toBe(true);
+    framed.close();
+
+    const unframedLeft = createMockTransportPair(unframedJsonProfile()).left;
+    const unframed = new Connection("client", () => Promise.resolve(unframedLeft));
+    unframed.start();
+    await settle(10);
+    expect(unframed.supportsStream).toBe(false);
+    unframed.close();
   });
 });

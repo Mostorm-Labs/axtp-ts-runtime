@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Bytes } from "../../src/io/bytes.js";
-import type { ITransport } from "../../src/transport/transport.js";
+import type { ITransport } from "../../src/transport/contract.js";
 import {
   createMockTransportPair,
   MockClientTransport,
   MockServerTransport
 } from "../../src/transport/mock/mockTransport.js";
-import { CloseCode } from "../../src/transport/transport.js";
+import { CloseCode, unframedJsonProfile } from "../../src/transport/contract.js";
+import { framedBinaryProfile } from "../../src/transport/profile.js";
 import { EventStream } from "../../src/types/events.js";
 import { computeEventMasks, isEventSubscribed } from "../../src/types/registry.js";
 
@@ -87,6 +88,17 @@ describe("MockTransport", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(received).toEqual([1, 2]);
   });
+
+  it("profile.frameMode 从 capabilities 反派（默认 framed / 传 unframed）", () => {
+    const framed = createMockTransportPair();
+    expect(framed.left.profile.frameMode).toBe("standard-framed");
+    const unframed = createMockTransportPair(unframedJsonProfile());
+    expect(unframed.left.profile.frameMode).toBe("unframed-json");
+  });
+
+  it("framedBinaryProfile 与 framedBinaryProfile 表达同一 framed 形态", () => {
+    expect(framedBinaryProfile("AXTP-TCP").frameMode).toBe("standard-framed");
+  });
 });
 
 describe("MockServerTransport 多连接", () => {
@@ -95,8 +107,8 @@ describe("MockServerTransport 多连接", () => {
     const connections: ITransport[] = [];
     server.onConnection.subscribe((t) => connections.push(t));
     await server.listen();
-    const client1 = new MockClientTransport(server.capabilities, server);
-    const client2 = new MockClientTransport(server.capabilities, server);
+    const client1 = new MockClientTransport(server.profile, server);
+    const client2 = new MockClientTransport(server.profile, server);
     await Promise.all([client1.connect(), client2.connect()]);
     // connect 异步 accept，需等 macrotask
     await new Promise((r) => setTimeout(r, 10));

@@ -9,7 +9,7 @@ import type {
   CloseCode,
   LogicalRole,
   PhysicalRole
-} from "../transport/transport.js";
+} from "../transport/contract.js";
 import type {
   EventName,
   EventPayload,

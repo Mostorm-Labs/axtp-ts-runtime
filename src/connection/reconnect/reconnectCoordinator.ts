@@ -5,7 +5,7 @@
 //   → [链路 ready] → onSuccess()（reset attempts=0 + 清 timer）。
 //   active 在 attempt() 交还 transport 时即置 false，使 link-ready 前的再次断连能重新 start()。
 
-import type { ITransport, TransportFactory } from "../../transport/transport.js";
+import type { ITransport, TransportFactory } from "../../transport/contract.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
 import { nextDelay, type resolvePolicy } from "./reconnect.js";
 

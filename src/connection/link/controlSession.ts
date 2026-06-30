@@ -17,7 +17,7 @@ import {
   type NegotiationParams
 } from "../../protocol/codec/control.js";
 import { ControlOpcode, RpcEncoding } from "../../protocol/model.js";
-import type { PhysicalRole } from "../../transport/transport.js";
+import type { PhysicalRole } from "../../transport/contract.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
 
 export interface NegotiatedLink {

@@ -16,7 +16,7 @@ import type {
   RpcMessage
 } from "../../protocol/model.js";
 import { RpcOp, helloMsg, identifiedMsg, identifyMsg } from "../../protocol/model.js";
-import type { LogicalRole } from "../../transport/transport.js";
+import type { LogicalRole } from "../../transport/contract.js";
 import { AxtpError, ErrorCode } from "../../types/error.js";
 
 /**

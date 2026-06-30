@@ -4,7 +4,7 @@
 
 import type { RpcMessage } from "../../protocol/model.js";
 import { RpcOp } from "../../protocol/model.js";
-import type { LogicalRole } from "../../transport/transport.js";
+import type { LogicalRole } from "../../transport/contract.js";
 import type { AxtpError } from "../../types/error.js";
 import type { SessionIO } from "../types.js";
 import { Handshake, type SessionState } from "./handshake.js";

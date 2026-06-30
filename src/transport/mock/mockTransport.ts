@@ -6,20 +6,20 @@ import { AxtpError, ErrorCode } from "../../types/error.js";
 import { EventStream } from "../../types/events.js";
 import {
   CloseCode,
-  framedBinaryCapabilities,
   type CloseReason,
   type IClientTransport,
   type IServerTransport,
-  type ITransport,
-  type TransportCapabilities
-} from "../transport.js";
+  type ITransport
+} from "../contract.js";
+import { framedBinaryProfile, type TransportProfile } from "../profile.js";
 
 /** 创建一对互连的 MockTransport：左右端双向互通。 */
-export function createMockTransportPair(
-  capabilities: TransportCapabilities = framedBinaryCapabilities()
-): { left: MockTransport; right: MockTransport } {
-  const left = new MockTransport(capabilities);
-  const right = new MockTransport(capabilities);
+export function createMockTransportPair(profile: TransportProfile = framedBinaryProfile()): {
+  left: MockTransport;
+  right: MockTransport;
+} {
+  const left = new MockTransport(profile);
+  const right = new MockTransport(profile);
   left.linkPeer(right);
   right.linkPeer(left);
   return { left, right };
@@ -27,8 +27,7 @@ export function createMockTransportPair(
 
 /** 把 server/client 用 mock 对接：返回 client transport，server 自动接受。 */
 export function bridgeMockServer(server: MockServerTransport): MockTransport {
-  const capabilities = server.capabilities;
-  const client = new MockTransport(capabilities);
+  const client = new MockTransport(server.profile);
   server.accept(client);
   return client;
 }
@@ -47,7 +46,7 @@ export class MockTransport implements ITransport {
    *  使 mock 对"谁先发"无关——双向握手（经典/Cloud Reverse）都能走通。 */
   private outboundPending: Bytes[] = [];
 
-  constructor(readonly capabilities: TransportCapabilities) {}
+  constructor(readonly profile: TransportProfile) {}
 
   send(bytes: Bytes): void {
     if (!this.connected) return;
@@ -113,6 +112,14 @@ export class MockTransport implements ITransport {
     this.close(CloseCode.Normal, "terminated", false);
   }
 
+  // ===== KeepaliveTransport（结构化满足；mock 无真实 ping/pong，仅占位以使 unframed mock
+  //       满足 KeepaliveTransport 契约——unframed mock 测试不验证 keepalive 行为，timeout 兜底）。 =====
+  sendKeepalive(): void {
+    // no-op
+  }
+  onKeepaliveAck(_listener: () => void): () => void {
+    return () => {};
+  }
 }
 
 /** Mock server：可手动 accept 多个连接，每连接产出 MockTransport。 */
@@ -123,7 +130,7 @@ export class MockServerTransport implements IServerTransport {
   private listening = false;
   private accepted: MockTransport[] = [];
 
-  constructor(readonly capabilities: TransportCapabilities = framedBinaryCapabilities()) {}
+  constructor(readonly profile: TransportProfile = framedBinaryProfile()) {}
 
   listen(): Promise<void> {
     this.listening = true;
@@ -133,14 +140,13 @@ export class MockServerTransport implements IServerTransport {
   /** 测试主动注入一个新 client 连接。 */
   accept(client: MockTransport): void {
     if (!this.listening) return;
-    const serverSide = new MockTransport(this.capabilities);
+    const serverSide = new MockTransport(this.profile);
     // 双向 linkPeer：flush 双方在连接前缓冲的出站字节（支持 client 先发 Hello 的 Cloud Reverse）。
     serverSide.linkPeer(client);
     client.linkPeer(serverSide);
     this.accepted.push(serverSide);
     this.onConnection.emit(serverSide);
   }
-
 
   close(): Promise<void> {
     this.listening = false;
@@ -158,13 +164,14 @@ export class MockClientTransport implements IClientTransport {
   readonly onClose = new EventStream<void>();
   private available = true;
   constructor(
-    readonly capabilities: TransportCapabilities,
+    readonly profile: TransportProfile,
     private readonly server: MockServerTransport
   ) {}
 
   connect(): Promise<ITransport> {
-    if (!this.available) return Promise.reject(new AxtpError(ErrorCode.Unavailable, "transport unavailable"));
-    const client = new MockTransport(this.capabilities);
+    if (!this.available)
+      return Promise.reject(new AxtpError(ErrorCode.Unavailable, "transport unavailable"));
+    const client = new MockTransport(this.profile);
     // 级联：client transport 断开时通知 MockClientTransport.onClose（#6b 修复）
     client.onClose.subscribe(() => this.onClose.emit(undefined));
     // 异步 accept：让调用方（establishSession）先建好 client Connection 再触发 server 发 Hello，
@@ -174,7 +181,6 @@ export class MockClientTransport implements IClientTransport {
     }, 0);
     return Promise.resolve(client);
   }
-
 
   close(): void {
     this.available = false;
