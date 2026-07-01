@@ -54,7 +54,7 @@ import only what they need and keep browser builds free of `node:net` / `ws`.
 | `src/sdk/` | Higher-level `AxtpClient` and `AxtpServer` SDK APIs. |
 | `src/types/` | Shared types: `registry` (method/event single source of truth), `error`, `events`. |
 | `tests/` | Unit, integration, and public-export snapshot tests (Vitest). |
-| `tests/conformance/` | AXTP conformance cases run against the locked spec (`pnpm test:conformance`). |
+| `devtools/conformance/` | AXTP conformance cases run against the locked spec; emits `conformance-results/result.json` via `run-conformance.sh` / `pnpm test:conformance`. |
 | `devtools/generators/` | TypeScript generator (`axtp-gen`) that consumes the AXTP spec and emits runtime artifacts. |
 | `devtools/scripts/` | Spec lock, generation, versioning, conformance, and release helper scripts. |
 
