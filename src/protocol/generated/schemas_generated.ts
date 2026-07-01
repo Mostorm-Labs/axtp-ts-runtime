@@ -608,8 +608,6 @@ export interface CastWindowState {
   alwaysOnTop: boolean;
   sessionId?: string;
   bounds?: CastRect;
-  previousNormalBounds?: CastRect;
-  restoredBounds?: CastRect;
   changedFields?: string[];
   updatedAt?: string;
 }
@@ -751,12 +749,6 @@ export interface CastStatus {
   redacted?: boolean;
 }
 
-export interface CastStatusChangedEvent {
-  changedSections: string[];
-  status: CastStatus;
-  sampledAt: string;
-}
-
 export interface CastSessionCapability {
   protocols: string[];
   receiverPhases: string[];
@@ -804,7 +796,6 @@ export interface CastFlowControlCapability {
 export interface CastStatusCapability {
   sections: string[];
   supportsSensitiveRedaction?: boolean;
-  supportsStatusChangedEvent?: boolean;
 }
 
 export interface GetDeviceInfoParams {

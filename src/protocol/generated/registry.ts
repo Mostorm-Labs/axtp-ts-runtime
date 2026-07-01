@@ -117,7 +117,6 @@ export const EVENT_REGISTRY = {
   "cast.windowChanged": { id: 0x160A, status: "draft", bitOffset: 9, payload: typeOnly<AxtpSchemas.CastWindowChangedEvent>() },
   "cast.backendChanged": { id: 0x160B, status: "draft", bitOffset: 10, payload: typeOnly<AxtpSchemas.CastBackendChangedEvent>() },
   "cast.flowControlChanged": { id: 0x160C, status: "draft", bitOffset: 11, payload: typeOnly<AxtpSchemas.CastFlowControlChangedEvent>() },
-  "cast.statusChanged": { id: 0x160D, status: "draft", bitOffset: 12, payload: typeOnly<AxtpSchemas.CastStatusChangedEvent>() },
   "software.configChanged": { id: 0x1701, status: "draft", bitOffset: 0, payload: typeOnly<AxtpSchemas.SoftwareConfigChangedEvent>() },
   "software.updatePolicyChanged": { id: 0x1702, status: "draft", bitOffset: 1, payload: typeOnly<AxtpSchemas.SoftwareUpdatePolicyChangedEvent>() },
 } satisfies Record<string, { id: number; status: EventStatus; bitOffset: number; payload: unknown }>;
