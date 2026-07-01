@@ -208,9 +208,17 @@ export class AxtpCore {
       case "rpc":
         return this.wire.encodeRpc(msg.msg);
       case "controlBody":
-        return this.framed?.encodeControlBody(msg.body) ?? [];
+        // unframed 不承载 CONTROL（gate/Endpoint 预检应阻止）；若误调则快速失败而非静默丢弃。
+        if (this.framed === undefined)
+          throw new AxtpError(
+            ErrorCode.NotSupported,
+            "CONTROL not supported on unframed transport"
+          );
+        return this.framed.encodeControlBody(msg.body);
       case "stream":
-        return this.framed?.encodeStream(msg.msg) ?? [];
+        if (this.framed === undefined)
+          throw new AxtpError(ErrorCode.NotSupported, "STREAM not supported on unframed transport");
+        return this.framed.encodeStream(msg.msg);
     }
   }
 

@@ -36,6 +36,7 @@ export interface KeepaliveStreamTransport extends StreamTransport {
 }
 
 /** stream client transport 契约：connect() 返回一条已建立的 StreamTransport（可复用，供重连）。 */
+/** stream client transport 契约：connect() 返回一条已建立的 StreamTransport（可复用，供重连）。 */
 export interface StreamClientTransport {
   readonly profile: TransportProfile;
   connect(): Promise<StreamTransport>;

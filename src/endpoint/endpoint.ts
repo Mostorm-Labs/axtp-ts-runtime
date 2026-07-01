@@ -181,7 +181,7 @@ export class AxtpEndpoint {
         if (mode === "control-heartbeat") this.core.sendHeartbeat();
         else (this.transport as KeepaliveStreamTransport).sendKeepalive();
       },
-      onTimeout: () => this.close()
+      onTimeout: () => this.close(false, true)
     });
     if (mode === "native-keepalive") {
       const t = this.transport as KeepaliveStreamTransport;
@@ -237,15 +237,16 @@ export class AxtpEndpoint {
     return this.broker.setMethod(method, this.streamMgr.wrapStreamHandler(handler));
   }
 
-  /** 主动关闭：abort pipe 链 + 关 transport。remote=true 表示对端发起。 */
-  close(remote = false): void {
+  /** 主动关闭：abort pipe 链 + 关 transport。remote=true 对端发起；terminate=true 死连接强制断（不等 CLOSE 握手）。 */
+  close(remote = false, terminate = false): void {
     if (this.lifecycle === "closed") return;
     this.heartbeat?.stop();
     this.heartbeat = undefined;
     this.keepaliveAckUnsub?.();
     this.keepaliveAckUnsub = undefined;
     this.ac?.abort();
-    this.transport.close();
+    if (terminate && this.transport.terminate) this.transport.terminate();
+    else this.transport.close();
     this.lifecycle = "closed";
     this.onClose.emit({ remote });
     this.core.rejectAllPending(

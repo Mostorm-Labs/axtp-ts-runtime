@@ -18,7 +18,7 @@ import {
   NodeWsStreamClientTransport,
   NodeWsStreamServerTransport
 } from "../../src/transport/ws/nodeWsStreamTransport.js";
-import { EventStream } from "../../src/types/events.js";
+import { once } from "../../tests/helpers/eventStreamHelpers.js";
 import { ErrorCode } from "../../src/types/error.js";
 import {
   computeEventMasks,
@@ -281,10 +281,6 @@ function writeResult(resultPath: string, profilePath: string): void {
 // ---- case 实现（新分层 API：AxtpSession + createMockTransportPair + unframedJsonProfile）----
 
 const HANDSHAKE = /^[0-9a-f]{8}$/;
-
-function once<T>(stream: EventStream<T>): Promise<T> {
-  return new Promise<T>((resolve) => stream.subscribe((v) => resolve(v)));
-}
 
 /** 一对背靠背 stream transport（unframed-json，自定义 ReadableStream/WritableStream 对接）。 */
 function makePair(): [StreamTransport, StreamTransport] {

@@ -15,11 +15,6 @@ export type InboundDisposition =
   | { kind: "respond-open-required" } // pre-APP_READY 的 Request → 回 ControlOpenRequired
   | { kind: "drop" }; // 非 APP_READY 的非 Request（Event/Response）→ 丢弃
 
-/** APP_READY 才允许业务流量（Request/Response/Event/Stream）。 */
-export function allowsBusiness(state: GateState): boolean {
-  return state === "APP_READY";
-}
-
 /** 按当前 gate state 决定入站 RPC op 的处置。 */
 export function classifyInbound(state: GateState, op: RpcOp): InboundDisposition {
   if (op === RpcOp.Hello || op === RpcOp.Identify || op === RpcOp.Identified) {

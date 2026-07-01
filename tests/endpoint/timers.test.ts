@@ -53,6 +53,25 @@ describe("Heartbeat", () => {
     hb.stop();
   });
 
+  it("reset 后停止 ack：超过 timeoutMs 仍触发 onTimeout（dead-peer 检测不失效）", () => {
+    let timeouts = 0;
+    let ack = true;
+    const hb = new Heartbeat({
+      intervalMs: 100,
+      timeoutMs: 200,
+      onTick: () => {
+        if (ack) hb.reset();
+      },
+      onTimeout: () => (timeouts += 1)
+    });
+    hb.start();
+    vi.advanceTimersByTime(500); // 持续 ack → reset 重设 deadline，不超时
+    expect(timeouts).toBe(0);
+    ack = false; // 停止 ack
+    vi.advanceTimersByTime(500); // 不再 reset → timeoutMs 后应触发
+    expect(timeouts).toBe(1);
+  });
+
   it("stop 后不再 tick", () => {
     let ticks = 0;
     const hb = new Heartbeat({

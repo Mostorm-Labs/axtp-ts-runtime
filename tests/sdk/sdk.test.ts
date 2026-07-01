@@ -5,11 +5,7 @@ import { describe, expect, it } from "vitest";
 import { AxtpClient } from "../../src/sdk/client.js";
 import { AxtpServer } from "../../src/sdk/server.js";
 import { createMockStreamLoopback } from "../../src/transport/mock/mockStreamTransport.js";
-import type { EventStream } from "../../src/types/events.js";
-
-function once<T>(stream: EventStream<T>): Promise<T> {
-  return new Promise<T>((resolve) => stream.subscribe((v) => resolve(v)));
-}
+import { once } from "../helpers/eventStreamHelpers.js";
 
 /** 标准 TCP 拓扑：server=device（logicalRole server 发 Hello），client=app（logicalRole client 发 Identify）。 */
 async function setupStandard(
@@ -22,7 +18,7 @@ async function setupStandard(
   const clientReady = once(client.onConnect);
   const serverReady = once(server.onConnect);
   await server.listen();
-  void client.connect().catch((e) => console.log("CONNECT REJECT", e));
+  void client.connect().catch(() => {});
   await clientReady;
   await serverReady;
   return { server, client };

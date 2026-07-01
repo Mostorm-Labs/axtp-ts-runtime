@@ -37,15 +37,9 @@ const DEFAULT_TIMEOUT_MS = 10000;
 const DEFAULT_MAX_FRAME_SIZE = 4096;
 const DEFAULT_HEARTBEAT_MS = 1000;
 
-interface EndpointEntry {
-  readonly localId: number;
-  readonly endpoint: AxtpEndpoint;
-}
-
 export class AxtpServer {
   private readonly router = new HandlerRouter();
-  private readonly entries = new Map<number, EndpointEntry>();
-  private byEndpoint = new Map<AxtpEndpoint, number>();
+  private readonly entries = new Map<number, AxtpEndpoint>();
   private nextLocalId = 1;
   private closed = false;
 
@@ -78,13 +72,11 @@ export class AxtpServer {
     });
     endpoint.onReady.subscribe(() => {
       if (this.closed) return;
-      this.entries.set(localId, { localId, endpoint });
-      this.byEndpoint.set(endpoint, localId);
+      this.entries.set(localId, endpoint);
       this.onConnect.emit(endpoint);
     });
     endpoint.onClose.subscribe(() => {
       if (this.entries.delete(localId)) {
-        this.byEndpoint.delete(endpoint);
         this.onDisconnect.emit(endpoint);
       }
     });
@@ -94,23 +86,26 @@ export class AxtpServer {
 
   /** localId（运行时自增整数，区别于协议 sid）。 */
   getLocalId(endpoint: AxtpEndpoint): number | undefined {
-    return this.byEndpoint.get(endpoint);
+    for (const [id, ep] of this.entries) {
+      if (ep === endpoint) return id;
+    }
+    return undefined;
   }
 
   getEndpoint(localId: number): AxtpEndpoint | undefined {
-    return this.entries.get(localId)?.endpoint;
+    return this.entries.get(localId);
   }
 
   /** 按协议 sid 查询。 */
   getEndpointBySid(sid: string): AxtpEndpoint | undefined {
-    for (const { endpoint } of this.entries.values()) {
-      if (endpoint.sid === sid) return endpoint;
+    for (const ep of this.entries.values()) {
+      if (ep.sid === sid) return ep;
     }
     return undefined;
   }
 
   getEndpoints(): AxtpEndpoint[] {
-    return [...this.entries.values()].map((e) => e.endpoint);
+    return [...this.entries.values()];
   }
 
   call<K extends MethodName>(
@@ -121,7 +116,7 @@ export class AxtpServer {
   ): Promise<MethodResponse<K>>;
   call(localId: number, method: string, params: unknown, options?: CallOptions): Promise<unknown>;
   call(localId: number, method: string, params: unknown, options?: CallOptions): Promise<unknown> {
-    const ep = this.entries.get(localId)?.endpoint;
+    const ep = this.entries.get(localId);
     if (ep === undefined)
       return Promise.reject(new AxtpError(ErrorCode.NotFound, `endpoint ${localId} not found`));
     return ep.call(method, params, options?.timeoutMs);
@@ -138,9 +133,9 @@ export class AxtpServer {
     payload: unknown,
     filter?: (endpoint: AxtpEndpoint) => boolean
   ): Promise<void> {
-    const targets = [...this.entries.values()]
-      .map((e) => e.endpoint)
-      .filter((ep) => ep.isReady && (filter === undefined || filter(ep)));
+    const targets = [...this.entries.values()].filter(
+      (ep) => ep.isReady && (filter === undefined || filter(ep))
+    );
     await Promise.allSettled(targets.map((ep) => ep.emit(event, payload)));
   }
 
@@ -165,9 +160,8 @@ export class AxtpServer {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    for (const { endpoint } of this.entries.values()) endpoint.close();
+    for (const endpoint of this.entries.values()) endpoint.close();
     this.entries.clear();
-    this.byEndpoint = new Map();
     await this.transport.close();
     this.onClose.emit(undefined);
     this.onConnect.close();

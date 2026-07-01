@@ -33,13 +33,11 @@ export class Heartbeat {
     this.clearTimers();
   }
 
-  /** 收到对端响应（HeartbeatAck / keepalive ack）——只取消 timeout，tick 继续固定节拍。 */
+  /** 收到对端响应（HeartbeatAck / keepalive ack）——重设 timeout：cancel 当前 + 重新 arm（deadline = now + timeoutMs）。
+   *  tick 保持固定节拍不受影响；ack 持续到达则 deadline 不断后移（连接存活），ack 停止则 timeout 触发（dead-peer 检测）。 */
   reset(): void {
     if (!this.running) return;
-    if (this.timeoutTimer !== undefined) {
-      clearTimeout(this.timeoutTimer);
-      this.timeoutTimer = undefined;
-    }
+    this.scheduleTimeout();
   }
 
   get isRunning(): boolean {

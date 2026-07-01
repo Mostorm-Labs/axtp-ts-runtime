@@ -8,11 +8,7 @@ import {
   NodeWsStreamClientTransport,
   NodeWsStreamServerTransport
 } from "../../src/transport/ws/nodeWsStreamTransport.js";
-import type { EventStream } from "../../src/types/events.js";
-
-function once<T>(stream: EventStream<T>): Promise<T> {
-  return new Promise<T>((resolve) => stream.subscribe((v) => resolve(v)));
-}
+import { once } from "../helpers/eventStreamHelpers.js";
 
 describe("AxtpEndpoint over 真实 WebSocket", () => {
   it("unframed-json 握手 + client.call → server handler → response", async () => {

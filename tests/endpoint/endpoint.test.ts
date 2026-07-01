@@ -6,13 +6,7 @@ import { AxtpEndpoint } from "../../src/endpoint/endpoint.js";
 import type { Bytes } from "../../src/io/bytes.js";
 import type { StreamTransport } from "../../src/transport/contract.js";
 import { framedBinaryProfile } from "../../src/transport/profile.js";
-import type { EventStream } from "../../src/types/events.js";
-
-function once<T>(stream: EventStream<T>): Promise<T> {
-  return new Promise<T>((resolve) => {
-    stream.subscribe((v) => resolve(v));
-  });
-}
+import { once } from "../helpers/eventStreamHelpers.js";
 
 /** 一对背靠背 stream transport：A.writable→B.readable，B.writable→A.readable。 */
 function loopback(): [StreamTransport, StreamTransport] {

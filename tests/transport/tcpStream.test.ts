@@ -8,11 +8,7 @@ import {
   NodeTcpStreamClientTransport,
   NodeTcpStreamServerTransport
 } from "../../src/transport/tcp/nodeTcpStreamTransport.js";
-import type { EventStream } from "../../src/types/events.js";
-
-function once<T>(stream: EventStream<T>): Promise<T> {
-  return new Promise<T>((resolve) => stream.subscribe((v) => resolve(v)));
-}
+import { once } from "../helpers/eventStreamHelpers.js";
 
 function serverEndpoint(t: StreamTransport): AxtpEndpoint {
   const ep = new AxtpEndpoint({
