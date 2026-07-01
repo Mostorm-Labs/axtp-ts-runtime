@@ -1,4 +1,4 @@
-// @axtp/runtime/mock：测试 / 开发用 mock transport 子入口。
+// @axtp/ts-sdk/mock：测试 / 开发用 mock transport 子入口。
 export {
   createMockTransportPair,
   MockClientTransport,

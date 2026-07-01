@@ -1,4 +1,4 @@
-// @axtp/runtime/transport：自定义 transport 契约子入口。
+// @axtp/ts-sdk/transport：自定义 transport 契约子入口。
 // ITransport / IServerTransport 全部类型、TransportProfile 能力模型与 CloseCode。
 export {
   CloseCode,
