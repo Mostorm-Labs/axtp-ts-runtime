@@ -1,0 +1,11 @@
+runtime: axtp-ts-runtime
+spec_min: spec/v0.11.0
+required_levels:
+  - core
+  - websocket-jsonrpc
+optional_levels:
+  - capability
+  - event
+unsupported_levels:
+  - framed-binary
+  - stream

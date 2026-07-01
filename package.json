@@ -38,7 +38,7 @@
     "lint:types": "tsc -p tsconfig.json --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
-    "test:conformance": "vitest run tests/conformance/",
+    "test:conformance": "vitest run --config devtools/conformance/vitest.config.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
