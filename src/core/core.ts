@@ -223,8 +223,9 @@ export class AxtpCore {
   }
 
   private onLinkReadyInternal(maxFrameSize: number | undefined, heartbeatIntervalMs: number): void {
+    if (this.gate !== "LINK_CONNECTED") return;
     if (maxFrameSize !== undefined) this.framed?.setMaxFrameSize(maxFrameSize);
-    if (this.gate === "LINK_CONNECTED") this.gate = "FRAMING_READY";
+    this.gate = "FRAMING_READY";
     this.handshake.onLinkReady();
     if (this.logicalRole === "server") this.sendRpc(this.handshake.startHello());
     this.enqueue({ kind: "linkReady", heartbeatIntervalMs });

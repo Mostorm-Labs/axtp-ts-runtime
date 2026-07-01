@@ -48,7 +48,7 @@ export class AxtpClient {
   private endpoint: AxtpEndpoint | undefined;
   private state: ClientState = "idle";
   private firstReady = true;
-  private coordinator: ReconnectCoordinator<StreamTransport> | undefined;
+  private coordinator: ReconnectCoordinator | undefined;
   /** connect() 等待首次 ready 的 resolver（首次 ready resolve；close/重连耗尽 reject）。 */
   private readyWait: { resolve: () => void; reject: (e: AxtpError) => void } | undefined;
 
@@ -89,7 +89,7 @@ export class AxtpClient {
 
     const policy = resolvePolicy(this.options.reconnect);
     if (policy.enabled) {
-      this.coordinator = new ReconnectCoordinator<StreamTransport>(
+      this.coordinator = new ReconnectCoordinator(
         policy,
         () => this.transport.connect(),
         (t) => this.spawnEndpoint(t),

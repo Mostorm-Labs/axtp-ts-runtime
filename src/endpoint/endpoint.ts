@@ -131,17 +131,19 @@ export class AxtpEndpoint {
         this.onCoreEvent(value);
       }
     } catch {
-      if (this.lifecycle !== "closed") this.close(true); // transport 错误 / 对端异常断开
+      // reader reject = transport 错误（非对端干净关闭）；lifecycle 已 closed（abort）→ no-op
+      if (this.lifecycle !== "closed") this.close(false);
     }
   }
 
   private onCoreEvent(ev: CoreEvent): void {
+    if (this.lifecycle === "closed") return;
     switch (ev.kind) {
       case "linkReady":
         this.startHeartbeat(ev.heartbeatIntervalMs);
         break;
       case "handshakeReady":
-        if (this.lifecycle !== "ready" && this.lifecycle !== "closed") {
+        if (this.lifecycle !== "ready") {
           this.lifecycle = "ready";
           this.onReady.emit(undefined);
         }

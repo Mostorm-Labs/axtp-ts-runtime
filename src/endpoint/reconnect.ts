@@ -2,6 +2,7 @@
 // 指数退避 + 抖动，成功后归零。coordinator 泛型化（transport 类型由调用方定，Endpoint 用 StreamTransport）。
 // AxtpClient 用它编排：断连 → 退避 → transportFactory() → 新 Endpoint（broker/router 跨连接复用保 handler）。
 
+import type { StreamTransport } from "../transport/contract.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 
 export interface ReconnectPolicy {
@@ -51,15 +52,15 @@ export function resolvePolicy(policy?: ReconnectPolicy): Required<ReconnectPolic
  *   → [Endpoint ready] → onSuccess()（reset attempts + 清 timer）。
  * active 在 attempt() 交还 transport 时即置 false，使 ready 前的再次断连能重新 start()。
  */
-export class ReconnectCoordinator<T> {
+export class ReconnectCoordinator {
   private attempts = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private active = false;
 
   constructor(
     private readonly policy: Required<ReconnectPolicy>,
-    private readonly transportFactory: () => Promise<T>,
-    private readonly onReconnected: (transport: T) => void,
+    private readonly transportFactory: () => Promise<StreamTransport>,
+    private readonly onReconnected: (transport: StreamTransport) => void,
     private readonly onFailed: () => void,
     private readonly onError: (err: AxtpError) => void
   ) {}
@@ -107,7 +108,10 @@ export class ReconnectCoordinator<T> {
 
   private async attempt(): Promise<void> {
     const transport = await this.transportFactory();
-    if (!this.active) return;
+    if (!this.active) {
+      transport.close();
+      return;
+    }
     this.onReconnected(transport);
     this.active = false;
   }

@@ -119,6 +119,7 @@ export class ControlSession {
 
   private handleOpen(controlId: number, tlv: Partial<NegotiationParams>): void {
     if (this.physicalRole !== "server") return;
+    if (this.linkState === "closed" || this.linkState === "closing") return;
     const required = [
       tlv.maxFrameSize,
       tlv.heartbeatIntervalMs,
