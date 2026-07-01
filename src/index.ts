@@ -1,4 +1,4 @@
-// @axtp/runtime 主入口：稳定 SDK API（聚合全部子入口，向后兼容）。
+// @axtp/ts-sdk 主入口：稳定 SDK API（聚合全部子入口，向后兼容）。
 // 推荐按需从子入口导入以减小打包体积：./node、./protocol、./transport、./mock、./io。
 // 用户主入口：AxtpClient / AxtpServer / AxtpSession / Stream / 类型 / 错误。
 

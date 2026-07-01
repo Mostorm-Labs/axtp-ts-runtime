@@ -32,7 +32,7 @@ src/connection -> src/protocol/codec/jsonRpc   (WebSocket unframed-JSON path)
 ```
 
 The package exposes several entry points (see `package.json` `exports`). The main
-entry `@axtp/runtime` re-exports everything for backward compatibility; the
+entry `@axtp/ts-sdk` re-exports everything for backward compatibility; the
 subpaths `./node`, `./protocol`, `./transport`, `./mock`, and `./io` let consumers
 import only what they need and keep browser builds free of `node:net` / `ws`.
 
@@ -201,7 +201,7 @@ version, and the generated manifest.
 
 ## Installation
 
-`@axtp/runtime` is published to a private Verdaccio registry. Consumers must
+`@axtp/ts-sdk` is published to a private Verdaccio registry. Consumers must
 configure registry access before installing. Add the following to a project-level
 or user-level `.npmrc`:
 
@@ -213,11 +213,11 @@ or user-level `.npmrc`:
 Then install:
 
 ```bash
-pnpm add @axtp/runtime
+pnpm add @axtp/ts-sdk
 ```
 
 The published version follows the runtime release version derived from the tag
 `vX.Y.Z.R`: a spec upgrade publishes `X.Y.Z` (revision `0`), while a runtime-only
 revision publishes the semver pre-release `X.Y.Z-runtime.R`. The package exposes
-the subpath entry points listed under `exports` (`@axtp/runtime`,
-`@axtp/runtime/node`, `/protocol`, `/transport`, `/mock`, `/io`).
+the subpath entry points listed under `exports` (`@axtp/ts-sdk`,
+`@axtp/ts-sdk/node`, `/protocol`, `/transport`, `/mock`, `/io`).

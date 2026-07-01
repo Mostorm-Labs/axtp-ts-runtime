@@ -1,6 +1,6 @@
 name: Publish npm package
 
-# Publishes @axtp/runtime to a private Verdaccio registry.
+# Publishes @axtp/ts-sdk to a private Verdaccio registry.
 #
 # Triggered automatically by any `v*` runtime tag, which covers both the
 # AXTP Spec upgrade path (upgrade-axtp-spec -> auto-release-on-merge -> tag)
@@ -31,7 +31,7 @@ permissions:
 
 jobs:
   publish:
-    name: Publish @axtp/runtime
+    name: Publish @axtp/ts-sdk
     runs-on: ubuntu-latest
     env:
       NODE_VERSION: 22
@@ -109,7 +109,7 @@ jobs:
 
           {
             echo "registry=${REGISTRY_URL}/"
-            echo "@auditoryworks:registry=${REGISTRY_URL}/"
+            echo "@axtp:registry=${REGISTRY_URL}/"
             echo "//${REGISTRY_HOST}/:_authToken=${NPM_TOKEN}"
             echo "always-auth=true"
             echo "strict-ssl=false"
