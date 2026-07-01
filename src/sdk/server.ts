@@ -6,7 +6,12 @@
 import { AxtpEndpoint } from "../endpoint/endpoint.js";
 import { HandlerRouter } from "../broker/router.js";
 import type { UntypedEventHandler, UntypedMethodHandler } from "../broker/context.js";
-import type { LogicalRole, StreamTransport, TransportProfile } from "../transport/contract.js";
+import type {
+  LogicalRole,
+  StreamServerTransport,
+  StreamTransport,
+  TransportProfile
+} from "../transport/contract.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {
@@ -17,14 +22,6 @@ import type {
   MethodResponse
 } from "../types/registry.js";
 import type { CallContext, CallOptions } from "./types.js";
-
-/** stream server transport 契约：listen + onConnection(每条接受的连接) + close。 */
-export interface StreamServerTransport {
-  readonly profile: TransportProfile;
-  listen(): Promise<void>;
-  readonly onConnection: EventStream<StreamTransport>;
-  close(): Promise<void>;
-}
 
 export interface ServerOptions {
   logicalRole?: LogicalRole;

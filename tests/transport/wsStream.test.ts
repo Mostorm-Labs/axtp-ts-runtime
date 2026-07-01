@@ -3,7 +3,6 @@
 
 import { describe, expect, it } from "vitest";
 import { AxtpEndpoint } from "../../src/endpoint/endpoint.js";
-import type { KeepaliveStreamTransport } from "../../src/transport/contract.js";
 import {
   NodeWsStreamClientTransport,
   NodeWsStreamServerTransport
@@ -17,7 +16,7 @@ describe("AxtpEndpoint over 真实 WebSocket", () => {
     const port = server.boundPort as number;
 
     const serverEpPromise = new Promise<AxtpEndpoint>((resolve) => {
-      server.onConnection.subscribe((t: KeepaliveStreamTransport) => {
+      server.onConnection.subscribe((t) => {
         const ep = new AxtpEndpoint({
           transport: t,
           physicalRole: "server",

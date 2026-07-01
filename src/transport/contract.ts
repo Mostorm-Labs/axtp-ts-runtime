@@ -49,6 +49,3 @@ export interface StreamServerTransport {
   readonly onConnection: EventStream<StreamTransport>;
   close(): Promise<void>;
 }
-
-/** 流式 transport 工厂（供 Endpoint 首次连接与重连）。 */
-export type StreamTransportFactory = () => Promise<StreamTransport>;

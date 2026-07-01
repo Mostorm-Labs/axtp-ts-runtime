@@ -7,7 +7,12 @@ import { WebSocket, WebSocketServer } from "ws";
 import { bytesToText, type Bytes } from "../../io/bytes.js";
 import { EventStream } from "../../types/events.js";
 import { unframedJsonProfile } from "../profile.js";
-import type { KeepaliveStreamTransport } from "../contract.js";
+import type {
+  KeepaliveStreamTransport,
+  StreamClientTransport,
+  StreamServerTransport,
+  StreamTransport
+} from "../contract.js";
 
 type WsMessageData = Buffer | ArrayBuffer | Buffer[];
 
@@ -100,7 +105,7 @@ export interface WsStreamClientOptions {
 }
 
 /** WS client（stream）：connect → KeepaliveStreamTransport。可复用（每次 connect 新建连接，供 AxtpClient 重连）。 */
-export class NodeWsStreamClientTransport {
+export class NodeWsStreamClientTransport implements StreamClientTransport {
   readonly profile = unframedJsonProfile();
 
   constructor(private readonly options: WsStreamClientOptions) {}
@@ -122,9 +127,9 @@ export interface WsStreamServerOptions {
 }
 
 /** WS server（stream）：每个接受的 ws → KeepaliveStreamTransport。 */
-export class NodeWsStreamServerTransport {
+export class NodeWsStreamServerTransport implements StreamServerTransport {
   readonly profile = unframedJsonProfile();
-  readonly onConnection = new EventStream<KeepaliveStreamTransport>();
+  readonly onConnection = new EventStream<StreamTransport>();
   private wss: WebSocketServer | undefined;
   private listening = false;
 

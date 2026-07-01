@@ -7,7 +7,7 @@ import { Duplex } from "node:stream";
 import type { Bytes } from "../../io/bytes.js";
 import { EventStream } from "../../types/events.js";
 import { framedBinaryProfile } from "../profile.js";
-import type { StreamTransport } from "../contract.js";
+import type { StreamClientTransport, StreamServerTransport, StreamTransport } from "../contract.js";
 
 export interface TcpStreamOptions {
   host?: string;
@@ -30,7 +30,7 @@ function socketToTransport(socket: net.Socket): StreamTransport {
 }
 
 /** TCP server（stream）：每个接受的 socket → StreamTransport。 */
-export class NodeTcpStreamServerTransport {
+export class NodeTcpStreamServerTransport implements StreamServerTransport {
   readonly profile = framedBinaryProfile("AXTP-TCP");
   readonly onConnection = new EventStream<StreamTransport>();
   private server: net.Server | undefined;
@@ -69,7 +69,7 @@ export class NodeTcpStreamServerTransport {
 }
 
 /** TCP client（stream）：connect → StreamTransport。可复用（每次 connect 新建连接，供 AxtpClient 重连）。 */
-export class NodeTcpStreamClientTransport {
+export class NodeTcpStreamClientTransport implements StreamClientTransport {
   readonly profile = framedBinaryProfile("AXTP-TCP");
 
   constructor(private readonly options: TcpStreamOptions) {}

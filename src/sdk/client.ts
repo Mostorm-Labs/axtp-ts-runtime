@@ -11,7 +11,11 @@ import {
   resolvePolicy,
   type ReconnectPolicy
 } from "../endpoint/reconnect.js";
-import type { StreamTransport, TransportProfile } from "../transport/contract.js";
+import type {
+  StreamClientTransport,
+  StreamTransport,
+  TransportProfile
+} from "../transport/contract.js";
 import type { LogicalRole } from "../transport/contract.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
@@ -24,12 +28,6 @@ import type {
 } from "../types/registry.js";
 import { computeEventMasks } from "../types/registry.js";
 import type { CallContext, CallOptions, Stream } from "./types.js";
-
-/** stream client transport 契约：connect() 返回一条已建立的 StreamTransport（可复用，供重连）。 */
-export interface StreamClientTransport {
-  readonly profile: TransportProfile;
-  connect(): Promise<StreamTransport>;
-}
 
 export interface ClientOptions {
   logicalRole?: LogicalRole;

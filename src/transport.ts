@@ -15,7 +15,6 @@ export type {
   StreamClientTransport,
   StreamServerTransport,
   StreamTransport,
-  StreamTransportFactory,
   TransportProfile,
   TransportProfileId
 } from "./transport/contract.js";
