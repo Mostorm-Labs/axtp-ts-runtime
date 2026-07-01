@@ -3,7 +3,7 @@
 // 对端持续快速回 ack 不会拉长探测间隔。
 // Endpoint 在 linkReady 时启动；framed onTick→core.sendHeartbeat，unframed onTick→transport.sendKeepalive。
 
-export interface HeartbeatConfig {
+interface HeartbeatConfig {
   /** 探测间隔 ms（固定节拍，不受 ack 影响）。 */
   readonly intervalMs: number;
   /** 无响应超时 ms（每次 tick 后启动，收到 ack 取消）。 */

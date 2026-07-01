@@ -11,7 +11,7 @@ interface PendingEntry {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
-export interface RequestResult {
+interface RequestResult {
   readonly requestId: number;
   readonly promise: Promise<ResponsePayload>;
 }

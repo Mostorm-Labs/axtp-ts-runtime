@@ -3,15 +3,10 @@
 // handle/on 注册到共享 router，作为每个 Endpoint 的 globalHandlers（全局生效）。
 // call(localId) 单播；emit 广播（可 filter）。
 
-import { AxtpEndpoint } from "../endpoint/endpoint.js";
-import { HandlerRouter } from "../broker/router.js";
 import type { UntypedEventHandler, UntypedMethodHandler } from "../broker/context.js";
-import type {
-  LogicalRole,
-  StreamServerTransport,
-  StreamTransport,
-  TransportProfile
-} from "../transport/contract.js";
+import { HandlerRouter } from "../broker/router.js";
+import { AxtpEndpoint } from "../endpoint/endpoint.js";
+import type { LogicalRole, StreamServerTransport, StreamTransport } from "../transport/contract.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {

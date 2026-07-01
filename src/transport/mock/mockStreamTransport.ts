@@ -117,8 +117,6 @@ export function createMockStreamLoopback(
   profile: TransportProfile = framedBinaryProfile("AXTP-TCP")
 ): MockStreamLoopback {
   const onConnection = new EventStream<StreamTransport>();
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  let listening = false;
   return {
     client: {
       profile,
@@ -131,12 +129,9 @@ export function createMockStreamLoopback(
     },
     server: {
       profile,
-      listen: async () => {
-        listening = true;
-      },
+      listen: async () => {},
       onConnection,
       close: async () => {
-        listening = false;
         onConnection.close();
       }
     }

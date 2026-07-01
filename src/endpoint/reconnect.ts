@@ -46,11 +46,6 @@ export function resolvePolicy(policy?: ReconnectPolicy): Required<ReconnectPolic
   return { ...defaultReconnectPolicy, ...policy };
 }
 
-/** 重连成功信息（onReconnect 事件载荷）。 */
-export interface ReconnectInfo {
-  readonly attempt: number;
-}
-
 /**
  * 重连编排器：start() → schedule() → attempt() → onReconnected（交还 transport，置 active=false）
  *   → [Endpoint ready] → onSuccess()（reset attempts + 清 timer）。

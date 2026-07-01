@@ -24,7 +24,7 @@ export type {
 } from "./broker/context.js";
 
 // ===== 重连 =====
-export type { ReconnectPolicy, ReconnectInfo } from "./endpoint/reconnect.js";
+export type { ReconnectPolicy } from "./endpoint/reconnect.js";
 
 // ===== 注册表（单一事实源）=====
 export {

@@ -11,11 +11,7 @@ import {
   resolvePolicy,
   type ReconnectPolicy
 } from "../endpoint/reconnect.js";
-import type {
-  StreamClientTransport,
-  StreamTransport,
-  TransportProfile
-} from "../transport/contract.js";
+import type { StreamClientTransport, StreamTransport } from "../transport/contract.js";
 import type { LogicalRole } from "../transport/contract.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
@@ -52,7 +48,6 @@ export class AxtpClient {
   private endpoint: AxtpEndpoint | undefined;
   private state: ClientState = "idle";
   private firstReady = true;
-  private connectAborted = false;
   private coordinator: ReconnectCoordinator<StreamTransport> | undefined;
   /** connect() 等待首次 ready 的 resolver（首次 ready resolve；close/重连耗尽 reject）。 */
   private readyWait: { resolve: () => void; reject: (e: AxtpError) => void } | undefined;
@@ -89,7 +84,6 @@ export class AxtpClient {
   async connect(timeoutMs: number = DEFAULT_CONNECT_TIMEOUT_MS): Promise<void> {
     if (this.state !== "idle")
       throw new AxtpError(ErrorCode.InvalidState, `cannot connect from state ${this.state}`);
-    this.connectAborted = false;
     this.firstReady = true;
     this.setState("connecting");
 
@@ -307,9 +301,8 @@ export class AxtpClient {
     return this.endpoint!.onStream(method, handler);
   }
 
-  /** 主动关闭，不再重连。中断进行中的 connect()。 */
+  /** 主动关闭，不再重连。 */
   async close(): Promise<void> {
-    this.connectAborted = true;
     this.coordinator?.stop();
     this.setState("closed");
     this.endpoint?.close();

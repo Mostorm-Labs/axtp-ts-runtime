@@ -9,7 +9,7 @@ import { RpcOp } from "../protocol/model.js";
 
 export type GateState = "LINK_CONNECTED" | "FRAMING_READY" | "APP_READY" | "CLOSING";
 
-export type InboundDisposition =
+type InboundDisposition =
   | { kind: "handshake" } // 路由到 handshake 状态机（Hello/Identify/Identified）
   | { kind: "business" } // APP_READY 业务：Request→broker / Response→pending / Event→broker
   | { kind: "respond-open-required" } // pre-APP_READY 的 Request → 回 ControlOpenRequired

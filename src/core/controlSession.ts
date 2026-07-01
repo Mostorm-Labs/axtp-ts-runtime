@@ -43,7 +43,7 @@ export interface ControlSessionCallbacks {
   onError?: (err: AxtpError) => void;
 }
 
-export type ControlLinkState = "idle" | "opening" | "open" | "closing" | "closed";
+type ControlLinkState = "idle" | "opening" | "open" | "closing" | "closed";
 
 const kMinFrameSize = 15; // 12B header + 2B CRC + 至少 1B payload
 
