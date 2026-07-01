@@ -221,7 +221,10 @@ export class MessageReassembler {
     if (assembly.totalSize > this.maxMessageSize) {
       this.assemblies.delete(frame.header.messageId);
       this.next.onError?.(
-        new AxtpError(ErrorCode.FrameTooLarge, `message exceeds maxMessageSize ${this.maxMessageSize}`)
+        new AxtpError(
+          ErrorCode.FrameTooLarge,
+          `message exceeds maxMessageSize ${this.maxMessageSize}`
+        )
       );
       return;
     }
@@ -243,7 +246,9 @@ export class MessageReassembler {
     for (const [id, assembly] of this.assemblies) {
       if (now - assembly.createdAt > this.assemblyTimeoutMs) {
         this.assemblies.delete(id);
-        this.next.onError?.(new AxtpError(ErrorCode.FrameReassemblyTimeout, `assembly ${id} timed out`));
+        this.next.onError?.(
+          new AxtpError(ErrorCode.FrameReassemblyTimeout, `assembly ${id} timed out`)
+        );
       }
     }
   }

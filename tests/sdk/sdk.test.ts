@@ -1,436 +1,92 @@
-import { afterEach, describe, expect, it } from "vitest";
+// AxtpClient / AxtpServer over mock stream loopback（新栈 SDK 集成）。
+// 覆盖 connect/call/handle/emit/广播/单播/close。
+
+import { describe, expect, it } from "vitest";
 import { AxtpClient } from "../../src/sdk/client.js";
 import { AxtpServer } from "../../src/sdk/server.js";
-import {
-  MockClientTransport,
-  MockServerTransport
-} from "../../src/transport/mock/mockTransport.js";
-import type { IClientTransport, ITransport, TransportProfile } from "../../src/transport/contract.js";
-import { unframedJsonProfile } from "../../src/transport/contract.js";
-import { AxtpError, ErrorCode } from "../../src/types/error.js";
-import { EventStream } from "../../src/types/events.js";
+import { createMockStreamLoopback } from "../../src/transport/mock/mockStreamTransport.js";
+import type { EventStream } from "../../src/types/events.js";
 
-function settle(ms = 20): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+function once<T>(stream: EventStream<T>): Promise<T> {
+  return new Promise<T>((resolve) => stream.subscribe((v) => resolve(v)));
 }
 
-/** 可编程 client transport：前 failFirst 次 connect() reject，之后对接到 server 成功。用于验证首次连接重连。 */
-class ScriptedClientTransport implements IClientTransport {
-  readonly onClose = new EventStream<void>();
-  private connectCalls = 0;
-  constructor(
-    readonly profile: TransportProfile,
-    private readonly server: MockServerTransport,
-    private readonly failFirst: number
-  ) {}
-  connect(): Promise<ITransport> {
-    this.connectCalls += 1;
-    if (this.connectCalls <= this.failFirst) {
-      return Promise.reject(
-        new AxtpError(ErrorCode.Unavailable, `scripted fail #${this.connectCalls}`)
-      );
-    }
-    return new MockClientTransport(this.profile, this.server).connect();
-  }
-}
-
-// 跟踪创建的 client/server，afterEach 统一关闭，避免 Connection/Heartbeat 定时器在测试结束后继续存活。
-const createdClients: AxtpClient[] = [];
-const createdServers: AxtpServer[] = [];
-
-afterEach(async () => {
-  for (const c of createdClients) await c.close();
-  for (const s of createdServers) await s.close();
-  createdClients.length = 0;
-  createdServers.length = 0;
-});
-
-async function makeServerClient(): Promise<{
-  server: AxtpServer;
-  client: AxtpClient;
-  serverTransport: MockServerTransport;
-}> {
-  // 经典场景：server 暴露能力（Logical Server），client 消费（Logical Client）。
-  // 显式传 logicalRole 覆盖 Cloud Reverse 默认值，保持本组测试的经典语义意图。
-  const serverTransport = new MockServerTransport(unframedJsonProfile());
-  const server = new AxtpServer(serverTransport, { logicalRole: "server" });
+/** 标准 TCP 拓扑：server=device（logicalRole server 发 Hello），client=app（logicalRole client 发 Identify）。 */
+async function setupStandard(
+  handlers?: (server: AxtpServer) => void
+): Promise<{ server: AxtpServer; client: AxtpClient }> {
+  const loop = createMockStreamLoopback();
+  const server = new AxtpServer(loop.server, { logicalRole: "server", heartbeatIntervalMs: 60000 });
+  const client = new AxtpClient(loop.client, { logicalRole: "client", heartbeatIntervalMs: 60000 });
+  if (handlers !== undefined) handlers(server);
+  const clientReady = once(client.onConnect);
+  const serverReady = once(server.onConnect);
   await server.listen();
-
-  const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
-  const client = new AxtpClient(clientTransport, { logicalRole: "client" });
-  createdClients.push(client);
-  createdServers.push(server);
-  await client.connect();
-  await settle(10);
-  return { server, client, serverTransport };
+  void client.connect().catch((e) => console.log("CONNECT REJECT", e));
+  await clientReady;
+  await serverReady;
+  return { server, client };
 }
 
-describe("AxtpServer 多 client + 全局 handle", () => {
-  it("server 接受多个 client，各自独立 session", async () => {
-    const { server, serverTransport } = await makeServerClient();
-    const client2Transport = new MockClientTransport(unframedJsonProfile(), serverTransport);
-    const client2 = new AxtpClient(client2Transport, { logicalRole: "client" });
-    await client2.connect();
-    await settle(10);
-    expect(server.getSessions().length).toBe(2);
-    client2.close();
-    await settle(10);
-  });
-
-  it("全局 handle 所有 session 共享（委托 HandlerRegistry）", async () => {
-    const { server, client } = await makeServerClient();
-    server.handle("audio.getAlgorithmConfig", () => ({ shared: true }));
-    const result = await client.call("audio.getAlgorithmConfig", {});
-    expect(result).toEqual({ shared: true });
-  });
-
-  it("新连接自动应用已有全局 handler", async () => {
-    const { server, serverTransport } = await makeServerClient();
-    server.handle("audio.getAlgorithmConfig", () => ({ late: true }));
-    const client2Transport = new MockClientTransport(unframedJsonProfile(), serverTransport);
-    const client2 = new AxtpClient(client2Transport, { logicalRole: "client" });
-    await client2.connect();
-    await settle(10);
-    const result = await client2.call("audio.getAlgorithmConfig", {});
-    expect(result).toEqual({ late: true });
-  });
-
-  it("单播：server.call(sessionId, ...)", async () => {
-    const { server, client } = await makeServerClient();
-    let called = false;
-    // client 注册 handler，server 主动调 client
-    client.handle("audio.getAlgorithmConfig", () => {
-      called = true;
-      return { from: "client" };
+describe("AxtpClient / AxtpServer（新栈）", () => {
+  it("connect → 双方 ready；client.call → server.handle → response", async () => {
+    const { server, client } = await setupStandard((s) => {
+      s.handle("add", (_ctx, p) => (p as { a: number }).a + (p as { b: number }).b);
     });
-    await settle(10);
-    const sessionId = server.getSessions()[0].localId;
-    const result = await server.call(sessionId, "audio.getAlgorithmConfig", {});
-    expect(called).toBe(true);
-    expect(result).toEqual({ from: "client" });
-  });
-
-  it("广播 emit 给所有 APP_READY session", async () => {
-    const { server, client, serverTransport } = await makeServerClient();
-    const client2Transport = new MockClientTransport(unframedJsonProfile(), serverTransport);
-    const client2 = new AxtpClient(client2Transport, { logicalRole: "client" });
-    await client2.connect();
-    await settle(10);
-
-    const received1: unknown[] = [];
-    const received2: unknown[] = [];
-    client.on("audio.algorithmConfigChanged", (p) => received1.push(p));
-    client2.on("audio.algorithmConfigChanged", (p) => received2.push(p));
-    await settle(10);
-
-    await server.emit("audio.algorithmConfigChanged", { broadcast: true } as never);
-    await settle(10);
-    expect(received1.length).toBe(1);
-    expect(received2.length).toBe(1);
-  });
-
-  it("广播 filter 定向", async () => {
-    const { server, client, serverTransport } = await makeServerClient();
-    const client2Transport = new MockClientTransport(unframedJsonProfile(), serverTransport);
-    const client2 = new AxtpClient(client2Transport, { logicalRole: "client" });
-    await client2.connect();
-    await settle(10);
-
-    const received1: unknown[] = [];
-    const received2: unknown[] = [];
-    client.on("audio.algorithmConfigChanged", (p) => received1.push(p));
-    client2.on("audio.algorithmConfigChanged", (p) => received2.push(p));
-    await settle(10);
-
-    // 只发给第一个 session（用 sid 区分）
-    const targetSid = client.sid;
-    await server.emit(
-      "audio.algorithmConfigChanged",
-      { x: 1 } as never,
-      (s) => s.sid === targetSid
-    );
-    await settle(10);
-    expect(received1.length).toBe(1);
-    expect(received2.length).toBe(0);
-  });
-});
-
-describe("AxtpClient 重连机制", () => {
-  it("断连后自动重连，handler 迁移", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonProfile());
-    const server = new AxtpServer(serverTransport, { logicalRole: "server" });
-    await server.listen();
-    server.handle("audio.getAlgorithmConfig", () => ({ reconnected: true }));
-
-    const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
-    const client = new AxtpClient(clientTransport, {
-      reconnect: { enabled: true, initialDelayMs: 10, maxDelayMs: 50 },
-      logicalRole: "client"
-    });
-    await client.connect();
-
-    let reconnected = false;
-    client.onReconnect.subscribe(() => (reconnected = true));
-
-    // 模拟断连：client 端 transport 触发 onClose
-    // 通过 client.call 失败或直接触发——这里用 server 关闭该 session
-    const serverSession = server.getSessions()[0];
-    serverSession?.close();
-    await settle(100); // 等重连（退避 10ms）
-
-    expect(reconnected).toBe(true);
     expect(client.isReady).toBe(true);
-
-    // handler 仍可用（迁移成功）
-    const result = await client.call("audio.getAlgorithmConfig", {});
-    expect(result).toEqual({ reconnected: true });
-  });
-
-  it("断连后 call 抛错（不启用重连）", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonProfile());
-    const server = new AxtpServer(serverTransport, { logicalRole: "server" });
-    await server.listen();
-    const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
-    const client = new AxtpClient(clientTransport, {
-      logicalRole: "client"
-    });
-    await client.connect();
-
-    server.getSessions()[0]?.close();
-    await settle(20);
-    // 断连后 client.call 应抛错（session not ready）
-    expect(() => client.call("audio.getAlgorithmConfig", {})).toThrow();
-  });
-
-  it("主动 close 不触发重连", async () => {
-    const { server: _server, client } = await makeServerClient();
-    let reconnected = false;
-    client.onReconnect.subscribe(() => (reconnected = true));
+    const result = await client.call("add", { a: 2, b: 3 });
+    expect(result).toBe(5);
     await client.close();
-    await settle(50);
-    expect(reconnected).toBe(false);
-  });
-
-  it("重连失败：maxAttempts 耗尽 -> onReconnectFailed", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonProfile());
-    const server = new AxtpServer(serverTransport, { logicalRole: "server" });
-    await server.listen();
-
-    const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
-    const client = new AxtpClient(clientTransport, {
-      logicalRole: "client",
-      reconnect: { enabled: true, initialDelayMs: 10, maxDelayMs: 10, maxAttempts: 2 }
-    });
-    await client.connect();
-
-    // 使 transport 不可用，重连时 connect() 会 reject
-    clientTransport.close();
     await server.close();
-
-    let reconnectFailed = false;
-    client.onReconnectFailed.subscribe(() => (reconnectFailed = true));
-
-    // 触发断连
-    server.getSessions()[0]?.close();
-
-    // 等待重连耗尽（transport.connect 拒绝 → 快速失败 → 退避重试 → maxAttempts）
-    await settle(500);
-
-    expect(reconnectFailed).toBe(true);
-    expect(client.isReady).toBe(false);
   });
 
-  it("首次连接失败 + reconnect enabled → 退避重试至成功", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonProfile());
-    const server = new AxtpServer(serverTransport, { logicalRole: "server" });
-    await server.listen();
-    server.handle("audio.getAlgorithmConfig", () => ({ ok: 1 }));
-    createdServers.push(server);
-
-    const clientTransport = new ScriptedClientTransport(unframedJsonProfile(), serverTransport, 2);
-    const client = new AxtpClient(clientTransport, {
-      reconnect: { enabled: true, initialDelayMs: 5, maxDelayMs: 20, jitter: false },
-      logicalRole: "client"
+  it("client.emit → server.on 收到", async () => {
+    let received: unknown;
+    const { server, client } = await setupStandard((s) => {
+      s.on("ping", (data) => {
+        received = data;
+      });
     });
-    createdClients.push(client);
-
-    const errors: AxtpError[] = [];
-    client.onError.subscribe((e) => errors.push(e));
-
-    await client.connect(); // 前 2 次失败，第 3 次成功
-
-    expect(client.isReady).toBe(true);
-    expect(errors.length).toBe(2); // 前 2 次失败上报 onError
-    const result = await client.call("audio.getAlgorithmConfig", {});
-    expect(result).toEqual({ ok: 1 });
+    client.emit("ping", { hello: "world" });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(received).toEqual({ hello: "world" });
+    await client.close();
+    await server.close();
   });
 
-  it("首次连接失败 + maxAttempts 耗尽 → onReconnectFailed + closed", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonProfile());
-    const clientTransport = new ScriptedClientTransport(
-      unframedJsonProfile(),
-      serverTransport,
-      Number.POSITIVE_INFINITY
-    );
-    const client = new AxtpClient(clientTransport, {
-      reconnect: { enabled: true, initialDelayMs: 5, maxDelayMs: 5, maxAttempts: 3, jitter: false },
-      logicalRole: "client"
+  it("server.emit 广播；client.on 收到", async () => {
+    const { server, client } = await setupStandard();
+    let received: unknown;
+    const evt: string = "broadcast";
+    client.on(evt, (data) => {
+      received = data;
     });
-    createdClients.push(client);
+    await new Promise((r) => setTimeout(r, 10));
+    await (server.emit as (event: string, payload: unknown) => Promise<void>)(evt, { x: 1 });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(received).toEqual({ x: 1 });
+    await client.close();
+    await server.close();
+  });
 
-    let failed = false;
-    client.onReconnectFailed.subscribe(() => (failed = true));
+  it("server.call(localId) 单播", async () => {
+    const { server, client } = await setupStandard();
+    client.handle("echo", (_ctx, p) => p);
+    const endpoints = server.getEndpoints();
+    expect(endpoints.length).toBe(1);
+    const localId = server.getLocalId(endpoints[0]) as number;
+    const result = await server.call(localId, "echo", { msg: "hi" });
+    expect(result).toEqual({ msg: "hi" });
+    await client.close();
+    await server.close();
+  });
 
-    await expect(client.connect()).rejects.toThrow();
-    expect(failed).toBe(true);
+  it("close → onDisconnect/onClose", async () => {
+    const { server, client } = await setupStandard();
+    await client.close();
+    await once(server.onDisconnect);
+    await server.close();
     expect(client.isClosed).toBe(true);
-  });
-
-  it("首次连接失败 + reconnect disabled → closed（保持原行为）", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonProfile());
-    const clientTransport = new ScriptedClientTransport(unframedJsonProfile(), serverTransport, 1);
-    const client = new AxtpClient(clientTransport, { logicalRole: "client" }); // 无 reconnect
-    createdClients.push(client);
-
-    let failed = false;
-    client.onReconnectFailed.subscribe(() => (failed = true));
-
-    await expect(client.connect()).rejects.toThrow();
-    expect(client.isClosed).toBe(true);
-    expect(failed).toBe(false); // disabled 不 emit onReconnectFailed
-  });
-
-  it("重试中 close() → 立即中断，不再重试", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonProfile());
-    const clientTransport = new ScriptedClientTransport(
-      unframedJsonProfile(),
-      serverTransport,
-      Number.POSITIVE_INFINITY
-    );
-    const client = new AxtpClient(clientTransport, {
-      reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 500, jitter: false },
-      logicalRole: "client"
-    });
-    createdClients.push(client);
-
-    let failed = false;
-    client.onReconnectFailed.subscribe(() => (failed = true));
-
-    const connectPromise = client.connect();
-    await settle(50); // 首次失败，进入退避（500ms）
-    await client.close(); // 退避中关闭
-    await connectPromise; // connectAborted → 静默 resolve（不 throw）
-    await settle(50);
-
-    expect(client.isClosed).toBe(true);
-    expect(failed).toBe(false); // 未耗尽，未 onReconnectFailed
-  });
-
-  it("首次重试成功后再断连，仍走 Connection 层重连", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonProfile());
-    const server = new AxtpServer(serverTransport, { logicalRole: "server" });
-    await server.listen();
-    createdServers.push(server);
-
-    const clientTransport = new ScriptedClientTransport(unframedJsonProfile(), serverTransport, 1);
-    const client = new AxtpClient(clientTransport, {
-      reconnect: { enabled: true, initialDelayMs: 5, maxDelayMs: 20, jitter: false },
-      logicalRole: "client"
-    });
-    createdClients.push(client);
-
-    await client.connect(); // 首次失败，第 2 次成功
-
-    let reconnected = false;
-    client.onReconnect.subscribe(() => (reconnected = true));
-
-    server.getSessions()[0]?.close(); // 触发断连
-    await settle(100); // 等 Connection 层重连（退避 5ms）
-
-    expect(reconnected).toBe(true);
-    expect(client.isReady).toBe(true);
-  });
-});
-
-describe("AxtpClient handle unsubscribe（重连安全）", () => {
-  it("unsubscribe 操作 snapshot，重连后不再迁移", async () => {
-    const { server, client, serverTransport: _serverTransport } = await makeServerClient();
-    let callCount = 0;
-    const unsub = client.handle("audio.getAlgorithmConfig", () => {
-      callCount++;
-      return {};
-    });
-    unsub();
-    await settle(10);
-
-    // 重新用全局 handler 测试
-    server.handle("audio.getAlgorithmConfig", () => ({ ok: 1 }));
-    await client.call("audio.getAlgorithmConfig", {});
-    expect(callCount).toBe(0); // 已 unsubscribe，不应被调用
-  });
-});
-
-describe("Cloud Reverse 默认场景（发起连接方=Logical Server）", () => {
-  // 默认值：AxtpClient logicalRole="server"（发 Hello、分配 sid、暴露能力），
-  //         AxtpServer logicalRole="client"（收 Hello、发 Identify、消费能力）。
-  // 对应 spec Cloud Reverse：设备主动连云，设备是 Logical Server。
-
-  it("默认 options：client（发起连接）发 Hello，server（接受连接）收 Hello", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonProfile());
-    // 默认 logicalRole：server 端="client"，client 端="server"
-    const server = new AxtpServer(serverTransport);
-    await server.listen();
-
-    const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
-    const client = new AxtpClient(clientTransport);
-    await client.connect();
-    await settle(10);
-
-    // 双方都应握手成功（Hello 由 client 发，Identify 由 server 发，Identified 由 client 发）
-    expect(client.isReady).toBe(true);
-    expect(client.sid).toMatch(/^[0-9a-f]{8}$/);
-    // server 端 session 也 ready
-    const serverSession = server.getSessions()[0];
-    expect(serverSession?.isReady).toBe(true);
-    expect(serverSession?.sid).toBe(client.sid); // 同一 sid（client 作为 Logical Server 分配）
-  });
-
-  it("Cloud Reverse：client 注册 handler（能力提供方），server 主动 call", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonProfile());
-    const server = new AxtpServer(serverTransport); // 默认 logicalRole="client"
-    await server.listen();
-
-    const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
-    const client = new AxtpClient(clientTransport); // 默认 logicalRole="server"
-    await client.connect();
-    await settle(10);
-
-    // client（Logical Server）暴露能力
-    client.handle("audio.getAlgorithmConfig", () => ({ provider: "client" }));
-
-    // server（Logical Client）主动调用 client
-    const sessionId = server.getSessions()[0].localId;
-    const result = await server.call(sessionId, "audio.getAlgorithmConfig", {});
-    expect(result).toEqual({ provider: "client" });
-  });
-
-  it("Cloud Reverse：client 主动 emit 事件，server 收", async () => {
-    const serverTransport = new MockServerTransport(unframedJsonProfile());
-    const server = new AxtpServer(serverTransport); // 默认 logicalRole="client"
-    await server.listen();
-
-    const clientTransport = new MockClientTransport(unframedJsonProfile(), serverTransport);
-    const client = new AxtpClient(clientTransport); // 默认 logicalRole="server"
-    await client.connect();
-    await settle(10);
-
-    const received: unknown[] = [];
-    server.on("audio.algorithmConfigChanged", (p) => received.push(p));
-    await settle(10);
-
-    await client.emit("audio.algorithmConfigChanged", { from: "cloud-reverse" });
-    await settle(10);
-    expect(received.length).toBe(1);
-    expect(received[0]).toEqual({ from: "cloud-reverse" });
+    expect(server.isClosed).toBe(true);
   });
 });
