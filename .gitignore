@@ -148,3 +148,6 @@ devtools/generators/dist/
 devtools/generators/.vite/
 third_party/axtp-spec/
 conformance-results/
+
+# 发布文档产物（由 devtools/scripts/sync-docs.mjs 从 generator 快照复制；快照是唯一来源，勿手改）
+docs/protocol.md

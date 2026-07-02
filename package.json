@@ -4,7 +4,9 @@
   "description": "TypeScript runtime / SDK for AXTP, with optional Node.js and Browser adapters.",
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "docs/protocol.md",
+    "docs/usage.md"
   ],
   "exports": {
     ".": {
@@ -33,7 +35,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node devtools/scripts/sync-docs.mjs",
     "lint": "eslint .",
     "lint:types": "tsc -p tsconfig.json --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",

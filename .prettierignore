@@ -24,3 +24,6 @@ devtools/generators/pnpm-workspace.yaml
 
 # 仓库根生成产物（生成器 manifest 等）
 generated/
+
+# 发布文档产物（同 .gitignore：从 generator 快照复制，prettier 不应格式化生成内容）
+docs/protocol.md
