@@ -6,7 +6,6 @@
 // AbortController：close/重连 abort() → signal 级联取消整条 pipe 链。
 //
 // 出站四件套（call/emit/openStream）组合 core；入站握手/控制由 core 自动处理。
-// TODO(P3 续)：心跳定时器（control / native keepalive）、重连协调器、streamManager、握手超时。
 
 import { AxtpCore } from "../core/core.js";
 import type { CoreEvent } from "../core/events.js";
@@ -181,13 +180,12 @@ export class AxtpEndpoint {
       timeoutMs,
       onTick: () => {
         if (mode === "control-heartbeat") this.core.sendHeartbeat();
-        else (this.transport as KeepaliveStreamTransport).sendKeepalive();
+        else if (isKeepaliveTransport(this.transport)) this.transport.sendKeepalive();
       },
       onTimeout: () => this.close(false, true)
     });
-    if (mode === "native-keepalive") {
-      const t = this.transport as KeepaliveStreamTransport;
-      this.keepaliveAckUnsub = t.onKeepaliveAck(() => this.heartbeat?.reset());
+    if (mode === "native-keepalive" && isKeepaliveTransport(this.transport)) {
+      this.keepaliveAckUnsub = this.transport.onKeepaliveAck(() => this.heartbeat?.reset());
     }
     this.heartbeat.start();
   }
@@ -266,4 +264,9 @@ export class AxtpEndpoint {
     if (this.lifecycle !== "ready")
       throw new AxtpError(ErrorCode.InvalidState, "endpoint not ready");
   }
+}
+
+/** Type guard：transport 是否支持 native keepalive（WS ping/pong）。 */
+function isKeepaliveTransport(t: StreamTransport): t is KeepaliveStreamTransport {
+  return "sendKeepalive" in t;
 }
