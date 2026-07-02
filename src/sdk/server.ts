@@ -1,23 +1,12 @@
-// AxtpServer：多 client 管理 + 广播/单播（SDK 层，不知 Connection）。
-// 每 client 一个 AxtpSession（内含 Connection），Session 是上层一等对象。
-// handle/on 全局生效：注册到 HandlerRouter，所有 session 委托查询。
-// call(localId, ...) 单播；emit(...) 广播。
-//
-// 事件语义：
-// - onConnect: session 握手成功（ready 后触发）
-// - onDisconnect: 单个 session 断开
-// - onClose: Server 整体关闭
+// AxtpServer：多连接 SDK 门面（基于 AxtpEndpoint）。
+// listen → 每条接受的 StreamTransport 建一个 Endpoint（logicalRole 决定 Hello 方向）。
+// handle/on 注册到共享 router，作为每个 Endpoint 的 globalHandlers（全局生效）。
+// call(id) 单播；emit 广播（可 filter）。
 
-import { HandlerRouter } from "../session/handler/handlerRouter.js";
-import {
-  AxtpSession,
-  type CallContext,
-  type CallOptions,
-  type CommonOptions,
-  type UntypedEventHandler,
-  type UntypedMethodHandler
-} from "../session/session.js";
-import type { IServerTransport, ITransport } from "../transport/contract.js";
+import type { UntypedEventHandler, UntypedMethodHandler } from "../broker/context.js";
+import { HandlerRouter } from "../broker/router.js";
+import { AxtpEndpoint } from "../endpoint/endpoint.js";
+import type { LogicalRole, StreamServerTransport, StreamTransport } from "../transport/contract.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {
@@ -27,104 +16,142 @@ import type {
   MethodRequest,
   MethodResponse
 } from "../types/registry.js";
+import type { CallContext, CallOptions } from "./types.js";
 
-/**
- * Server 选项。当前与 CommonOptions 相同；未来增加 server 专属字段（如 maxConnections、auth）
- * 时改为 interface 形式声明。现以 type 别名表达，避免空 interface（@typescript-eslint/no-empty-object-type）。
- */
-export type ServerOptions = CommonOptions;
+export interface ServerOptions {
+  logicalRole?: LogicalRole;
+  defaultTimeoutMs?: number;
+  heartbeatIntervalMs?: number;
+  maxFrameSize?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_MAX_FRAME_SIZE = 4096;
+const DEFAULT_HEARTBEAT_MS = 5_000;
 
 export class AxtpServer {
-  private readonly sessions = new Map<number, AxtpSession>();
-  private readonly handlers = new HandlerRouter();
-  readonly onConnect = new EventStream<AxtpSession>();
-  readonly onDisconnect = new EventStream<AxtpSession>();
-  readonly onError = new EventStream<AxtpError>();
-  readonly onClose = new EventStream<void>();
+  private readonly router = new HandlerRouter();
+  private readonly entries = new Map<number, AxtpEndpoint>();
+  private nextId = 1;
   private closed = false;
 
+  readonly onConnect = new EventStream<AxtpEndpoint>();
+  readonly onDisconnect = new EventStream<AxtpEndpoint>();
+  readonly onError = new EventStream<AxtpError>();
+  readonly onClose = new EventStream<void>();
+
   constructor(
-    private readonly transport: IServerTransport,
+    private readonly transport: StreamServerTransport,
     private readonly options: ServerOptions = {}
   ) {}
 
   async listen(): Promise<void> {
-    this.transport.onConnection.subscribe((t) => this.adoptConnection(t));
-    this.transport.onError.subscribe((err) => this.onError.emit(err));
+    this.transport.onConnection.subscribe((t) => this.adopt(t));
     await this.transport.listen();
   }
 
-  /** 新连接到达：建 Session（内含 Connection），握手成功后 onConnect 触发。 */
-  private adoptConnection(t: ITransport): void {
-    // server 端 transport 已由 IServerTransport accept 建立，包成一次性 factory 供 Connection 首次 attach。
-    const session = new AxtpSession(() => Promise.resolve(t), {
+  /** 新连接到达：建 Endpoint，握手成功后注册 + onConnect。 */
+  private adopt(t: StreamTransport): void {
+    const id = this.nextId++;
+    const endpoint = new AxtpEndpoint({
+      transport: t,
       physicalRole: "server",
-      // 默认 logical client（发 Identify）：对应 AXTP-WS-CLOUD-REVERSE（Cloud=physical server=logical client）。
-      // 标准 AXTP-TCP（Device=physical server=logical server，发 Hello）需显式传 logicalRole:"server"。
       logicalRole: this.options.logicalRole ?? "client",
-      defaultTimeoutMs: this.options.defaultTimeoutMs ?? 10000,
-      handshakeTimeoutMs: this.options.handshakeTimeoutMs,
-      heartbeatIntervalMs: this.options.heartbeatIntervalMs,
-      heartbeatTimeoutMs: this.options.heartbeatTimeoutMs,
-      maxFrameSize: this.options.maxFrameSize,
-      globalHandlers: this.handlers
+      maxFrameSize: this.options.maxFrameSize ?? DEFAULT_MAX_FRAME_SIZE,
+      heartbeatIntervalMs: this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_MS,
+      defaultTimeoutMs: this.options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
+      globalHandlers: this.router,
+      id
     });
-
-    session.onClose.subscribe(() => {
-      // 仅当该 session 确曾 onConnect（已在表中）才发 onDisconnect，避免对握手失败、
-      // 从未 onConnect 的 session 触发“幽灵” onDisconnect。
-      if (this.sessions.delete(session.localId)) {
-        this.onDisconnect.emit(session);
+    endpoint.onReady.subscribe(() => {
+      if (this.closed) return;
+      this.entries.set(id, endpoint);
+      this.onConnect.emit(endpoint);
+    });
+    endpoint.onClose.subscribe(() => {
+      if (this.entries.delete(id)) {
+        this.onDisconnect.emit(endpoint);
       }
     });
+    endpoint.onError.subscribe((e) => this.onError.emit(e));
+    endpoint.start();
+  }
 
-    session.onError.subscribe((err) => {
-      this.onError.emit(err);
-    });
+  /** id（运行时自增整数，区别于协议 sid）。 */
+  getId(endpoint: AxtpEndpoint): number | undefined {
+    for (const [id, ep] of this.entries) {
+      if (ep === endpoint) return id;
+    }
+    return undefined;
+  }
 
-    // 握手成功后才注册到 sessions 表 + 触发 onConnect
-    session.onReady.subscribe(() => {
-      this.sessions.set(session.localId, session);
-      this.onConnect.emit(session);
-    });
+  getEndpoint(id: number): AxtpEndpoint | undefined {
+    return this.entries.get(id);
+  }
+
+  /** 按协议 sid 查询。 */
+  getEndpointBySid(sid: string): AxtpEndpoint | undefined {
+    for (const ep of this.entries.values()) {
+      if (ep.sid === sid) return ep;
+    }
+    return undefined;
+  }
+
+  getEndpoints(): AxtpEndpoint[] {
+    return [...this.entries.values()];
   }
 
   call<K extends MethodName>(
-    localId: number,
+    id: number,
     method: K,
     params: MethodRequest<K>,
     options?: CallOptions
-  ): Promise<MethodResponse<K>>;
-  call(localId: number, method: string, params: unknown, options?: CallOptions): Promise<unknown>;
-  call(
-    localId: number,
-    method: string,
-    params: unknown,
-    options?: CallOptions
-  ): Promise<unknown> {
-    const session = this.sessions.get(localId);
-    if (session === undefined)
-      return Promise.reject(new AxtpError(ErrorCode.NotFound, `session ${localId} not found`));
-    return session.call(method, params, options);
+  ): Promise<MethodResponse<K>> {
+    return this.callRaw(id, method, params, options) as Promise<MethodResponse<K>>;
   }
 
-  async emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
-  async emit<K extends EventName>(
+  /** 弱类型 call：method 为任意 string、params 为 unknown。动态/自定义方法名走这里。 */
+  callRaw(id: number, method: string, params: unknown, options?: CallOptions): Promise<unknown> {
+    const ep = this.entries.get(id);
+    if (ep === undefined)
+      return Promise.reject(new AxtpError(ErrorCode.NotFound, `endpoint ${id} not found`));
+    return ep.call(method, params, options?.timeoutMs);
+  }
+
+  emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
+  emit<K extends EventName>(
     event: K,
     payload: EventPayload<K>,
-    filter: (session: AxtpSession) => boolean
+    filter: (endpoint: AxtpEndpoint) => boolean
   ): Promise<void>;
-  async emit(
+  emit<K extends EventName>(
+    event: K,
+    payload: EventPayload<K>,
+    filter?: (endpoint: AxtpEndpoint) => boolean
+  ): Promise<void> {
+    return this.emitRaw(event, payload, filter);
+  }
+
+  /** 弱类型 emit（广播，可选 filter）。 */
+  async emitRaw(
     event: string,
     payload: unknown,
-    filter?: (session: AxtpSession) => boolean
+    filter?: (endpoint: AxtpEndpoint) => boolean
   ): Promise<void> {
-    const targets = [...this.sessions.values()].filter((s) => {
-      if (!s.isReady) return false;
-      if (filter !== undefined && !filter(s)) return false;
-      return true;
-    });
-    await Promise.allSettled(targets.map((s) => s.emit(event, payload)));
+    const targets = [...this.entries.values()].filter(
+      (ep) => ep.isReady && (filter === undefined || filter(ep))
+    );
+    await Promise.allSettled(targets.map((ep) => ep.emit(event, payload)));
+  }
+
+  emitTo<K extends EventName>(id: number, event: K, payload: EventPayload<K>): Promise<void> {
+    return this.emitToRaw(id, event, payload);
+  }
+
+  /** 弱类型 emitTo：定向发送到指定 id 的 endpoint。 */
+  async emitToRaw(id: number, event: string, payload: unknown): Promise<void> {
+    const ep = this.entries.get(id);
+    if (ep !== undefined && ep.isReady) await ep.emit(event, payload);
   }
 
   handle<K extends MethodName>(
@@ -133,48 +160,35 @@ export class AxtpServer {
       ctx: CallContext,
       params: MethodRequest<K>
     ) => MethodResponse<K> | Promise<MethodResponse<K>>
-  ): () => void;
-  handle(method: string, handler: UntypedMethodHandler): () => void;
-  handle(
-    method: string,
-    handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
   ): () => void {
-    return this.handlers.setMethod(method, handler as UntypedMethodHandler);
+    return this.handleRaw(method, handler as UntypedMethodHandler);
   }
 
-  on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void;
-  on(event: string, handler: UntypedEventHandler): () => void;
-  on(event: string, handler: UntypedEventHandler): () => void {
-    return this.handlers.addEventListener(event, handler);
+  /** 弱类型 handle。 */
+  handleRaw(method: string, handler: UntypedMethodHandler): () => void {
+    return this.router.setMethod(method, handler);
   }
 
-  getSessions(): AxtpSession[] {
-    return [...this.sessions.values()];
+  on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void {
+    return this.onRaw(event, handler as UntypedEventHandler);
   }
 
-  /** 按运行时 localId（自增整数）查询 session。 */
-  getSession(localId: number): AxtpSession | undefined {
-    return this.sessions.get(localId);
-  }
-
-  /** 按协议 sid（8 位 hex）查询 session；sid 未分配（握手前）时返回 undefined。 */
-  getSessionBySid(sid: string): AxtpSession | undefined {
-    for (const session of this.sessions.values()) {
-      if (session.sid === sid) return session;
-    }
-    return undefined;
+  /** 弱类型 on。 */
+  onRaw(event: string, handler: UntypedEventHandler): () => void {
+    return this.router.addEventListener(event, handler);
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    for (const session of this.sessions.values()) session.close();
-    this.sessions.clear();
+    for (const endpoint of this.entries.values()) endpoint.close();
+    this.entries.clear();
     await this.transport.close();
     this.onClose.emit(undefined);
     this.onConnect.close();
     this.onDisconnect.close();
     this.onError.close();
+    this.onClose.close();
   }
 
   get isClosed(): boolean {

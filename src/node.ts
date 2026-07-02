@@ -1,4 +1,4 @@
-// @axtp/ts-sdk/node：Node.js 传输子入口（TCP + WebSocket）。
+// @axtp/ts-sdk/node：Node.js 传输子入口（TCP framed + WS unframed）。
 // 浏览器环境只引主入口或 ./transport 契约，避免拉入 node:net / ws。
 export {
   NodeTcpClientTransport,

@@ -210,7 +210,7 @@ jobs:
             core/include/generated \
             sdk/include/generated \
             lib/src/generated \
-            src/core/protocol/generated \
+            src/protocol/generated \
             src/axtp_runtime/generated \
             fixtures/generated \
             fixtures/test-vectors; do

@@ -10,11 +10,22 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "vitest";
-import { AxtpSession } from "../../src/session/session.js";
-import { createMockTransportPair } from "../../src/transport/mock/mockTransport.js";
+import { AxtpEndpoint } from "../../src/endpoint/endpoint.js";
+import type { StreamTransport } from "../../src/transport/contract.js";
 import { unframedJsonProfile } from "../../src/transport/contract.js";
+import { createMockStreamPair } from "../../src/transport/mock/mockStreamTransport.js";
+import {
+  NodeWsClientTransport,
+  NodeWsServerTransport
+} from "../../src/transport/ws/nodeWsTransport.js";
+import { once } from "../../tests/helpers/eventStreamHelpers.js";
 import { ErrorCode } from "../../src/types/error.js";
-import { computeEventMasks, isEventSubscribed, METHOD_REGISTRY, registry } from "../../src/types/registry.js";
+import {
+  computeEventMasks,
+  isEventSubscribed,
+  METHOD_REGISTRY,
+  registry
+} from "../../src/types/registry.js";
 
 type Requirement = "required" | "optional" | "unsupported";
 type Status = "pending" | "passed" | "failed" | "skipped" | "unsupported";
@@ -33,26 +44,153 @@ const ROOT = process.cwd();
 // manifest.yaml 各 level 的 required_cases（去重后按 TS 支持等级归类）。
 const cases: CaseResult[] = [
   // required: core ∪ websocket-jsonrpc
-  { id: "session.hello_identify_identified", level: "websocket-jsonrpc", requirement: "required", status: "pending", durationMs: 0, message: "" },
-  { id: "session.request_before_identified", level: "websocket-jsonrpc", requirement: "required", status: "pending", durationMs: 0, message: "" },
-  { id: "rpc.request_response_json", level: "core", requirement: "required", status: "pending", durationMs: 0, message: "" },
-  { id: "rpc.method_not_found", level: "core", requirement: "required", status: "pending", durationMs: 0, message: "" },
-  { id: "rpc.request_id_match", level: "core", requirement: "required", status: "pending", durationMs: 0, message: "" },
-  { id: "error.standard_error_shape", level: "core", requirement: "required", status: "pending", durationMs: 0, message: "" },
+  {
+    id: "session.hello_identify_identified",
+    level: "websocket-jsonrpc",
+    requirement: "required",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "session.request_before_identified",
+    level: "websocket-jsonrpc",
+    requirement: "required",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "rpc.request_response_json",
+    level: "core",
+    requirement: "required",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "rpc.method_not_found",
+    level: "core",
+    requirement: "required",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "rpc.request_id_match",
+    level: "core",
+    requirement: "required",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "error.standard_error_shape",
+    level: "core",
+    requirement: "required",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
   // optional: capability ∪ event
-  { id: "capability.get_all", level: "capability", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "capability.method_binding", level: "capability", requirement: "optional", status: "skipped", durationMs: 0, message: "runtime has no capability→methods registry (types/registry.ts only indexes methods/events)" },
-  { id: "capability.unsupported_method", level: "capability", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "event.subscribe_event", level: "event", requirement: "optional", status: "pending", durationMs: 0, message: "" },
-  { id: "event.unsubscribe_event", level: "event", requirement: "optional", status: "skipped", durationMs: 0, message: "REIDENTIFY not implemented (updateSubscriptions is a NotImplemented placeholder)" },
-  { id: "event.emit_event", level: "event", requirement: "optional", status: "pending", durationMs: 0, message: "" },
+  {
+    id: "capability.get_all",
+    level: "capability",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "capability.method_binding",
+    level: "capability",
+    requirement: "optional",
+    status: "skipped",
+    durationMs: 0,
+    message:
+      "runtime has no capability→methods registry (types/registry.ts only indexes methods/events)"
+  },
+  {
+    id: "capability.unsupported_method",
+    level: "capability",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "event.subscribe_event",
+    level: "event",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
+  {
+    id: "event.unsubscribe_event",
+    level: "event",
+    requirement: "optional",
+    status: "skipped",
+    durationMs: 0,
+    message: "REIDENTIFY not implemented (updateSubscriptions is a NotImplemented placeholder)"
+  },
+  {
+    id: "event.emit_event",
+    level: "event",
+    requirement: "optional",
+    status: "pending",
+    durationMs: 0,
+    message: ""
+  },
   // unsupported: framed-binary ∪ stream（TS 是 WebSocket JSON runtime）
-  { id: "handshake.open_accept", level: "framed-binary", requirement: "unsupported", status: "unsupported", durationMs: 0, message: "TS runtime declares framed-binary unsupported (WebSocket JSON runtime)" },
-  { id: "handshake.close", level: "framed-binary", requirement: "unsupported", status: "unsupported", durationMs: 0, message: "TS runtime declares framed-binary unsupported (WebSocket JSON runtime)" },
-  { id: "handshake.heartbeat", level: "framed-binary", requirement: "unsupported", status: "unsupported", durationMs: 0, message: "TS runtime declares framed-binary unsupported (WebSocket JSON runtime)" },
-  { id: "stream.stream_open", level: "stream", requirement: "unsupported", status: "unsupported", durationMs: 0, message: "TS runtime declares stream unsupported (WebSocket JSON runtime)" },
-  { id: "stream.stream_data", level: "stream", requirement: "unsupported", status: "unsupported", durationMs: 0, message: "TS runtime declares stream unsupported (WebSocket JSON runtime)" },
-  { id: "stream.stream_close", level: "stream", requirement: "unsupported", status: "unsupported", durationMs: 0, message: "TS runtime declares stream unsupported (WebSocket JSON runtime)" }
+  {
+    id: "handshake.open_accept",
+    level: "framed-binary",
+    requirement: "unsupported",
+    status: "unsupported",
+    durationMs: 0,
+    message: "TS runtime declares framed-binary unsupported (WebSocket JSON runtime)"
+  },
+  {
+    id: "handshake.close",
+    level: "framed-binary",
+    requirement: "unsupported",
+    status: "unsupported",
+    durationMs: 0,
+    message: "TS runtime declares framed-binary unsupported (WebSocket JSON runtime)"
+  },
+  {
+    id: "handshake.heartbeat",
+    level: "framed-binary",
+    requirement: "unsupported",
+    status: "unsupported",
+    durationMs: 0,
+    message: "TS runtime declares framed-binary unsupported (WebSocket JSON runtime)"
+  },
+  {
+    id: "stream.stream_open",
+    level: "stream",
+    requirement: "unsupported",
+    status: "unsupported",
+    durationMs: 0,
+    message: "TS runtime declares stream unsupported (WebSocket JSON runtime)"
+  },
+  {
+    id: "stream.stream_data",
+    level: "stream",
+    requirement: "unsupported",
+    status: "unsupported",
+    durationMs: 0,
+    message: "TS runtime declares stream unsupported (WebSocket JSON runtime)"
+  },
+  {
+    id: "stream.stream_close",
+    level: "stream",
+    requirement: "unsupported",
+    status: "unsupported",
+    durationMs: 0,
+    message: "TS runtime declares stream unsupported (WebSocket JSON runtime)"
+  }
 ];
 
 // ---- 测试基础设施（与协议 API 无关，迁移自旧 devtools/conformance/conformance.test.ts）----
@@ -104,7 +242,9 @@ function readRuntimeMeta(): { runtime: string; runtimeVersion: string; specTag: 
       specTag: manifest.axtpSpec.tag
     };
   }
-  const pkg = JSON.parse(fs.readFileSync(path.resolve(ROOT, "package.json"), "utf8")) as { version: string };
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(ROOT, "package.json"), "utf8")) as {
+    version: string;
+  };
   const lock = fs.readFileSync(path.resolve(ROOT, "AXTP_SPEC.lock.yaml"), "utf8");
   const tagMatch = lock.match(/tag:\s*"?([^\s"]+)"?/);
   return { runtime: "axtp-ts-runtime", runtimeVersion: pkg.version, specTag: tagMatch?.[1] ?? "" };
@@ -142,27 +282,55 @@ function writeResult(resultPath: string, profilePath: string): void {
 
 const HANDSHAKE = /^[0-9a-f]{8}$/;
 
+/** 一对背靠背 stream transport（unframed-json，自定义 ReadableStream/WritableStream 对接）。 */
+function makePair(): [StreamTransport, StreamTransport] {
+  return createMockStreamPair(unframedJsonProfile());
+}
+
 async function withPair<T>(
-  fn: (client: AxtpSession, server: AxtpSession) => Promise<T>,
-  clientEventMasks?: string
+  fn: (client: AxtpEndpoint, server: AxtpEndpoint) => Promise<T>,
+  subscribeEvent?: string
 ): Promise<T> {
-  const { left, right } = createMockTransportPair(unframedJsonProfile());
-  const client = new AxtpSession(
-    () => Promise.resolve(left),
-    clientEventMasks
-      ? { physicalRole: "client", logicalRole: "client", eventMasks: clientEventMasks }
-      : { physicalRole: "client", logicalRole: "client" }
-  );
-  const server = new AxtpSession(() => Promise.resolve(right), { physicalRole: "server", logicalRole: "server" });
-  await Promise.all([
-    new Promise<void>((resolve) => client.onReady.subscribe(() => resolve())),
-    new Promise<void>((resolve) => server.onReady.subscribe(() => resolve()))
-  ]);
+  // 用真实 WS（in-process server+client）：TS 声明为 WebSocket JSON runtime，且避免内存 loopback 的 Web Streams 怪问题。
+  const wsServer = new NodeWsServerTransport({ port: 0 });
+  await wsServer.listen();
+  const port = wsServer.boundPort as number;
+  const serverEpPromise = new Promise<AxtpEndpoint>((resolve) => {
+    wsServer.onConnection.subscribe((t) => {
+      const ep = new AxtpEndpoint({
+        transport: t,
+        physicalRole: "server",
+        logicalRole: "server",
+        maxFrameSize: 4096,
+        heartbeatIntervalMs: 60000,
+        handshakeSeed: 1
+      });
+      ep.start();
+      resolve(ep);
+    });
+  });
+  const clientT = await new NodeWsClientTransport({
+    url: `ws://127.0.0.1:${port}`
+  }).connect();
+  const client = new AxtpEndpoint({
+    transport: clientT,
+    physicalRole: "client",
+    logicalRole: "client",
+    maxFrameSize: 4096,
+    heartbeatIntervalMs: 60000
+  });
+  if (subscribeEvent !== undefined) client.on(subscribeEvent, () => {});
+  const server = await serverEpPromise;
+  const serverReady = once(server.onReady);
+  const clientReady = once(client.onReady);
+  client.start();
+  await Promise.all([serverReady, clientReady]);
   try {
     return await fn(client, server);
   } finally {
     client.close();
     server.close();
+    await wsServer.close();
   }
 }
 
@@ -173,19 +341,25 @@ async function caseHelloIdentifyIdentified(): Promise<boolean> {
   });
 }
 
-// session.request_before_identified：未握手时业务 call 必须被同步拒绝（requireReady 守卫）。
+// session.request_before_identified：未 start（idle）时业务 call 必须被同步拒绝（requireReady 守卫）。
 async function caseRequestBeforeIdentified(): Promise<boolean> {
-  const { left } = createMockTransportPair(unframedJsonProfile());
-  const session = new AxtpSession(() => Promise.resolve(left), { physicalRole: "client", logicalRole: "client" });
+  const [clientT] = makePair();
+  const client = new AxtpEndpoint({
+    transport: clientT,
+    physicalRole: "client",
+    logicalRole: "client",
+    maxFrameSize: 4096,
+    heartbeatIntervalMs: 60000
+  });
   try {
     try {
-      session.call("audio.getAlgorithmConfig", {});
+      client.call("audio.getAlgorithmConfig", {});
       return false; // 未抛错 = 失败
     } catch {
       return true;
     }
   } finally {
-    session.close();
+    client.close();
   }
 }
 
@@ -218,7 +392,10 @@ async function caseRequestIdMatch(): Promise<boolean> {
       client.call("audio.getAlgorithmConfig", {}),
       client.call("audio.getAlgorithmConfig", {})
     ]);
-    return JSON.stringify(a) === JSON.stringify({ ok: true }) && JSON.stringify(b) === JSON.stringify({ ok: true });
+    return (
+      JSON.stringify(a) === JSON.stringify({ ok: true }) &&
+      JSON.stringify(b) === JSON.stringify({ ok: true })
+    );
   });
 }
 
@@ -255,13 +432,13 @@ async function caseCapabilityUnsupportedMethod(): Promise<boolean> {
   });
 }
 
-// event.subscribe_event：eventMasks 编码正确，且携带订阅意图的握手成功。
+// event.subscribe_event：eventMasks 编码正确，且携带订阅意图（connect 前 client.on）的握手成功。
 async function caseSubscribeEvent(): Promise<boolean> {
   const masks = computeEventMasks(["audio.algorithmConfigChanged"]);
   if (masks !== "090101" || !isEventSubscribed("audio.algorithmConfigChanged", masks)) return false;
   return withPair(async (client, server) => {
     return HANDSHAKE.test(client.sid) && client.sid === server.sid;
-  }, masks);
+  }, "audio.algorithmConfigChanged");
 }
 
 // event.emit_event：server emit → client on 收到事件，data.reason 非空。
@@ -271,7 +448,10 @@ async function caseEmitEvent(): Promise<boolean> {
     client.on("audio.algorithmConfigChanged", (data: unknown) => {
       received = data as { reason?: string };
     });
-    await server.emit("audio.algorithmConfigChanged", { reason: "user_request", applyState: "applied" });
+    await server.emit("audio.algorithmConfigChanged", {
+      reason: "user_request",
+      applyState: "applied"
+    });
     await new Promise((resolve) => setTimeout(resolve, 10));
     return received !== undefined && received.reason != null;
   });
@@ -279,6 +459,7 @@ async function caseEmitEvent(): Promise<boolean> {
 
 describe("AXTP conformance", () => {
   it("executes native runtime conformance cases", async () => {
+    // ... 每个 case 起一个 in-process WS server，10 个 case 给足超时
     const specPath = resolveSpecPath();
     const profilePath =
       process.env.CONFORMANCE_PROFILE_PATH ?? "devtools/conformance/runtime-profile.yaml";
@@ -304,9 +485,11 @@ describe("AXTP conformance", () => {
 
     writeResult(resultPath, profilePath);
 
-    const requiredFailed = cases.some((item) => item.requirement === "required" && item.status !== "passed");
+    const requiredFailed = cases.some(
+      (item) => item.requirement === "required" && item.status !== "passed"
+    );
     if (requiredFailed && process.env.CONFORMANCE_ALLOW_INCOMPLETE !== "true") {
       throw new Error("required AXTP conformance cases failed");
     }
-  });
+  }, 60000);
 });

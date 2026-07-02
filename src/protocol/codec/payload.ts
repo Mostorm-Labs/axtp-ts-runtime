@@ -2,7 +2,7 @@
 // Standard Framed RPC 在 payload 前置 rpcEncoding(1B)（spec:213），JSON=0x01。
 // 本期 JSON-only：rpcEncoding != JSON -> RpcEncodingUnsupported；malformed envelope -> RpcPayloadInvalid。
 // CONTROL payload 由 control.ts 解析（5B header + TLV）；STREAM payload 由 stream.ts 解析（16B header）。
-// payloadType 分发由 FramedLink 内联（仅一处使用，不再需要 PayloadDecoder 类 + PayloadSink 接口）。
+// payloadType 分发由 Core 的 FramedWireAdapter 内联（仅一处使用）。
 
 import type { RpcMessage } from "../model.js";
 import { RpcEncoding } from "../model.js";

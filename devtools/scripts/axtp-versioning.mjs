@@ -203,7 +203,7 @@ function constantTargets(runtimeName) {
   }
   if (runtimeName === "axtp-ts-runtime") {
     return [
-      { kind: "ts", file: path.join(root, "src/core/protocol/generated/axtpGeneratedVersion.ts") }
+      { kind: "ts", file: path.join(root, "src/protocol/generated/axtpGeneratedVersion.ts") }
     ];
   }
   if (runtimeName === "axtp-python-runtime") {

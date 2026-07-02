@@ -1,7 +1,5 @@
-// @axtp/ts-sdk/transport：自定义 transport 契约子入口。
-// ITransport / IServerTransport 全部类型、TransportProfile 能力模型与 CloseCode。
+// @axtp/ts-sdk/transport：transport 契约子入口（Stream 体系 + profile 能力模型）。
 export {
-  CloseCode,
   framedBinaryProfile,
   keepaliveMode,
   supportsControl,
@@ -9,16 +7,14 @@ export {
   unframedJsonProfile
 } from "./transport/contract.js";
 export type {
-  CloseReason,
   FrameMode,
-  IClientTransport,
-  IServerTransport,
-  ITransport,
   KeepaliveMode,
-  KeepaliveTransport,
+  KeepaliveStreamTransport,
   LogicalRole,
   PhysicalRole,
-  TransportFactory,
+  StreamClientTransport,
+  StreamServerTransport,
+  StreamTransport,
   TransportProfile,
   TransportProfileId
 } from "./transport/contract.js";

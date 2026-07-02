@@ -14,4 +14,4 @@ pnpm --dir devtools/generators test
 pnpm --dir devtools/generators generate:runtime
 ```
 
-Generated TypeScript artifacts are written to `src/core/protocol/generated/`.
+Generated TypeScript artifacts are written to `src/protocol/generated/`.

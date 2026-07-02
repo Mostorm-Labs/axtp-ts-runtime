@@ -1,21 +1,17 @@
-// AxtpClient：单 Session 封装（SDK 层，不知 Connection）。
-// 显式状态机：idle → connecting → ready → reconnecting → connecting/ready/closed
-// connect() 带超时保护，避免握手卡住永久 hang。
-// 订阅 session.onStateChange 驱动 client 状态 + emit 对应事件。
+// AxtpClient：单连接 SDK 门面（基于 AxtpEndpoint）。
+// 持一个 router（method/event handler，跨重连复用——作为每个 Endpoint 的 globalHandlers）。
+// connect()：transport.connect → Endpoint → 等握手 ready（超时保护）。reconnect 启用时首次失败也走重连。
+// 显式状态机：idle → connecting → ready → reconnecting → connecting → ready / → closed。
 
-import { resolvePolicy, type ReconnectPolicy } from "../connection/reconnect/reconnect.js";
+import type { UntypedEventHandler, UntypedMethodHandler } from "../broker/context.js";
+import { HandlerRouter } from "../broker/router.js";
+import { AxtpEndpoint } from "../endpoint/endpoint.js";
 import {
-  AxtpSession,
-  type CallContext,
-  type CallOptions,
-  type CommonOptions,
-  type SessionCloseInfo,
-  type SessionLifecycleState,
-  type UntypedEventHandler,
-  type UntypedMethodHandler
-} from "../session/session.js";
-import type { Stream } from "../session/stream/stream.js";
-import type { IClientTransport } from "../transport/contract.js";
+  ReconnectCoordinator,
+  resolvePolicy,
+  type ReconnectPolicy
+} from "../endpoint/reconnect.js";
+import type { LogicalRole, StreamClientTransport, StreamTransport } from "../transport/contract.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {
@@ -26,320 +22,319 @@ import type {
   MethodResponse
 } from "../types/registry.js";
 import { computeEventMasks } from "../types/registry.js";
+import type { CallContext, CallOptions, Stream } from "./types.js";
 
-/** SDK Client 生命周期状态机。 */
-export type ClientState =
-  | "idle" // 构造后未 connect
-  | "connecting" // 正在建立连接+握手（含首次和重连后）
-  | "ready" // session ready
-  | "reconnecting" // 传输断开，重连中
-  | "closed"; // 终态
-
-export interface ClientOptions extends CommonOptions {
+export interface ClientOptions {
+  logicalRole?: LogicalRole;
+  defaultTimeoutMs?: number;
+  handshakeTimeoutMs?: number;
+  heartbeatIntervalMs?: number;
+  maxFrameSize?: number;
   reconnect?: ReconnectPolicy;
 }
 
-/** connect() 默认超时 ms（覆盖 transport 连接 + 握手全过程）。 */
-const DEFAULT_CONNECT_TIMEOUT_MS = 30000;
+export type ClientState = "idle" | "connecting" | "ready" | "reconnecting" | "closed";
+
+const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_MAX_FRAME_SIZE = 4096;
+const DEFAULT_HEARTBEAT_MS = 5_000;
 
 export class AxtpClient {
-  private session: AxtpSession | undefined;
-  private clientState: ClientState = "idle";
-  /** 首次 onReady 是否已收到（用于区分 onConnect vs onReconnect）。 */
-  private firstReady = true;
-  /** connect() 被 close() 中断标志：置位后 connect() 静默退出不 throw。 */
-  private connectAborted = false;
-  /** 已注册的事件名（用于计算 eventMasks 订阅意图，在 connect/重连时注入 Identify）。 */
+  /** handler 路由：跨连接复用（作为每个 Endpoint 的 globalHandlers）。 */
+  private readonly router = new HandlerRouter();
   private readonly subscribedEvents = new Set<string>();
+  private endpoint: AxtpEndpoint | undefined;
+  private state: ClientState = "idle";
+  private firstReady = true;
+  private coordinator: ReconnectCoordinator | undefined;
+  /** connect() 等待首次 ready 的 resolver（首次 ready resolve；close/重连耗尽 reject）。 */
+  private readyWait: { resolve: () => void; reject: (e: AxtpError) => void } | undefined;
 
-  // 事件流
   readonly onStateChange = new EventStream<ClientState>();
   readonly onConnect = new EventStream<void>();
-  readonly onDisconnect = new EventStream<SessionCloseInfo>();
+  readonly onDisconnect = new EventStream<{ remote: boolean }>();
   readonly onReconnect = new EventStream<{ attempt: number }>();
   readonly onReconnectFailed = new EventStream<void>();
   readonly onError = new EventStream<AxtpError>();
 
   constructor(
-    private readonly transport: IClientTransport,
+    private readonly transport: StreamClientTransport,
     private readonly options: ClientOptions = {}
   ) {}
 
-  // ===== 状态 =====
-
-  get state(): ClientState {
-    return this.clientState;
-  }
-
-  get isReady(): boolean {
-    return this.clientState === "ready";
-  }
-
-  get isReconnecting(): boolean {
-    return this.clientState === "reconnecting";
-  }
-
-  get isClosed(): boolean {
-    return this.clientState === "closed";
-  }
-
   get sid(): string {
-    return this.session?.sid ?? "";
+    return this.endpoint?.sid ?? "";
+  }
+  get isReady(): boolean {
+    return this.state === "ready";
+  }
+  get isClosed(): boolean {
+    return this.state === "closed";
   }
 
-  private setState(newState: ClientState): void {
-    if (this.clientState === newState) return;
-    if (this.clientState === "closed") return;
-    this.clientState = newState;
-    this.onStateChange.emit(newState);
+  private setState(s: ClientState): void {
+    if (this.state === s || this.state === "closed") return;
+    this.state = s;
+    this.onStateChange.emit(s);
   }
 
-  // ===== 连接 =====
-
-  /**
-   * 首次连接。transport 建立与重连统一交给 Connection（factory 模式）：
-   *   - reconnect 启用：首次失败也按策略退避重试（无硬超时，持续到 ready 或 maxAttempts 耗尽）
-   *   - reconnect 未启用：transport 连接 + 握手超时后 reject
-   */
+  /** 首次连接。reconnect 启用：首次失败也走重连（无硬超时，持续到 ready 或耗尽）。 */
   async connect(timeoutMs: number = DEFAULT_CONNECT_TIMEOUT_MS): Promise<void> {
-    if (this.clientState !== "idle") {
-      throw new AxtpError(ErrorCode.InvalidState, `cannot connect from state ${this.clientState}`);
-    }
-    this.connectAborted = false;
+    if (this.state !== "idle")
+      throw new AxtpError(ErrorCode.InvalidState, `cannot connect from state ${this.state}`);
+    this.firstReady = true;
     this.setState("connecting");
 
     const policy = resolvePolicy(this.options.reconnect);
-    this.session = new AxtpSession(() => this.transport.connect(), {
+    if (policy.enabled) {
+      this.coordinator = new ReconnectCoordinator(
+        policy,
+        () => this.transport.connect(),
+        (t) => this.spawnEndpoint(t),
+        () => this.handleReconnectFailed(),
+        (e) => this.onError.emit(e)
+      );
+    }
+
+    void this.tryOpen(policy.enabled);
+    await this.awaitReady(timeoutMs);
+    this.setState("ready");
+    this.onConnect.emit(undefined);
+  }
+
+  private async tryOpen(reconnectEnabled: boolean): Promise<void> {
+    try {
+      const t = await this.transport.connect();
+      if (this.state === "closed") {
+        t.close();
+        return;
+      }
+      this.spawnEndpoint(t);
+    } catch (err) {
+      if (this.state === "closed") return;
+      this.onError.emit(
+        err instanceof AxtpError
+          ? err
+          : new AxtpError(ErrorCode.TransportDisconnected, "connect failed", err)
+      );
+      if (reconnectEnabled && this.coordinator !== undefined) {
+        this.setState("reconnecting");
+        this.coordinator.start();
+      } else {
+        this.failReady(new AxtpError(ErrorCode.TransportDisconnected, "connect failed", err));
+      }
+    }
+  }
+
+  /** 建立/重建一个 Endpoint（首次 + 每次重连）。handler 经 router(globalHandlers) 跨连接复用。 */
+  private spawnEndpoint(t: StreamTransport): void {
+    if (this.state === "closed") {
+      t.close();
+      return;
+    }
+    const ep = new AxtpEndpoint({
+      transport: t,
       physicalRole: "client",
-      // 默认 logical server（发 Hello）：对应 AXTP-WS-CLOUD-REVERSE（Device=physical client=logical server）。
-      // 标准 AXTP-TCP（App=physical client=logical client，发 Identify）需显式传 logicalRole:"client"。
       logicalRole: this.options.logicalRole ?? "server",
-      defaultTimeoutMs: this.options.defaultTimeoutMs,
-      handshakeTimeoutMs: this.options.handshakeTimeoutMs,
-      reconnect: this.options.reconnect,
-      heartbeatIntervalMs: this.options.heartbeatIntervalMs,
-      heartbeatTimeoutMs: this.options.heartbeatTimeoutMs,
-      maxFrameSize: this.options.maxFrameSize,
+      maxFrameSize: this.options.maxFrameSize ?? DEFAULT_MAX_FRAME_SIZE,
+      heartbeatIntervalMs: this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_MS,
+      defaultTimeoutMs: this.options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
+      globalHandlers: this.router,
       eventMasks: this.computeEventMasks()
     });
-    this.wireSessionEvents();
+    this.endpoint = ep;
+    if (this.state !== "ready") this.setState("connecting");
+    ep.onReady.subscribe(() => this.onEndpointReady());
+    ep.onClose.subscribe(({ remote }) => this.onEndpointClose(remote));
+    ep.onError.subscribe((e) => this.onError.emit(e));
+    ep.start();
+  }
 
-    try {
-      await this.waitForReady(policy.enabled ? Number.POSITIVE_INFINITY : timeoutMs);
+  private onEndpointReady(): void {
+    this.coordinator?.onSuccess();
+    if (this.firstReady) {
+      this.firstReady = false;
+      this.resolveReady();
+    } else {
       this.setState("ready");
-      this.onConnect.emit(undefined);
-    } catch (err) {
-      // 关闭已创建的 session（含 Connection/心跳定时器/transport），避免资源泄漏。
-      this.session?.close();
-      this.session = undefined;
-      this.setState("closed");
-      if (this.connectAborted) return; // 用户 close() 中断，静默退出
-      throw err instanceof AxtpError
-        ? err
-        : new AxtpError(ErrorCode.TransportDisconnected, "connect failed", err);
+      this.onReconnect.emit({ attempt: this.coordinator?.attemptCount ?? 0 });
     }
   }
 
-  /** 订阅 session 事件并转发为 client 事件流。 */
-  private wireSessionEvents(): void {
-    const session = this.session;
-    if (session === undefined) return;
-    session.onStateChange.subscribe((s) => this.onSessionStateChange(s));
-    session.onClose.subscribe((info) => this.onDisconnect.emit(info));
-    session.onReconnect.subscribe((info) => this.onReconnect.emit(info));
-    session.onReconnectFailed.subscribe(() => this.onReconnectFailed.emit(undefined));
-    session.onError.subscribe((err) => this.onError.emit(err));
+  private onEndpointClose(remote: boolean): void {
+    if (this.state === "closed") return;
+    this.endpoint = undefined;
+    if (this.firstReady) {
+      // 首次 ready 前断开
+      if (this.coordinator !== undefined) {
+        this.setState("reconnecting");
+        this.onDisconnect.emit({ remote });
+        this.coordinator.start();
+      } else {
+        this.failReady(
+          new AxtpError(
+            ErrorCode.TransportDisconnected,
+            `closed before ready${remote ? " by peer" : ""}`
+          )
+        );
+      }
+    } else {
+      this.onDisconnect.emit({ remote });
+      if (this.coordinator !== undefined) {
+        this.setState("reconnecting");
+        this.coordinator.start();
+      } else {
+        this.setState("closed");
+      }
+    }
   }
 
-  /**
-   * 等待 session 首次 ready。
-   * timeoutMs=Infinity（reconnect 启用）：不武装超时，持续等到 ready 或 session 关闭（重连耗尽）。
-   * 否则：超时后 reject，保护首次 transport 连接 + 握手。
-   */
-  private waitForReady(timeoutMs: number): Promise<void> {
-    const session = this.session;
-    if (session === undefined) {
-      return Promise.reject(new AxtpError(ErrorCode.InvalidState, "session not created"));
-    }
-    if (session.isReady) return Promise.resolve();
+  private handleReconnectFailed(): void {
+    this.failReady(new AxtpError(ErrorCode.TransportDisconnected, "reconnect attempts exhausted"));
+    this.setState("closed");
+    this.onReconnectFailed.emit(undefined);
+  }
 
+  private awaitReady(timeoutMs: number): Promise<void> {
     return new Promise<void>((resolve, reject) => {
+      const rw: { resolve: () => void; reject: (e: AxtpError) => void } = {
+        resolve: () => {},
+        reject: () => {}
+      };
+      this.readyWait = rw;
       const armed = timeoutMs !== Number.POSITIVE_INFINITY;
       const timer = armed
         ? setTimeout(() => {
-            unsub();
-            closeUnsub();
-            reject(new AxtpError(ErrorCode.Timeout, `connect timed out after ${timeoutMs}ms`));
+            if (this.readyWait === rw) {
+              this.readyWait = undefined;
+              rw.reject(new AxtpError(ErrorCode.Timeout, `connect timed out after ${timeoutMs}ms`));
+            }
           }, timeoutMs)
         : undefined;
-      const clear = (): void => {
+      const done = (fn: () => void) => {
         if (timer !== undefined) clearTimeout(timer);
+        fn();
       };
-
-      const unsub = session.onReady.subscribe(() => {
-        clear();
-        unsub();
-        closeUnsub();
-        resolve();
-      });
-
-      // session 关闭（重连耗尽 / 被动关闭 / 用户 close）→ reject
-      const closeUnsub = session.onClose.subscribe(() => {
-        clear();
-        unsub();
-        closeUnsub();
-        reject(new AxtpError(ErrorCode.TransportDisconnected, "session closed before ready"));
-      });
+      // 用一个内部 promise 桥接 rw.resolve/reject（在 resolveReady/failReady 调用时触发）
+      new Promise<void>((res, rej) => {
+        rw.resolve = () => done(() => res());
+        rw.reject = (e) => done(() => rej(e));
+      }).then(resolve, reject);
     });
   }
 
-  /** Session 状态变化 → 更新 Client 状态 + emit 事件。 */
-  private onSessionStateChange(sessionState: SessionLifecycleState): void {
-    switch (sessionState) {
-      case "ready":
-        if (this.firstReady) {
-          this.firstReady = false;
-        }
-        this.setState("ready");
-        break;
-      case "reconnecting":
-        this.setState("reconnecting");
-        break;
-      case "connecting":
-        // 重连后重新握手（非首次）
-        if (!this.firstReady) {
-          this.setState("connecting");
-        }
-        break;
-      case "closed":
-        this.setState("closed");
-        break;
+  private resolveReady(): void {
+    if (this.readyWait !== undefined) {
+      const rw = this.readyWait;
+      this.readyWait = undefined;
+      rw.resolve();
     }
   }
 
-  // ===== 四件套（转发 Session）=====
+  private failReady(err: AxtpError): void {
+    if (this.readyWait !== undefined) {
+      const rw = this.readyWait;
+      this.readyWait = undefined;
+      rw.reject(err);
+    }
+  }
+
+  // ===== 四件套 =====
 
   call<K extends MethodName>(
     method: K,
     params: MethodRequest<K>,
     options?: CallOptions
-  ): Promise<MethodResponse<K>>;
-  call(method: string, params: unknown, options?: CallOptions): Promise<unknown>;
-  call(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
-    this.requireUsable();
-    const session = this.session;
-    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
-    return session.call(method, params, options);
+  ): Promise<MethodResponse<K>> {
+    return this.callRaw(method, params, options) as Promise<MethodResponse<K>>;
+  }
+
+  /** 弱类型 call：method 为任意 string、params 为 unknown。动态/自定义方法名走这里。 */
+  callRaw(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
+    const ep = this.requireUsable();
+    return ep.call(method, params, options?.timeoutMs);
   }
 
   handle<K extends MethodName>(
     method: K,
-    handler: (ctx: CallContext, params: MethodRequest<K>) => MethodResponse<K> | Promise<MethodResponse<K>>
-  ): () => void;
-  handle(method: string, handler: UntypedMethodHandler): () => void;
-  handle(
-    method: string,
-    handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
+    handler: (
+      ctx: CallContext,
+      params: MethodRequest<K>
+    ) => MethodResponse<K> | Promise<MethodResponse<K>>
   ): () => void {
-    this.requireConnected();
-    const session = this.session;
-    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
-    return session.handle(method, handler as UntypedMethodHandler);
+    return this.handleRaw(method, handler as UntypedMethodHandler);
   }
 
-  emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
-  emit(event: string, payload: unknown): Promise<void>;
-  emit(event: string, payload: unknown): Promise<void> {
-    this.requireUsable();
-    const session = this.session;
-    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
-    return session.emit(event, payload);
+  /** 弱类型 handle。 */
+  handleRaw(method: string, handler: UntypedMethodHandler): () => void {
+    return this.router.setMethod(method, handler);
   }
 
-  /**
-   * 订阅事件。注意：eventMasks 仅在 connect / 重连握手时注入 Identify；
-   * connect 之后新增的订阅不会立即通知对端（REIDENTIFY 是 spec draft，Phase 1 未实现），
-   * 需等下次重连握手才生效。运行时订阅意图重发参见 {@link updateSubscriptions}。
-   */
-  on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void;
-  on(event: string, handler: UntypedEventHandler): () => void;
-  on(event: string, handler: UntypedEventHandler): () => void {
-    this.requireConnected();
-    const session = this.session;
-    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
+  emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void> {
+    return this.emitRaw(event, payload);
+  }
+
+  /** 弱类型 emit。 */
+  emitRaw(event: string, payload: unknown): Promise<void> {
+    const ep = this.requireUsable();
+    ep.emit(event, payload);
+    return Promise.resolve();
+  }
+
+  on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void {
+    return this.onRaw(event, handler as UntypedEventHandler);
+  }
+
+  /** 弱类型 on。非 registry 事件名不进入 eventMasks（computeEventMasks 对未知名自动跳过）。 */
+  onRaw(event: string, handler: UntypedEventHandler): () => void {
     this.subscribedEvents.add(event);
-    const unsub = session.on(event, handler);
-    return () => {
-      this.subscribedEvents.delete(event);
-      unsub();
-    };
+    return this.router.addEventListener(event, handler);
   }
-
-  /** 从已注册事件名计算 eventMasks（hex 编码，供 Identify 携带）。 */
-  private computeEventMasks(): string | undefined {
-    if (this.subscribedEvents.size === 0) return undefined;
-    return computeEventMasks([...this.subscribedEvents]);
-  }
-
-  /**
-   * 重发当前事件订阅意图（eventMasks）给对端。
-   *
-   * Phase 1 未实现 REIDENTIFY（spec draft），无法在握手后动态更新订阅；调用始终抛
-   * NotImplemented。connect 后新增的订阅只能等下次重连握手生效。
-   */
-  updateSubscriptions(): void {
-    throw new AxtpError(
-      ErrorCode.NotImplemented,
-      "updateSubscriptions requires REIDENTIFY (spec draft, not supported in Phase 1)"
-    );
-  }
-
-  // ===== Stream =====
 
   openStream(
     method: string,
     params: unknown,
     options?: CallOptions
   ): Promise<{ streamId: number; response: unknown; stream: Stream }> {
-    this.requireUsable();
-    const session = this.session;
-    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not ready");
-    return session.openStream(method, params, options);
+    const ep = this.requireUsable();
+    return ep.openStream(method, params, options?.timeoutMs) as Promise<{
+      streamId: number;
+      response: unknown;
+      stream: Stream;
+    }>;
   }
 
   onStream(
     method: string,
-    handler: (ctx: CallContext, params: unknown) => unknown | Promise<unknown>
+    handler: (params: unknown, stream: Stream) => unknown | Promise<unknown>
   ): () => void {
-    this.requireConnected();
-    const session = this.session;
-    if (session === undefined) throw new AxtpError(ErrorCode.InvalidState, "client not connected");
-    return session.onStream(method, handler);
+    const ep = this.requireUsable();
+    return ep.onStream(method, handler);
   }
 
-  /** 主动关闭，不再重连。中断进行中的 connect()（connectAborted 使其静默退出）。 */
+  /** 主动关闭，不再重连。 */
   async close(): Promise<void> {
-    this.connectAborted = true;
-    const session = this.session;
+    this.coordinator?.stop();
     this.setState("closed");
-    session?.close();
+    this.endpoint?.close();
+    this.failReady(new AxtpError(ErrorCode.TransportDisconnected, "closed"));
   }
 
-  private requireUsable(): void {
-    if (this.clientState === "closed")
+  private computeEventMasks(): string | undefined {
+    return this.subscribedEvents.size > 0
+      ? computeEventMasks([...this.subscribedEvents])
+      : undefined;
+  }
+
+  private requireUsable(): AxtpEndpoint {
+    if (this.state === "closed")
       throw new AxtpError(ErrorCode.TransportDisconnected, "client closed");
-    if (this.clientState === "reconnecting")
+    if (this.state === "reconnecting")
       throw new AxtpError(ErrorCode.TransportDisconnected, "client reconnecting");
-    if (this.clientState !== "ready")
+    const ep = this.endpoint;
+    if (this.state !== "ready" || ep === undefined)
       throw new AxtpError(ErrorCode.InvalidState, "client not ready");
-    if (this.session === undefined)
-      throw new AxtpError(ErrorCode.InvalidState, "client not ready");
-  }
-
-  private requireConnected(): void {
-    if (this.clientState === "closed")
-      throw new AxtpError(ErrorCode.TransportDisconnected, "client closed");
-    if (this.session === undefined)
-      throw new AxtpError(ErrorCode.InvalidState, "client not connected");
+    return ep;
   }
 }

@@ -18,45 +18,62 @@ maintained in the AXTP main specification repository.
 
 ## Architecture
 
-The runtime is layered from the locked AXTP spec downward: generated protocol
-facts feed the codec/model layer, byte helpers sit below the protocol layer, and
-the connection / session / SDK layers build on top. Transport implementations sit
-behind a single `ITransport` contract, so Node TCP/WS, mock, and custom transports
-are interchangeable.
+The runtime is a three-layer engine over the locked AXTP spec: **Core** (protocol
+correctness), **Broker** (business dispatch), and **Endpoint** (stream-driver
+glue), exposed through the **SDK** (`AxtpClient` / `AxtpServer`). Data flows over
+**Web Streams** end-to-end: `transport.readable` is piped through `core.inbound`,
+decoded into `CoreEvent`s, routed by the Endpoint, and responses flow back through
+`core.outbound` to `transport.writable`. Backpressure, composability, and
+per-connection cancellation (`AbortController`) come from the Web Streams model.
 
 ```text
-devtools/generators -> src/protocol/generated
-src/io -> src/protocol -> src/connection -> src/session -> src/sdk
-src/transport  <-  src/connection              (transport contract + implementations)
-src/connection -> src/protocol/codec/jsonRpc   (WebSocket unframed-JSON path)
+devtools/generators -> src/protocol/generated   (locked; do not edit by hand)
+src/io -> src/protocol -> src/core -> src/broker -> src/endpoint -> src/sdk
+src/transport  <-  src/endpoint                 (StreamTransport: readable / writable / close)
 ```
 
+Core owns no I/O and no business logic: it exposes an `inbound`
+(`TransformStream<Bytes, CoreEvent>`) and an `outbound` stream, with the protocol
+state machines (framing, CONTROL, handshake, runtime gate, pending-call
+correlation) living inside the transform closures. Broker is a pure inbound
+dispatcher (method/event handlers, zero protocol knowledge). Endpoint wires one
+transport + one Core + one Broker, drives the consume loop, owns lifecycle /
+reconnect / heartbeat / stream routing, and provides the outbound four-piece API
+(`call` / `handle` / `emit` / `on` / `openStream`).
+
+Transports sit behind a single `StreamTransport` contract
+(`readable` / `writable` / `close`). Node TCP wraps `net.Socket` via
+`Duplex.toWeb(socket)`; WebSocket uses message-boundary
+`ReadableStream` / `WritableStream` plus native ping/pong
+(`KeepaliveStreamTransport`); an in-memory mock loopback is provided for tests.
+
 The package exposes several entry points (see `package.json` `exports`). The main
-entry `@axtp/ts-sdk` re-exports everything for backward compatibility; the
-subpaths `./node`, `./protocol`, `./transport`, `./mock`, and `./io` let consumers
-import only what they need and keep browser builds free of `node:net` / `ws`.
+entry `@axtp/ts-sdk` re-exports everything; the subpaths `./node`, `./protocol`,
+`./transport`, `./mock`, and `./io` let consumers import only what they need and
+keep browser builds free of `node:net` / `ws`.
 
 ## Repository Layout
 
-| Path | Purpose |
-| --- | --- |
-| `src/index.ts` | Main entry: stable SDK API plus re-export of every subpath (backward compatible). |
-| `src/node.ts` | `./node` subpath: Node TCP + WebSocket transports. |
-| `src/protocol.ts` | `./protocol` subpath: payload model, constants, and factories. |
-| `src/transport.ts` | `./transport` subpath: custom `ITransport` contracts and capability factories. |
-| `src/mock.ts` | `./mock` subpath: mock transports for tests. |
-| `src/io.ts` | `./io` subpath: `Bytes` type and byte helpers. |
-| `src/io/` | `Bytes` type, byte helpers, `ByteReader` / `ByteWriter`, CRC16 utilities. |
-| `src/protocol/` | Protocol layer: `model.ts`, `codec/` (frame / control / stream / payload / jsonRpc), and `generated/` (AXTP IDs, registries, version — do not edit by hand). |
-| `src/connection/` | Connection layer: `Connection`, `Heartbeat`, `reconnect/`, and `codec/` (`CodecPipeline`, `ControlSession` link state machine). |
-| `src/session/` | Session layer: `AxtpSession`, `handshake/`, `rpc/`, `stream/`, `handler/`. |
-| `src/transport/` | Transport implementations: `tcp/`, `ws/`, `mock/`. |
-| `src/sdk/` | Higher-level `AxtpClient` and `AxtpServer` SDK APIs. |
-| `src/types/` | Shared types: `registry` (method/event single source of truth), `error`, `events`. |
-| `tests/` | Unit, integration, and public-export snapshot tests (Vitest). |
-| `devtools/conformance/` | AXTP conformance cases run against the locked spec; emits `conformance-results/result.json` via `run-conformance.sh` / `pnpm test:conformance`. |
-| `devtools/generators/` | TypeScript generator (`axtp-gen`) that consumes the AXTP spec and emits runtime artifacts. |
-| `devtools/scripts/` | Spec lock, generation, versioning, conformance, and release helper scripts. |
+| Path                    | Purpose                                                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts`          | Main entry: stable SDK API plus re-export of every subpath (backward compatible).                                                                             |
+| `src/node.ts`           | `./node` subpath: Node TCP + WebSocket **stream** transports (`Duplex.toWeb` / message-boundary streams).                                                     |
+| `src/protocol.ts`       | `./protocol` subpath: payload model, constants, and factories.                                                                                                |
+| `src/transport.ts`      | `./transport` subpath: `StreamTransport` / `KeepaliveStreamTransport` contracts, `TransportProfile` factories, role types.                                    |
+| `src/mock.ts`           | `./mock` subpath: in-memory stream loopback pair for tests.                                                                                                   |
+| `src/io.ts`             | `./io` subpath: `Bytes` type and byte helpers.                                                                                                                |
+| `src/io/`               | `Bytes` type, byte helpers, `ByteReader` / `ByteWriter`, CRC16 utilities.                                                                                     |
+| `src/protocol/`         | Protocol layer: `model.ts`, `codec/` (frame / control / stream / payload / jsonRpc), and `generated/` (AXTP IDs, registries, version — do not edit by hand).  |
+| `src/core/`             | Core layer: `AxtpCore` (inbound/outbound Web Streams), wire adapters (`framed` / `unframed`), `controlSession`, `handshake`, `runtimeGate`, `pendingCalls`.   |
+| `src/broker/`           | Broker layer: `BasicBroker` (inbound dispatch), `router` (method/event handlers), `context`.                                                                  |
+| `src/endpoint/`         | Endpoint layer: `AxtpEndpoint` (stream driver), `timers` (Heartbeat), `stream` / `streamManager` / `streamRegistry`, `reconnect`.                             |
+| `src/transport/`        | `StreamTransport` contract + `profile` + TCP (`Duplex.toWeb`) / WS (message streams + ping/pong) / mock loopback implementations.                             |
+| `src/sdk/`              | `AxtpClient` / `AxtpServer` SDK facades over `AxtpEndpoint` (typed `call` / `handle` / `emit` / `on` / `openStream`, connect timeout, eventMasks, reconnect). |
+| `src/types/`            | Shared types: `registry` (method/event single source of truth), `error`, `events`.                                                                            |
+| `tests/`                | Unit, integration, and public-export snapshot tests (Vitest).                                                                                                 |
+| `devtools/conformance/` | AXTP conformance cases run against the locked spec; emits `conformance-results/result.json` via `run-conformance.sh` / `pnpm test:conformance`.               |
+| `devtools/generators/`  | TypeScript generator (`axtp-gen`) that consumes the AXTP spec and emits runtime artifacts.                                                                    |
+| `devtools/scripts/`     | Spec lock, generation, versioning, conformance, and release helper scripts.                                                                                   |
 
 ## AXTP Spec Compatibility
 
