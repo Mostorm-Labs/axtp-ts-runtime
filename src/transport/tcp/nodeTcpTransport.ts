@@ -1,4 +1,4 @@
-// Node TCP stream transport：Standard Framed Binary，经 Web Streams 暴露（Core/Endpoint 消费）。
+// Node TCP transport：Standard Framed Binary，经 Web Streams 暴露（Core/Endpoint 消费）。
 // 用 Duplex.toWeb(socket) 把 net.Socket 转成 { readable, writable }。transport 只搬运原始字节，
 // 帧的 resync/CRC 由 Core 的 wire adapter 负责。server 每个接受的 socket 产出一个 StreamTransport。
 
@@ -9,7 +9,7 @@ import { EventStream } from "../../types/events.js";
 import { framedBinaryProfile } from "../profile.js";
 import type { StreamClientTransport, StreamServerTransport, StreamTransport } from "../contract.js";
 
-export interface TcpStreamOptions {
+export interface TcpOptions {
   host?: string;
   port: number;
 }
@@ -30,13 +30,13 @@ function socketToTransport(socket: net.Socket): StreamTransport {
 }
 
 /** TCP server（stream）：每个接受的 socket → StreamTransport。 */
-export class NodeTcpStreamServerTransport implements StreamServerTransport {
+export class NodeTcpServerTransport implements StreamServerTransport {
   readonly profile = framedBinaryProfile("AXTP-TCP");
   readonly onConnection = new EventStream<StreamTransport>();
   private server: net.Server | undefined;
   private listening = false;
 
-  constructor(private readonly options: TcpStreamOptions) {}
+  constructor(private readonly options: TcpOptions) {}
 
   /** 监听端口（port=0 → 随机端口，listen 后读 port）。 */
   listen(): Promise<void> {
@@ -69,10 +69,10 @@ export class NodeTcpStreamServerTransport implements StreamServerTransport {
 }
 
 /** TCP client（stream）：connect → StreamTransport。可复用（每次 connect 新建连接，供 AxtpClient 重连）。 */
-export class NodeTcpStreamClientTransport implements StreamClientTransport {
+export class NodeTcpClientTransport implements StreamClientTransport {
   readonly profile = framedBinaryProfile("AXTP-TCP");
 
-  constructor(private readonly options: TcpStreamOptions) {}
+  constructor(private readonly options: TcpOptions) {}
 
   connect(): Promise<StreamTransport> {
     return new Promise((resolve, reject) => {

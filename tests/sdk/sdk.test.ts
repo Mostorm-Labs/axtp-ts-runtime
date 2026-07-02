@@ -65,13 +65,13 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await server.close();
   });
 
-  it("server.call(localId) 单播", async () => {
+  it("server.call(id) 单播", async () => {
     const { server, client } = await setupStandard();
     client.handleRaw("echo", (_ctx, p) => p);
     const endpoints = server.getEndpoints();
     expect(endpoints.length).toBe(1);
-    const localId = server.getLocalId(endpoints[0]) as number;
-    const result = await server.callRaw(localId, "echo", { msg: "hi" });
+    const id = server.getId(endpoints[0]) as number;
+    const result = await server.callRaw(id, "echo", { msg: "hi" });
     expect(result).toEqual({ msg: "hi" });
     await client.close();
     await server.close();

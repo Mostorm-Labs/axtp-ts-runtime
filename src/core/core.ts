@@ -13,9 +13,9 @@
 
 import type { Bytes } from "../io/bytes.js";
 import {
+  defaultOpenParams,
   encodeHeartbeat,
-  encodeHeartbeatAck,
-  defaultOpenParams
+  encodeHeartbeatAck
 } from "../protocol/codec/control.js";
 import {
   RpcOp,
@@ -29,8 +29,8 @@ import {
 import type { LogicalRole, PhysicalRole, TransportProfile } from "../transport/contract.js";
 import { supportsControl } from "../transport/profile.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
-import type { CoreEvent, OutboundMessage } from "./events.js";
 import { ControlSession } from "./controlSession.js";
+import type { CoreEvent, OutboundMessage } from "./events.js";
 import { Handshake } from "./handshake.js";
 import { PendingCalls } from "./pendingCalls.js";
 import { classifyInbound, type GateState } from "./runtimeGate.js";
@@ -67,6 +67,7 @@ export class AxtpCore {
   private readonly heartbeatIntervalMs: number;
   /** inbound readable-side controller（start 回调捕获，流生命周期内有效，供任意时机 enqueue）。 */
   private readableCtl: TransformStreamDefaultController<CoreEvent> | undefined;
+  private readonly wireSink: WireSink;
 
   constructor(opts: CoreOptions) {
     this.logicalRole = opts.logicalRole;
@@ -118,6 +119,12 @@ export class AxtpCore {
       { highWaterMark: 1024 }
     );
     this.outWriter = this.outbound.writable.getWriter();
+    this.wireSink = {
+      onControl: (body) => this.control?.handleControlBody(body),
+      onRpc: (msg) => this.handleRpc(msg),
+      onStream: (msg) => this.handleStream(msg),
+      onError: (err) => this.enqueue({ kind: "error", err })
+    };
   }
 
   // ===== 公共：Endpoint 调用 =====
@@ -232,13 +239,7 @@ export class AxtpCore {
   }
 
   private routeBytes(bytes: Bytes): void {
-    const sink: WireSink = {
-      onControl: (body) => this.control?.handleControlBody(body),
-      onRpc: (msg) => this.handleRpc(msg),
-      onStream: (msg) => this.handleStream(msg),
-      onError: (err) => this.enqueue({ kind: "error", err })
-    };
-    this.wire.feedBytes(bytes, sink);
+    this.wire.feedBytes(bytes, this.wireSink);
   }
 
   private handleRpc(msg: RpcMessage): void {

@@ -1,4 +1,4 @@
-// Node WebSocket stream transport：Unframed JSON（每条 WS message = 一个 AXTP JSON envelope）。
+// Node WebSocket transport：Unframed JSON（每条 WS message = 一个 AXTP JSON envelope）。
 // WS 是 message 边界（非字节流），不能用 Duplex.toWeb——自定义 ReadableStream（每 message 一个 chunk）
 // + WritableStream（每 chunk 发一条 text message），保持 envelope 边界给 Core 的 unframed wire adapter。
 // 心跳：WS 原生 ping/pong（KeepaliveStreamTransport；spec 明确 WS 不走 CONTROL）。
@@ -98,17 +98,17 @@ function wsToTransport(ws: WebSocket): KeepaliveStreamTransport {
   };
 }
 
-export interface WsStreamClientOptions {
+export interface WsClientOptions {
   url: string;
   protocols?: string | string[];
   headers?: Record<string, string>;
 }
 
 /** WS client（stream）：connect → KeepaliveStreamTransport。可复用（每次 connect 新建连接，供 AxtpClient 重连）。 */
-export class NodeWsStreamClientTransport implements StreamClientTransport {
+export class NodeWsClientTransport implements StreamClientTransport {
   readonly profile = unframedJsonProfile();
 
-  constructor(private readonly options: WsStreamClientOptions) {}
+  constructor(private readonly options: WsClientOptions) {}
 
   connect(): Promise<KeepaliveStreamTransport> {
     return new Promise((resolve, reject) => {
@@ -121,19 +121,19 @@ export class NodeWsStreamClientTransport implements StreamClientTransport {
   }
 }
 
-export interface WsStreamServerOptions {
+export interface WsServerOptions {
   port: number;
   host?: string;
 }
 
 /** WS server（stream）：每个接受的 ws → KeepaliveStreamTransport。 */
-export class NodeWsStreamServerTransport implements StreamServerTransport {
+export class NodeWsServerTransport implements StreamServerTransport {
   readonly profile = unframedJsonProfile();
   readonly onConnection = new EventStream<StreamTransport>();
   private wss: WebSocketServer | undefined;
   private listening = false;
 
-  constructor(private readonly options: WsStreamServerOptions) {}
+  constructor(private readonly options: WsServerOptions) {}
 
   listen(): Promise<void> {
     return new Promise((resolve, reject) => {

@@ -181,10 +181,11 @@ export class ControlSession {
       return;
     }
     this.linkState = "open";
+    const selected = tlv.selectedRpcEncoding ?? RpcEncoding.Json;
     this.negotiated = {
       maxFrameSize: tlv.maxFrameSize ?? this.localParams.maxFrameSize,
       heartbeatIntervalMs: tlv.heartbeatIntervalMs ?? this.localParams.heartbeatIntervalMs,
-      selectedRpcEncoding: tlv.selectedRpcEncoding ?? RpcEncoding.Json,
+      selectedRpcEncoding: selected,
       accepted: true
     };
     this.callbacks.onLinkReady?.(this.negotiated);

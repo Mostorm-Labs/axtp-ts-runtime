@@ -21,8 +21,8 @@ describe("public exports: 主入口聚合 SDK 核心 + 子入口", () => {
   });
 
   it("主入口聚合全部子入口", () => {
-    expect(main.NodeTcpStreamClientTransport).toBeDefined();
-    expect(main.NodeWsStreamServerTransport).toBeDefined();
+    expect(main.NodeTcpClientTransport).toBeDefined();
+    expect(main.NodeWsServerTransport).toBeDefined();
     expect(main.ControlOpcode).toBeDefined();
     expect(main.PayloadType).toBeDefined();
     expect(main.requestMsg).toBeDefined();
@@ -32,8 +32,8 @@ describe("public exports: 主入口聚合 SDK 核心 + 子入口", () => {
   });
 
   it("./node 仅 Node stream 传输，不含 SDK 核心", () => {
-    expect(nodeEntry.NodeTcpStreamClientTransport).toBeDefined();
-    expect(nodeEntry.NodeWsStreamServerTransport).toBeDefined();
+    expect(nodeEntry.NodeTcpClientTransport).toBeDefined();
+    expect(nodeEntry.NodeWsServerTransport).toBeDefined();
     expect((nodeEntry as Record<string, unknown>).AxtpClient).toBeUndefined();
   });
 

@@ -99,7 +99,7 @@ export class AxtpClient {
     }
 
     void this.tryOpen(policy.enabled);
-    await this.awaitReady(policy.enabled ? Number.POSITIVE_INFINITY : timeoutMs);
+    await this.awaitReady(timeoutMs);
     this.setState("ready");
     this.onConnect.emit(undefined);
   }
@@ -253,8 +253,8 @@ export class AxtpClient {
 
   /** 弱类型 call：method 为任意 string、params 为 unknown。动态/自定义方法名走这里。 */
   callRaw(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
-    this.requireUsable();
-    return this.endpoint!.call(method, params, options?.timeoutMs);
+    const ep = this.requireUsable();
+    return ep.call(method, params, options?.timeoutMs);
   }
 
   handle<K extends MethodName>(
@@ -278,8 +278,8 @@ export class AxtpClient {
 
   /** 弱类型 emit。 */
   emitRaw(event: string, payload: unknown): Promise<void> {
-    this.requireUsable();
-    this.endpoint!.emit(event, payload);
+    const ep = this.requireUsable();
+    ep.emit(event, payload);
     return Promise.resolve();
   }
 
@@ -298,8 +298,8 @@ export class AxtpClient {
     params: unknown,
     options?: CallOptions
   ): Promise<{ streamId: number; response: unknown; stream: Stream }> {
-    this.requireUsable();
-    return this.endpoint!.openStream(method, params, options?.timeoutMs) as Promise<{
+    const ep = this.requireUsable();
+    return ep.openStream(method, params, options?.timeoutMs) as Promise<{
       streamId: number;
       response: unknown;
       stream: Stream;
@@ -310,7 +310,8 @@ export class AxtpClient {
     method: string,
     handler: (params: unknown, stream: Stream) => unknown | Promise<unknown>
   ): () => void {
-    return this.endpoint!.onStream(method, handler);
+    const ep = this.requireUsable();
+    return ep.onStream(method, handler);
   }
 
   /** 主动关闭，不再重连。 */
@@ -327,12 +328,14 @@ export class AxtpClient {
       : undefined;
   }
 
-  private requireUsable(): void {
+  private requireUsable(): AxtpEndpoint {
     if (this.state === "closed")
       throw new AxtpError(ErrorCode.TransportDisconnected, "client closed");
     if (this.state === "reconnecting")
       throw new AxtpError(ErrorCode.TransportDisconnected, "client reconnecting");
-    if (this.state !== "ready" || this.endpoint === undefined)
+    const ep = this.endpoint;
+    if (this.state !== "ready" || ep === undefined)
       throw new AxtpError(ErrorCode.InvalidState, "client not ready");
+    return ep;
   }
 }

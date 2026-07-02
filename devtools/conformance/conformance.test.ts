@@ -15,9 +15,9 @@ import type { StreamTransport } from "../../src/transport/contract.js";
 import { unframedJsonProfile } from "../../src/transport/contract.js";
 import { createMockStreamPair } from "../../src/transport/mock/mockStreamTransport.js";
 import {
-  NodeWsStreamClientTransport,
-  NodeWsStreamServerTransport
-} from "../../src/transport/ws/nodeWsStreamTransport.js";
+  NodeWsClientTransport,
+  NodeWsServerTransport
+} from "../../src/transport/ws/nodeWsTransport.js";
 import { once } from "../../tests/helpers/eventStreamHelpers.js";
 import { ErrorCode } from "../../src/types/error.js";
 import {
@@ -292,7 +292,7 @@ async function withPair<T>(
   subscribeEvent?: string
 ): Promise<T> {
   // 用真实 WS（in-process server+client）：TS 声明为 WebSocket JSON runtime，且避免内存 loopback 的 Web Streams 怪问题。
-  const wsServer = new NodeWsStreamServerTransport({ port: 0 });
+  const wsServer = new NodeWsServerTransport({ port: 0 });
   await wsServer.listen();
   const port = wsServer.boundPort as number;
   const serverEpPromise = new Promise<AxtpEndpoint>((resolve) => {
@@ -309,7 +309,7 @@ async function withPair<T>(
       resolve(ep);
     });
   });
-  const clientT = await new NodeWsStreamClientTransport({
+  const clientT = await new NodeWsClientTransport({
     url: `ws://127.0.0.1:${port}`
   }).connect();
   const client = new AxtpEndpoint({

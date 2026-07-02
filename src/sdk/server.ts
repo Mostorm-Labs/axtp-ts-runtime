@@ -1,7 +1,7 @@
 // AxtpServer：多连接 SDK 门面（基于 AxtpEndpoint）。
 // listen → 每条接受的 StreamTransport 建一个 Endpoint（logicalRole 决定 Hello 方向）。
 // handle/on 注册到共享 router，作为每个 Endpoint 的 globalHandlers（全局生效）。
-// call(localId) 单播；emit 广播（可 filter）。
+// call(id) 单播；emit 广播（可 filter）。
 
 import type { UntypedEventHandler, UntypedMethodHandler } from "../broker/context.js";
 import { HandlerRouter } from "../broker/router.js";
@@ -32,7 +32,7 @@ const DEFAULT_HEARTBEAT_MS = 1000;
 export class AxtpServer {
   private readonly router = new HandlerRouter();
   private readonly entries = new Map<number, AxtpEndpoint>();
-  private nextLocalId = 1;
+  private nextId = 1;
   private closed = false;
 
   readonly onConnect = new EventStream<AxtpEndpoint>();
@@ -52,7 +52,7 @@ export class AxtpServer {
 
   /** 新连接到达：建 Endpoint，握手成功后注册 + onConnect。 */
   private adopt(t: StreamTransport): void {
-    const localId = this.nextLocalId++;
+    const id = this.nextId++;
     const endpoint = new AxtpEndpoint({
       transport: t,
       physicalRole: "server",
@@ -64,11 +64,11 @@ export class AxtpServer {
     });
     endpoint.onReady.subscribe(() => {
       if (this.closed) return;
-      this.entries.set(localId, endpoint);
+      this.entries.set(id, endpoint);
       this.onConnect.emit(endpoint);
     });
     endpoint.onClose.subscribe(() => {
-      if (this.entries.delete(localId)) {
+      if (this.entries.delete(id)) {
         this.onDisconnect.emit(endpoint);
       }
     });
@@ -76,16 +76,16 @@ export class AxtpServer {
     endpoint.start();
   }
 
-  /** localId（运行时自增整数，区别于协议 sid）。 */
-  getLocalId(endpoint: AxtpEndpoint): number | undefined {
+  /** id（运行时自增整数，区别于协议 sid）。 */
+  getId(endpoint: AxtpEndpoint): number | undefined {
     for (const [id, ep] of this.entries) {
       if (ep === endpoint) return id;
     }
     return undefined;
   }
 
-  getEndpoint(localId: number): AxtpEndpoint | undefined {
-    return this.entries.get(localId);
+  getEndpoint(id: number): AxtpEndpoint | undefined {
+    return this.entries.get(id);
   }
 
   /** 按协议 sid 查询。 */
@@ -101,19 +101,24 @@ export class AxtpServer {
   }
 
   call<K extends MethodName>(
-    localId: number,
+    id: number,
     method: K,
     params: MethodRequest<K>,
     options?: CallOptions
   ): Promise<MethodResponse<K>> {
-    return this.callRaw(localId, method, params, options) as Promise<MethodResponse<K>>;
+    return this.callRaw(id, method, params, options) as Promise<MethodResponse<K>>;
   }
 
   /** 弱类型 call：method 为任意 string、params 为 unknown。动态/自定义方法名走这里。 */
-  callRaw(localId: number, method: string, params: unknown, options?: CallOptions): Promise<unknown> {
-    const ep = this.entries.get(localId);
+  callRaw(
+    id: number,
+    method: string,
+    params: unknown,
+    options?: CallOptions
+  ): Promise<unknown> {
+    const ep = this.entries.get(id);
     if (ep === undefined)
-      return Promise.reject(new AxtpError(ErrorCode.NotFound, `endpoint ${localId} not found`));
+      return Promise.reject(new AxtpError(ErrorCode.NotFound, `endpoint ${id} not found`));
     return ep.call(method, params, options?.timeoutMs);
   }
 

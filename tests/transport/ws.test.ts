@@ -1,17 +1,17 @@
-// 真实 WebSocket loopback：AxtpEndpoint over NodeWsStreamTransport（unframed-json）。
+// 真实 WebSocket loopback：AxtpEndpoint over NodeWsTransport（unframed-json）。
 // 验证新栈在真实 WS 上完成 RPC 握手（无 CONTROL）+ call。
 
 import { describe, expect, it } from "vitest";
 import { AxtpEndpoint } from "../../src/endpoint/endpoint.js";
 import {
-  NodeWsStreamClientTransport,
-  NodeWsStreamServerTransport
-} from "../../src/transport/ws/nodeWsStreamTransport.js";
+  NodeWsClientTransport,
+  NodeWsServerTransport
+} from "../../src/transport/ws/nodeWsTransport.js";
 import { once } from "../helpers/eventStreamHelpers.js";
 
 describe("AxtpEndpoint over 真实 WebSocket", () => {
   it("unframed-json 握手 + client.call → server handler → response", async () => {
-    const server = new NodeWsStreamServerTransport({ port: 0 });
+    const server = new NodeWsServerTransport({ port: 0 });
     await server.listen();
     const port = server.boundPort as number;
 
@@ -31,7 +31,7 @@ describe("AxtpEndpoint over 真实 WebSocket", () => {
       });
     });
 
-    const clientT = await new NodeWsStreamClientTransport({
+    const clientT = await new NodeWsClientTransport({
       url: `ws://127.0.0.1:${port}`
     }).connect();
     const clientEp = new AxtpEndpoint({

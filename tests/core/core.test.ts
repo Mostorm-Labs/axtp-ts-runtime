@@ -84,7 +84,9 @@ describe("AxtpCore — framed server 端到端", () => {
 
     expect((await readEvents(core, 1))[0].kind).toBe("linkReady");
     const outs = await readOut(core, 2);
-    expect(decodeControl(decodeFrame(outs[0]).control!).opcode).toBe(ControlOpcode.Accept);
+    const control = decodeFrame(outs[0]).control;
+    if (control === undefined) throw new Error("expected control frame");
+    expect(decodeControl(control).opcode).toBe(ControlOpcode.Accept);
     expect(decodeFrame(outs[1]).rpc?.op).toBe(RpcOp.Hello);
   });
 

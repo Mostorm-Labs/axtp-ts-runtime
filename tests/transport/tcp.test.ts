@@ -1,13 +1,13 @@
-// 真实 TCP loopback：AxtpEndpoint over NodeTcpStreamTransport（Duplex.toWeb）。
+// 真实 TCP loopback：AxtpEndpoint over NodeTcpTransport（Duplex.toWeb）。
 // 验证新栈在真实 socket 上完成 framed 握手 + RPC call + close。
 
 import { describe, expect, it } from "vitest";
 import { AxtpEndpoint } from "../../src/endpoint/endpoint.js";
 import type { StreamTransport } from "../../src/transport/contract.js";
 import {
-  NodeTcpStreamClientTransport,
-  NodeTcpStreamServerTransport
-} from "../../src/transport/tcp/nodeTcpStreamTransport.js";
+  NodeTcpClientTransport,
+  NodeTcpServerTransport
+} from "../../src/transport/tcp/nodeTcpTransport.js";
 import { once } from "../helpers/eventStreamHelpers.js";
 
 function serverEndpoint(t: StreamTransport): AxtpEndpoint {
@@ -35,7 +35,7 @@ function clientEndpoint(t: StreamTransport): AxtpEndpoint {
 
 describe("AxtpEndpoint over 真实 TCP", () => {
   it("framed 握手 + client.call → server handler → response", async () => {
-    const server = new NodeTcpStreamServerTransport({ port: 0 });
+    const server = new NodeTcpServerTransport({ port: 0 });
     await server.listen();
     const port = server.boundPort;
     expect(port).toBeGreaterThan(0);
@@ -48,7 +48,7 @@ describe("AxtpEndpoint over 真实 TCP", () => {
       });
     });
 
-    const clientT = await new NodeTcpStreamClientTransport({ port: port as number }).connect();
+    const clientT = await new NodeTcpClientTransport({ port: port as number }).connect();
     const clientEp = clientEndpoint(clientT);
     clientEp.start();
 
