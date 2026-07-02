@@ -3,16 +3,15 @@
 // connect()：transport.connect → Endpoint → 等握手 ready（超时保护）。reconnect 启用时首次失败也走重连。
 // 显式状态机：idle → connecting → ready → reconnecting → connecting → ready / → closed。
 
-import { AxtpEndpoint } from "../endpoint/endpoint.js";
-import { HandlerRouter } from "../broker/router.js";
 import type { UntypedEventHandler, UntypedMethodHandler } from "../broker/context.js";
+import { HandlerRouter } from "../broker/router.js";
+import { AxtpEndpoint } from "../endpoint/endpoint.js";
 import {
   ReconnectCoordinator,
   resolvePolicy,
   type ReconnectPolicy
 } from "../endpoint/reconnect.js";
-import type { StreamClientTransport, StreamTransport } from "../transport/contract.js";
-import type { LogicalRole } from "../transport/contract.js";
+import type { LogicalRole, StreamClientTransport, StreamTransport } from "../transport/contract.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { EventStream } from "../types/events.js";
 import type {
@@ -36,10 +35,10 @@ export interface ClientOptions {
 
 export type ClientState = "idle" | "connecting" | "ready" | "reconnecting" | "closed";
 
-const DEFAULT_CONNECT_TIMEOUT_MS = 30000;
-const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_FRAME_SIZE = 4096;
-const DEFAULT_HEARTBEAT_MS = 1000;
+const DEFAULT_HEARTBEAT_MS = 5_000;
 
 export class AxtpClient {
   /** handler 路由：跨连接复用（作为每个 Endpoint 的 globalHandlers）。 */

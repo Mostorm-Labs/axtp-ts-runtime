@@ -25,9 +25,9 @@ export interface ServerOptions {
   maxFrameSize?: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_FRAME_SIZE = 4096;
-const DEFAULT_HEARTBEAT_MS = 1000;
+const DEFAULT_HEARTBEAT_MS = 5_000;
 
 export class AxtpServer {
   private readonly router = new HandlerRouter();
@@ -110,12 +110,7 @@ export class AxtpServer {
   }
 
   /** 弱类型 call：method 为任意 string、params 为 unknown。动态/自定义方法名走这里。 */
-  callRaw(
-    id: number,
-    method: string,
-    params: unknown,
-    options?: CallOptions
-  ): Promise<unknown> {
+  callRaw(id: number, method: string, params: unknown, options?: CallOptions): Promise<unknown> {
     const ep = this.entries.get(id);
     if (ep === undefined)
       return Promise.reject(new AxtpError(ErrorCode.NotFound, `endpoint ${id} not found`));
