@@ -1,6 +1,8 @@
 // broker/context.ts — Broker 层共享类型（消除 router↔broker 循环 type-import）。
 // 与 session 层解耦：Broker 零协议知识，只认 RpcMessage 语义 + handler 注册表。
 
+import type { EventName, EventPayload } from "../types/registry.js";
+
 /** 方法 handler（无类型；SDK 层用 typed 重载包一层）。 */
 export type UntypedMethodHandler = (
   ctx: CallContext,
@@ -20,6 +22,10 @@ export interface GlobalHandlerSource {
 export interface CallContext {
   readonly requestId: number;
   readonly sid: string;
-  /** 向该对端推送事件（独立 Event 消息，非 RPC 响应）。Endpoint 注入（绑定 core.emit）。 */
-  emit: (event: string, payload: unknown) => void;
+  /** Server 管理时的 endpoint localId（独立用 Endpoint 时 undefined）。供 handler 做 server 级定向操作（callRaw/emitTo）。 */
+  readonly id?: number;
+  /** typed 事件推送：EventName 类型检查 + payload 类型约束。 */
+  emit<K extends EventName>(event: K, payload: EventPayload<K>): void;
+  /** 弱类型事件推送：任意事件名。 */
+  emitRaw(event: string, payload: unknown): void;
 }

@@ -77,7 +77,7 @@ describe("BasicBroker — dispatchRequest", () => {
       emitted = [e, p];
     };
     broker.setMethod("m", (ctx) => {
-      ctx.emit("ev", { x: 1 });
+      ctx.emitRaw("ev", { x: 1 });
       return 0;
     });
     broker.dispatchRequest(requestMsg("12345678", 1, "m", {}));

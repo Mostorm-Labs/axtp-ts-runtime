@@ -43,6 +43,8 @@ export interface EndpointOptions {
   readonly globalHandlers?: GlobalHandlerSource;
   readonly handshakeSeed?: number;
   readonly eventMasks?: string;
+  /** Server 管理时的 endpoint localId（传入 broker → CallContext.id 供 handler 定向操作）。 */
+  readonly id?: number;
 }
 
 export class AxtpEndpoint {
@@ -82,6 +84,7 @@ export class AxtpEndpoint {
       onError: (err) => this.onError.emit(err)
     });
     this.broker.emit = (event, payload) => this.core.emit(event, payload);
+    this.broker.id = opts.id;
     this.streamMgr = new StreamManager((sp) => this.core.sendStream(sp));
   }
 

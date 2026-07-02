@@ -60,7 +60,8 @@ export class AxtpServer {
       maxFrameSize: this.options.maxFrameSize ?? DEFAULT_MAX_FRAME_SIZE,
       heartbeatIntervalMs: this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_MS,
       defaultTimeoutMs: this.options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
-      globalHandlers: this.router
+      globalHandlers: this.router,
+      id
     });
     endpoint.onReady.subscribe(() => {
       if (this.closed) return;
@@ -141,6 +142,16 @@ export class AxtpServer {
       (ep) => ep.isReady && (filter === undefined || filter(ep))
     );
     await Promise.allSettled(targets.map((ep) => ep.emit(event, payload)));
+  }
+
+  emitTo<K extends EventName>(id: number, event: K, payload: EventPayload<K>): Promise<void> {
+    return this.emitToRaw(id, event, payload);
+  }
+
+  /** 弱类型 emitTo：定向发送到指定 id 的 endpoint。 */
+  async emitToRaw(id: number, event: string, payload: unknown): Promise<void> {
+    const ep = this.entries.get(id);
+    if (ep !== undefined && ep.isReady) await ep.emit(event, payload);
   }
 
   handle<K extends MethodName>(

@@ -32,6 +32,8 @@ export class BasicBroker {
   private sink: BrokerSink | undefined;
   /** Endpoint 注入：handler 内 ctx.emit → core.emit（出站事件）。 */
   emit: ((event: string, payload: unknown) => void) | undefined;
+  /** Server 注入：endpoint localId，传入 CallContext 供 handler 做 server 级定向操作。 */
+  id: number | undefined;
 
   constructor(globalSource?: GlobalHandlerSource) {
     this.router = new HandlerRouter(globalSource);
@@ -52,10 +54,15 @@ export class BasicBroker {
   /** 入站 Request 分发（异步派发，不 await——保证 Endpoint reader 不被业务阻塞）。 */
   dispatchRequest(msg: RequestPayload): void {
     const handler = this.router.getMethod(msg.method);
+    const emitFn = (event: string, payload: unknown): void => {
+      this.emit?.(event, payload);
+    };
     const ctx: CallContext = {
       requestId: msg.requestId,
       sid: msg.sid,
-      emit: (event, payload) => this.emit?.(event, payload)
+      id: this.id,
+      emit: emitFn,
+      emitRaw: emitFn
     };
     if (handler === undefined) {
       this.sink?.onResult(responseMsg(msg.sid, msg.requestId, ErrorCode.RpcMethodNotFound));
