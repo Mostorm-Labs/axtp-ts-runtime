@@ -27,10 +27,10 @@ async function setupStandard(
 describe("AxtpClient / AxtpServer（新栈）", () => {
   it("connect → 双方 ready；client.call → server.handle → response", async () => {
     const { server, client } = await setupStandard((s) => {
-      s.handle("add", (_ctx, p) => (p as { a: number }).a + (p as { b: number }).b);
+      s.handleRaw("add", (_ctx, p) => (p as { a: number }).a + (p as { b: number }).b);
     });
     expect(client.isReady).toBe(true);
-    const result = await client.call("add", { a: 2, b: 3 });
+    const result = await client.callRaw("add", { a: 2, b: 3 });
     expect(result).toBe(5);
     await client.close();
     await server.close();
@@ -39,11 +39,11 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
   it("client.emit → server.on 收到", async () => {
     let received: unknown;
     const { server, client } = await setupStandard((s) => {
-      s.on("ping", (data) => {
+      s.onRaw("ping", (data) => {
         received = data;
       });
     });
-    client.emit("ping", { hello: "world" });
+    client.emitRaw("ping", { hello: "world" });
     await new Promise((r) => setTimeout(r, 20));
     expect(received).toEqual({ hello: "world" });
     await client.close();
@@ -54,11 +54,11 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     const { server, client } = await setupStandard();
     let received: unknown;
     const evt: string = "broadcast";
-    client.on(evt, (data) => {
+    client.onRaw(evt, (data) => {
       received = data;
     });
     await new Promise((r) => setTimeout(r, 10));
-    await (server.emit as (event: string, payload: unknown) => Promise<void>)(evt, { x: 1 });
+    await server.emitRaw(evt, { x: 1 });
     await new Promise((r) => setTimeout(r, 20));
     expect(received).toEqual({ x: 1 });
     await client.close();
@@ -67,11 +67,11 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
 
   it("server.call(localId) 单播", async () => {
     const { server, client } = await setupStandard();
-    client.handle("echo", (_ctx, p) => p);
+    client.handleRaw("echo", (_ctx, p) => p);
     const endpoints = server.getEndpoints();
     expect(endpoints.length).toBe(1);
     const localId = server.getLocalId(endpoints[0]) as number;
-    const result = await server.call(localId, "echo", { msg: "hi" });
+    const result = await server.callRaw(localId, "echo", { msg: "hi" });
     expect(result).toEqual({ msg: "hi" });
     await client.close();
     await server.close();

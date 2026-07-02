@@ -105,22 +105,34 @@ export class AxtpServer {
     method: K,
     params: MethodRequest<K>,
     options?: CallOptions
-  ): Promise<MethodResponse<K>>;
-  call(localId: number, method: string, params: unknown, options?: CallOptions): Promise<unknown>;
-  call(localId: number, method: string, params: unknown, options?: CallOptions): Promise<unknown> {
+  ): Promise<MethodResponse<K>> {
+    return this.callRaw(localId, method, params, options) as Promise<MethodResponse<K>>;
+  }
+
+  /** 弱类型 call：method 为任意 string、params 为 unknown。动态/自定义方法名走这里。 */
+  callRaw(localId: number, method: string, params: unknown, options?: CallOptions): Promise<unknown> {
     const ep = this.entries.get(localId);
     if (ep === undefined)
       return Promise.reject(new AxtpError(ErrorCode.NotFound, `endpoint ${localId} not found`));
     return ep.call(method, params, options?.timeoutMs);
   }
 
-  async emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
-  async emit<K extends EventName>(
+  emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
+  emit<K extends EventName>(
     event: K,
     payload: EventPayload<K>,
     filter: (endpoint: AxtpEndpoint) => boolean
   ): Promise<void>;
-  async emit(
+  emit<K extends EventName>(
+    event: K,
+    payload: EventPayload<K>,
+    filter?: (endpoint: AxtpEndpoint) => boolean
+  ): Promise<void> {
+    return this.emitRaw(event, payload, filter);
+  }
+
+  /** 弱类型 emit（广播，可选 filter）。 */
+  async emitRaw(
     event: string,
     payload: unknown,
     filter?: (endpoint: AxtpEndpoint) => boolean
@@ -137,15 +149,21 @@ export class AxtpServer {
       ctx: CallContext,
       params: MethodRequest<K>
     ) => MethodResponse<K> | Promise<MethodResponse<K>>
-  ): () => void;
-  handle(method: string, handler: UntypedMethodHandler): () => void;
-  handle(method: string, handler: UntypedMethodHandler): () => void {
+  ): () => void {
+    return this.handleRaw(method, handler as UntypedMethodHandler);
+  }
+
+  /** 弱类型 handle。 */
+  handleRaw(method: string, handler: UntypedMethodHandler): () => void {
     return this.router.setMethod(method, handler);
   }
 
-  on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void;
-  on(event: string, handler: UntypedEventHandler): () => void;
-  on(event: string, handler: UntypedEventHandler): () => void {
+  on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void {
+    return this.onRaw(event, handler as UntypedEventHandler);
+  }
+
+  /** 弱类型 on。 */
+  onRaw(event: string, handler: UntypedEventHandler): () => void {
     return this.router.addEventListener(event, handler);
   }
 

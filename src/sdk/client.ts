@@ -247,9 +247,12 @@ export class AxtpClient {
     method: K,
     params: MethodRequest<K>,
     options?: CallOptions
-  ): Promise<MethodResponse<K>>;
-  call(method: string, params: unknown, options?: CallOptions): Promise<unknown>;
-  call(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
+  ): Promise<MethodResponse<K>> {
+    return this.callRaw(method, params, options) as Promise<MethodResponse<K>>;
+  }
+
+  /** 弱类型 call：method 为任意 string、params 为 unknown。动态/自定义方法名走这里。 */
+  callRaw(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
     this.requireUsable();
     return this.endpoint!.call(method, params, options?.timeoutMs);
   }
@@ -260,23 +263,32 @@ export class AxtpClient {
       ctx: CallContext,
       params: MethodRequest<K>
     ) => MethodResponse<K> | Promise<MethodResponse<K>>
-  ): () => void;
-  handle(method: string, handler: UntypedMethodHandler): () => void;
-  handle(method: string, handler: UntypedMethodHandler): () => void {
+  ): () => void {
+    return this.handleRaw(method, handler as UntypedMethodHandler);
+  }
+
+  /** 弱类型 handle。 */
+  handleRaw(method: string, handler: UntypedMethodHandler): () => void {
     return this.router.setMethod(method, handler);
   }
 
-  emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void>;
-  emit(event: string, payload: unknown): Promise<void>;
-  emit(event: string, payload: unknown): Promise<void> {
+  emit<K extends EventName>(event: K, payload: EventPayload<K>): Promise<void> {
+    return this.emitRaw(event, payload);
+  }
+
+  /** 弱类型 emit。 */
+  emitRaw(event: string, payload: unknown): Promise<void> {
     this.requireUsable();
     this.endpoint!.emit(event, payload);
     return Promise.resolve();
   }
 
-  on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void;
-  on(event: string, handler: UntypedEventHandler): () => void;
-  on(event: string, handler: UntypedEventHandler): () => void {
+  on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void {
+    return this.onRaw(event, handler as UntypedEventHandler);
+  }
+
+  /** 弱类型 on。非 registry 事件名不进入 eventMasks（computeEventMasks 对未知名自动跳过）。 */
+  onRaw(event: string, handler: UntypedEventHandler): () => void {
     this.subscribedEvents.add(event);
     return this.router.addEventListener(event, handler);
   }
