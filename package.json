@@ -1,6 +1,6 @@
 {
   "name": "@axtp/ts-sdk",
-  "version": "0.11.0-runtime.3",
+  "version": "0.11.0-runtime.4",
   "description": "TypeScript runtime / SDK for AXTP, with optional Node.js and Browser adapters.",
   "type": "module",
   "files": [
