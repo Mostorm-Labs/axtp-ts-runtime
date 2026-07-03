@@ -4,6 +4,7 @@
 // call(id) 单播；emit 广播（可 filter）。
 
 import type { UntypedEventHandler, UntypedMethodHandler } from "../broker/context.js";
+import type { AxtpDiagnostics } from "../diagnostics.js";
 import { HandlerRouter } from "../broker/router.js";
 import { AxtpEndpoint } from "../endpoint/endpoint.js";
 import type { LogicalRole, StreamServerTransport, StreamTransport } from "../transport/contract.js";
@@ -23,6 +24,7 @@ export interface ServerOptions {
   defaultTimeoutMs?: number;
   heartbeatIntervalMs?: number;
   maxFrameSize?: number;
+  diagnostics?: AxtpDiagnostics;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -61,6 +63,7 @@ export class AxtpServer {
       heartbeatIntervalMs: this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_MS,
       defaultTimeoutMs: this.options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
       globalHandlers: this.router,
+      diagnostics: this.options.diagnostics,
       id
     });
     endpoint.onReady.subscribe(() => {

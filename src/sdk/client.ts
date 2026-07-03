@@ -5,6 +5,7 @@
 
 import type { UntypedEventHandler, UntypedMethodHandler } from "../broker/context.js";
 import { HandlerRouter } from "../broker/router.js";
+import { diagnosticData, emitDiagnostic, type AxtpDiagnostics } from "../diagnostics.js";
 import { AxtpEndpoint } from "../endpoint/endpoint.js";
 import {
   ReconnectCoordinator,
@@ -21,7 +22,7 @@ import type {
   MethodRequest,
   MethodResponse
 } from "../types/registry.js";
-import { computeEventMasks } from "../types/registry.js";
+import { computeEventMasks, EVENT_REGISTRY } from "../types/registry.js";
 import type { CallContext, CallOptions, Stream } from "./types.js";
 
 export interface ClientOutboxOptions {
@@ -38,6 +39,7 @@ export interface ClientOptions {
   maxFrameSize?: number;
   reconnect?: ReconnectPolicy;
   outbox?: ClientOutboxOptions;
+  diagnostics?: AxtpDiagnostics;
 }
 
 export type ClientState = "idle" | "connecting" | "ready" | "reconnecting" | "closed";
@@ -157,7 +159,8 @@ export class AxtpClient {
       heartbeatIntervalMs: this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_MS,
       defaultTimeoutMs: this.options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
       globalHandlers: this.router,
-      eventMasks: this.computeEventMasks()
+      eventMasks: this.computeEventMasks(),
+      diagnostics: this.options.diagnostics
     });
     this.endpoint = ep;
     if (this.state !== "ready") this.setState("connecting");
@@ -359,6 +362,13 @@ export class AxtpClient {
   /** 弱类型 on。非 registry 事件名不进入 eventMasks（computeEventMasks 对未知名自动跳过）。 */
   onRaw(event: string, handler: UntypedEventHandler): () => void {
     this.subscribedEvents.add(event);
+    emitDiagnostic(this.options.diagnostics, {
+      level: "debug",
+      scope: "client",
+      event: "listener.add",
+      name: event,
+      known: event in EVENT_REGISTRY
+    });
     return this.router.addEventListener(event, handler);
   }
 
@@ -394,9 +404,16 @@ export class AxtpClient {
   }
 
   private computeEventMasks(): string | undefined {
-    return this.subscribedEvents.size > 0
-      ? computeEventMasks([...this.subscribedEvents])
-      : undefined;
+    if (this.subscribedEvents.size === 0) return undefined;
+    const events = [...this.subscribedEvents];
+    const masks = computeEventMasks(events);
+    emitDiagnostic(this.options.diagnostics, {
+      level: "debug",
+      scope: "client",
+      event: "identify.eventMasks",
+      data: diagnosticData(this.options.diagnostics, { events, masks })
+    });
+    return masks;
   }
 
   private requireUsable(): AxtpEndpoint {

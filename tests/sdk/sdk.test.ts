@@ -2,6 +2,7 @@
 // 覆盖 connect/call/handle/emit/广播/单播/close。
 
 import { describe, expect, it } from "vitest";
+import type { AxtpDiagnosticEntry } from "../../src/diagnostics.js";
 import { AxtpClient } from "../../src/sdk/client.js";
 import { AxtpServer } from "../../src/sdk/server.js";
 import type { StreamClientTransport } from "../../src/transport/contract.js";
@@ -354,6 +355,91 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await clientReady;
     await new Promise((r) => setTimeout(r, 30));
     expect(received).toEqual({ hello: "client" });
+    await client.close();
+    await server.close();
+  });
+
+  it("diagnostics 记录事件监听、出站、入站和无 handler 分发", async () => {
+    const clientLogs: AxtpDiagnosticEntry[] = [];
+    const serverLogs: AxtpDiagnosticEntry[] = [];
+    const loop = createMockStreamLoopback();
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000,
+      diagnostics: {
+        includePayload: true,
+        logger: (entry) => serverLogs.push(entry)
+      }
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000,
+      diagnostics: {
+        includePayload: true,
+        logger: (entry) => clientLogs.push(entry)
+      }
+    });
+
+    client.onRaw("cast.sessionStateChanged", () => {});
+    const clientReady = once(client.onConnect);
+    const serverReady = once(server.onConnect);
+    await server.listen();
+    void client.connect().catch(() => {});
+    await clientReady;
+    await serverReady;
+
+    await server.emitRaw("cast.sessionStateChanged", { receiverPhase: "playing" });
+    await client.emitRaw("cast.sessionStarted", { sessionId: "s1" });
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(clientLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "client",
+        event: "listener.add",
+        name: "cast.sessionStateChanged",
+        known: true
+      })
+    );
+    expect(clientLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "client",
+        event: "identify.eventMasks",
+        data: expect.objectContaining({ events: ["cast.sessionStateChanged"] })
+      })
+    );
+    expect(serverLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "core",
+        event: "rpc.out.event",
+        direction: "out",
+        name: "cast.sessionStateChanged"
+      })
+    );
+    expect(clientLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "core",
+        event: "rpc.in.event",
+        direction: "in",
+        name: "cast.sessionStateChanged"
+      })
+    );
+    expect(clientLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "broker",
+        event: "event.dispatch",
+        name: "cast.sessionStateChanged",
+        handlerCount: 1
+      })
+    );
+    expect(serverLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "broker",
+        event: "event.dispatch",
+        name: "cast.sessionStarted",
+        handlerCount: 0
+      })
+    );
+
     await client.close();
     await server.close();
   });

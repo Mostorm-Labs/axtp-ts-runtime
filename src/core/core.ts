@@ -27,6 +27,7 @@ import {
   type StreamPayload
 } from "../protocol/model.js";
 import type { LogicalRole, PhysicalRole, TransportProfile } from "../transport/contract.js";
+import { diagnosticData, emitDiagnostic, type AxtpDiagnostics } from "../diagnostics.js";
 import { supportsControl } from "../transport/profile.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import { ControlSession } from "./controlSession.js";
@@ -69,6 +70,8 @@ export interface CoreOptions {
   readonly handshakeSeed?: number;
   /** client 在 Identify 携带的 eventMasks（订阅意图）。 */
   readonly eventMasks?: string;
+  /** 可插拔诊断日志。 */
+  readonly diagnostics?: AxtpDiagnostics;
 }
 
 export class AxtpCore {
@@ -84,6 +87,7 @@ export class AxtpCore {
   private gate: GateState = "LINK_CONNECTED";
   private readonly logicalRole: LogicalRole;
   private readonly heartbeatIntervalMs: number;
+  private readonly diagnostics: AxtpDiagnostics | undefined;
   /** inbound readable-side controller（start 回调捕获，流生命周期内有效，供任意时机 enqueue）。 */
   private readableCtl: TransformStreamDefaultController<CoreEvent> | undefined;
   private readonly wireSink: WireSink;
@@ -91,6 +95,7 @@ export class AxtpCore {
   constructor(opts: CoreOptions) {
     this.logicalRole = opts.logicalRole;
     this.heartbeatIntervalMs = opts.heartbeatIntervalMs;
+    this.diagnostics = opts.diagnostics;
 
     if (supportsControl(opts.profile)) {
       const fa = new FramedWireAdapter(opts.maxFrameSize);
@@ -180,6 +185,15 @@ export class AxtpCore {
 
   /** 出站事件（fire-and-forget）。 */
   emit(event: string, payload: unknown): void {
+    emitDiagnostic(this.diagnostics, {
+      level: "debug",
+      scope: "core",
+      event: "rpc.out.event",
+      direction: "out",
+      sid: this.handshake.sid,
+      name: event,
+      data: diagnosticData(this.diagnostics, payload)
+    });
     this.sendRpc(eventMsg(this.handshake.sid, event, payload));
   }
 
@@ -308,6 +322,15 @@ export class AxtpCore {
         this.enqueue({ kind: "rpcRequest", msg });
         break;
       case RpcOp.Event:
+        emitDiagnostic(this.diagnostics, {
+          level: "debug",
+          scope: "core",
+          event: "rpc.in.event",
+          direction: "in",
+          sid: msg.sid,
+          name: msg.eventName,
+          data: diagnosticData(this.diagnostics, msg.data)
+        });
         this.enqueue({ kind: "rpcEvent", msg });
         break;
       case RpcOp.RequestResponse:
