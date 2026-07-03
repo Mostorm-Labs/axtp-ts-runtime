@@ -82,7 +82,8 @@ export class BasicBroker {
               err
             )
           );
-          this.sink?.onResult(responseMsg(msg.sid, msg.requestId, code));
+          const message = err instanceof Error ? err.message : String(err);
+          this.sink?.onResult(responseMsg(msg.sid, msg.requestId, code, { message }));
         }
       );
   }

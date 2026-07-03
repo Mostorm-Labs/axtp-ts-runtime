@@ -36,4 +36,17 @@ describe("JSON RPC response status", () => {
 
     expect(decoded).toBeUndefined();
   });
+
+  it("preserves failure response result details", () => {
+    const details = { message: "displayName is required", field: "displayName" };
+    const encoded = encodeJsonRpc(responseMsg("12345678", 3, ErrorCode.InvalidArgument, details));
+    const wire = JSON.parse(new TextDecoder().decode(encoded)) as {
+      d: { result?: unknown };
+    };
+
+    expect(wire.d.result).toEqual(details);
+
+    const decoded = decodeJsonRpc(encoded) as ResponsePayload | undefined;
+    expect(decoded?.result).toEqual(details);
+  });
 });

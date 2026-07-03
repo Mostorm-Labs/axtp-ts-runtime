@@ -48,7 +48,7 @@ describe("BasicBroker — dispatchRequest", () => {
     expect((results[0] as ResponsePayload).status).toBe(ErrorCode.RpcMethodNotFound);
   });
 
-  it("handler 抛 AxtpError → onResult(其 code) + onError", async () => {
+  it("handler 抛 AxtpError → onResult(其 code + 错误详情) + onError", async () => {
     const { broker, results, stats } = capture();
     broker.setMethod("boom", () => {
       throw new AxtpError(ErrorCode.RpcExecutionFailed, "x");
@@ -56,10 +56,11 @@ describe("BasicBroker — dispatchRequest", () => {
     broker.dispatchRequest(requestMsg("12345678", 2, "boom", {}));
     await tick();
     expect((results[0] as ResponsePayload).status).toBe(ErrorCode.RpcExecutionFailed);
+    expect((results[0] as ResponsePayload).result).toEqual({ message: "x" });
     expect(stats.errs).toBe(1);
   });
 
-  it("handler 抛普通 Error → onResult(RpcExecutionFailed) + onError", async () => {
+  it("handler 抛普通 Error → onResult(RpcExecutionFailed + 错误详情) + onError", async () => {
     const { broker, results, stats } = capture();
     broker.setMethod("boom", () => {
       throw new Error("plain");
@@ -67,6 +68,7 @@ describe("BasicBroker — dispatchRequest", () => {
     broker.dispatchRequest(requestMsg("12345678", 2, "boom", {}));
     await tick();
     expect((results[0] as ResponsePayload).status).toBe(ErrorCode.RpcExecutionFailed);
+    expect((results[0] as ResponsePayload).result).toEqual({ message: "plain" });
     expect(stats.errs).toBe(1);
   });
 

@@ -7,11 +7,12 @@
 // reader.read() 自然等待 transform 产出的 chunk。
 
 import { describe, expect, it } from "vitest";
+import { AxtpCore } from "../../src/core/core.js";
 import { concatBytes, type Bytes } from "../../src/io/bytes.js";
 import { decodeControl, defaultOpenParams, encodeOpen } from "../../src/protocol/codec/control.js";
 import { encodeJsonRpc } from "../../src/protocol/codec/jsonRpc.js";
-import { AxtpCore } from "../../src/core/core.js";
 import { FramedWireAdapter } from "../../src/core/wire/framed.js";
+
 import type { CoreEvent } from "../../src/core/events.js";
 import type { WireSink } from "../../src/core/wire/adapter.js";
 import {
@@ -21,9 +22,11 @@ import {
   identifiedMsg,
   identifyMsg,
   requestMsg,
+  responseMsg,
   type RpcMessage,
   type StreamPayload
 } from "../../src/protocol/model.js";
+import { AxtpError, ErrorCode } from "../../src/types/error.js";
 import { framedBinaryProfile, unframedJsonProfile } from "../../src/transport/profile.js";
 
 async function readEvents(core: AxtpCore, n: number): Promise<CoreEvent[]> {
@@ -192,5 +195,38 @@ describe("AxtpCore — unframed client 端到端", () => {
 
     void w.write(encodeJsonRpc(requestMsg("3", 1, "audio.get", {})));
     expect((await readEvents(core, 1))[0]).toMatchObject({ kind: "rpcRequest" });
+  });
+
+  it("call rejects with server failure response details", async () => {
+    const core = new AxtpCore({
+      profile: unframedJsonProfile(),
+      physicalRole: "client",
+      logicalRole: "client",
+      maxFrameSize: 4096,
+      heartbeatIntervalMs: 1000
+    });
+    core.markLinkReady();
+    await readEvents(core, 1);
+    const w = core.inbound.writable.getWriter();
+    void w.write(encodeJsonRpc(helloMsg("", "1.0.0")));
+    await readOut(core, 1);
+    void w.write(encodeJsonRpc(identifiedMsg("1234abcd")));
+    await readEvents(core, 1);
+
+    const callPromise = core.call("cast.setAudio", { enabled: true }, 1000);
+    const request = JSON.parse(new TextDecoder().decode((await readOut(core, 1))[0])) as {
+      d: { id: number };
+    };
+    const details = { message: "audio control is not supported", capability: "audio" };
+    void w.write(encodeJsonRpc(responseMsg("1234abcd", request.d.id, ErrorCode.NotSupported, details)));
+
+    await expect(callPromise).rejects.toMatchObject({
+      name: "AxtpError",
+      code: ErrorCode.NotSupported,
+      requestId: request.d.id,
+      message: "call cast.setAudio failed: audio control is not supported"
+    });
+    await expect(callPromise).rejects.toBeInstanceOf(AxtpError);
+    await expect(callPromise).rejects.toHaveProperty("cause", details);
   });
 });

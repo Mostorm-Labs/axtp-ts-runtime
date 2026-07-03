@@ -149,8 +149,7 @@ export function encodeJsonRpc(msg: RpcMessage): Bytes {
         id: msg.requestId,
         status: { ok: msg.status === ErrorCode.Success, code: msg.status }
       };
-      if (msg.status === ErrorCode.Success && msg.result !== undefined)
-        d.result = msg.result as JsonValue;
+      if (msg.result !== undefined) d.result = msg.result as JsonValue;
       return toBytes(JSON.stringify({ sid: msg.sid, op: msg.op, d }));
     }
   }
