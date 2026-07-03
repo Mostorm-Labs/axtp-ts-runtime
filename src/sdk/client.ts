@@ -24,6 +24,12 @@ import type {
 import { computeEventMasks } from "../types/registry.js";
 import type { CallContext, CallOptions, Stream } from "./types.js";
 
+export interface ClientOutboxOptions {
+  enabled?: boolean;
+  maxSize?: number;
+  overflow?: "drop-oldest" | "drop-newest" | "reject";
+}
+
 export interface ClientOptions {
   logicalRole?: LogicalRole;
   defaultTimeoutMs?: number;
@@ -31,6 +37,7 @@ export interface ClientOptions {
   heartbeatIntervalMs?: number;
   maxFrameSize?: number;
   reconnect?: ReconnectPolicy;
+  outbox?: ClientOutboxOptions;
 }
 
 export type ClientState = "idle" | "connecting" | "ready" | "reconnecting" | "closed";
@@ -40,6 +47,13 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_FRAME_SIZE = 4096;
 const DEFAULT_HEARTBEAT_MS = 5_000;
 
+type QueuedEvent = {
+  event: string;
+  payload: unknown;
+  resolve: () => void;
+  reject: (err: AxtpError) => void;
+};
+
 export class AxtpClient {
   /** handler 路由：跨连接复用（作为每个 Endpoint 的 globalHandlers）。 */
   private readonly router = new HandlerRouter();
@@ -48,6 +62,7 @@ export class AxtpClient {
   private state: ClientState = "idle";
   private firstReady = true;
   private coordinator: ReconnectCoordinator | undefined;
+  private readonly eventOutbox: QueuedEvent[] = [];
   /** connect() 等待首次 ready 的 resolver（首次 ready resolve；close/重连耗尽 reject）。 */
   private readyWait: { resolve: () => void; reject: (e: AxtpError) => void } | undefined;
 
@@ -100,6 +115,7 @@ export class AxtpClient {
     void this.tryOpen(policy.enabled);
     await this.awaitReady(timeoutMs);
     this.setState("ready");
+    this.flushOutbox();
     this.onConnect.emit(undefined);
   }
 
@@ -160,6 +176,7 @@ export class AxtpClient {
       this.setState("ready");
       this.onReconnect.emit({ attempt: this.coordinator?.attemptCount ?? 0 });
     }
+    this.flushOutbox();
   }
 
   private onEndpointClose(remote: boolean): void {
@@ -251,8 +268,8 @@ export class AxtpClient {
   }
 
   /** 弱类型 call：method 为任意 string、params 为 unknown。动态/自定义方法名走这里。 */
-  callRaw(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
-    const ep = this.requireUsable();
+  async callRaw(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
+    const ep = options?.offlinePolicy === "wait-ready" ? await this.waitForUsable() : this.requireUsable();
     return ep.call(method, params, options?.timeoutMs);
   }
 
@@ -277,9 +294,60 @@ export class AxtpClient {
 
   /** 弱类型 emit。 */
   emitRaw(event: string, payload: unknown): Promise<void> {
-    const ep = this.requireUsable();
-    ep.emit(event, payload);
-    return Promise.resolve();
+    const ep = this.endpoint;
+    if (this.state === "ready" && ep !== undefined) {
+      ep.emit(event, payload);
+      return Promise.resolve();
+    }
+    return this.enqueueEvent(event, payload);
+  }
+
+  private enqueueEvent(event: string, payload: unknown): Promise<void> {
+    if (this.state === "closed")
+      return Promise.reject(new AxtpError(ErrorCode.TransportDisconnected, "client closed"));
+    const outbox = this.options.outbox;
+    if (outbox?.enabled !== true) {
+      try {
+        this.requireUsable();
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    }
+    const maxSize = outbox?.maxSize ?? 1000;
+    const overflow = outbox?.overflow ?? "reject";
+    if (this.eventOutbox.length >= maxSize) {
+      if (overflow === "reject") {
+        return Promise.reject(new AxtpError(ErrorCode.InvalidState, "client event outbox full"));
+      }
+      if (overflow === "drop-newest") return Promise.resolve();
+      const dropped = this.eventOutbox.shift();
+      dropped?.resolve();
+    }
+    return new Promise<void>((resolve, reject) => {
+      this.eventOutbox.push({ event, payload, resolve, reject });
+      this.flushOutbox();
+    });
+  }
+
+  private flushOutbox(): void {
+    while (this.state === "ready" && this.endpoint !== undefined && this.eventOutbox.length > 0) {
+      const item = this.eventOutbox.shift() as QueuedEvent;
+      try {
+        this.endpoint.emit(item.event, item.payload);
+        item.resolve();
+      } catch (err) {
+        item.reject(
+          err instanceof AxtpError
+            ? err
+            : new AxtpError(ErrorCode.TransportDisconnected, "failed to flush event outbox", err)
+        );
+      }
+    }
+  }
+
+  private rejectOutbox(err: AxtpError): void {
+    const queued = this.eventOutbox.splice(0);
+    for (const item of queued) item.reject(err);
   }
 
   on<K extends EventName>(event: K, handler: (payload: EventPayload<K>) => void): () => void {
@@ -318,7 +386,9 @@ export class AxtpClient {
     this.coordinator?.stop();
     this.setState("closed");
     this.endpoint?.close();
-    this.failReady(new AxtpError(ErrorCode.TransportDisconnected, "closed"));
+    const err = new AxtpError(ErrorCode.TransportDisconnected, "closed");
+    this.failReady(err);
+    this.rejectOutbox(err);
   }
 
   private computeEventMasks(): string | undefined {
@@ -336,5 +406,43 @@ export class AxtpClient {
     if (this.state !== "ready" || ep === undefined)
       throw new AxtpError(ErrorCode.InvalidState, "client not ready");
     return ep;
+  }
+
+  private waitForUsable(): Promise<AxtpEndpoint> {
+    try {
+      return Promise.resolve(this.requireUsable());
+    } catch (err) {
+      if (this.state === "closed") return Promise.reject(err);
+      return new Promise<AxtpEndpoint>((resolve, reject) => {
+        const cleanup = () => {
+          unsubscribeConnect();
+          unsubscribeFailed();
+          unsubscribeState();
+        };
+        const resolveIfReady = () => {
+          try {
+            const ep = this.requireUsable();
+            cleanup();
+            resolve(ep);
+          } catch {
+            /* still not ready */
+          }
+        };
+        const unsubscribeConnect = this.onConnect.subscribe(resolveIfReady);
+        const unsubscribeFailed = this.onReconnectFailed.subscribe(() => {
+          cleanup();
+          reject(new AxtpError(ErrorCode.TransportDisconnected, "reconnect attempts exhausted"));
+        });
+        const unsubscribeState = this.onStateChange.subscribe((state) => {
+          if (state === "closed") {
+            cleanup();
+            reject(new AxtpError(ErrorCode.TransportDisconnected, "client closed"));
+          } else if (state === "ready") {
+            resolveIfReady();
+          }
+        });
+        resolveIfReady();
+      });
+    }
   }
 }
