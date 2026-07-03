@@ -3,10 +3,11 @@
 //   LINK_CONNECTED → FRAMING_READY → APP_READY → CLOSING。
 //
 // 角色：Logical Server 发 Hello/Identified、生成 sid；Logical Client 发 Identify、校验 axtpVersion。
-// Hello 发送方 = Logical Server（与 Physical 角色正交）。sid = 8 位 hex，混合 randomSeed（spec:207）。
+// Hello 发送方 = Logical Server（与 Physical 角色正交）。本端生成 sid 时使用 8 位 hex，混合 randomSeed（spec:207）。
 // 由 Core inbound transform 编排：link ready 后 server 发 startHello()，handle() 的 outbound 由 Core 发出。
 
 import { AXTP_SPEC_VERSION } from "../protocol/generated/axtpVersion.js";
+import { AXTP_GENERATED_VERSION } from "../protocol/generated/axtpGeneratedVersion.js";
 import type {
   HelloPayload,
   IdentifyPayload,
@@ -18,10 +19,22 @@ import type { LogicalRole } from "../transport/contract.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import type { GateState } from "./runtimeGate.js";
 
-/** axtpVersion 兼容判定：主版本=1 即接受（spec:205 spec compatibility authority）。支持 "1"/"1.0"/"1.0.0"。 */
+function parseVersionParts(version: string): readonly [number, number] | undefined {
+  const [majorPart, minorPart = "0"] = version.split(".");
+  const major = Number.parseInt(majorPart, 10);
+  const minor = Number.parseInt(minorPart, 10);
+  if (!Number.isInteger(major) || !Number.isInteger(minor)) return undefined;
+  return [major, minor];
+}
+
+/** axtpVersion 兼容判定：主版本=1 即接受；兼容旧实现误填的当前锁定 spec 0.x minor。 */
 function isAxtpVersionCompatible(version: string): boolean {
-  const major = Number.parseInt(version, 10);
-  return Number.isInteger(major) && major === 1;
+  const incoming = parseVersionParts(version);
+  if (incoming === undefined) return false;
+  const [major, minor] = incoming;
+  if (major === 1) return true;
+  const locked = parseVersionParts(AXTP_GENERATED_VERSION.specVersion);
+  return locked !== undefined && major === 0 && locked[0] === 0 && minor === locked[1];
 }
 
 export interface HandshakeResult {
@@ -138,8 +151,10 @@ export class Handshake {
   private handleIdentified(payload: IdentifiedPayload): HandshakeResult {
     if (this.logicalRole !== "client") return { becameReady: false };
     const sid = payload.sid;
-    // spec:211 APP_READY 后 malformed/empty/non-hex/zero sid MUST 拒绝
-    if (!/^[0-9a-fA-F]{8}$/.test(sid) || sid === "00000000") {
+    // 接收端把 sid 作为 peer 分配的 opaque token 原样保存/回传。
+    // 虽然本端生成 sid 时使用 8 位 hex，但这里不规范化短字符串（如 "3" -> "00000003"），
+    // 否则后续业务消息可能和对端 session 表使用的原始 sid 不一致。
+    if (sid.length === 0 || sid === "00000000") {
       return {
         becameReady: false,
         error: new AxtpError(ErrorCode.RpcPayloadInvalid, `invalid sid: ${sid}`)
