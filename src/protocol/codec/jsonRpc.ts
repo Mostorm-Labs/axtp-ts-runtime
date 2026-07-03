@@ -3,7 +3,7 @@
 // 一次 parse 直出结构化 RpcMessage，一次 stringify 直出 wire，无 bytes 中转/重复编解码。
 //
 // Request:    d = { id, method, params }
-// Response:   d = { id, status, result }   (status = uint errorCode; 0=SUCCESS)
+// Response:   d = { id, status, result }   (status = { ok, code }; code=uint errorCode)
 // Event:      d = { event, data }
 // Hello:      d = { axtpVersion }
 // Identify:   d = { randomSeed, eventMasks }
@@ -50,6 +50,19 @@ function parseRequestIdFromEnvelope(object: JsonObject): number {
   return 0;
 }
 
+function parseResponseStatus(value: JsonValue | undefined): ErrorCode {
+  const status = asObject(value);
+  const { ok, code } = status;
+  if (typeof ok !== "boolean") throw new Error("invalid status.ok");
+  if (typeof code !== "number" || !Number.isInteger(code) || code < 0 || code > 0xffffffff) {
+    throw new Error("invalid status.code");
+  }
+  if (ok !== (code === ErrorCode.Success)) {
+    throw new Error("inconsistent response status");
+  }
+  return (code >>> 0) as ErrorCode;
+}
+
 /** 把 envelope JSON 文本解码为 RpcMessage（判别联合）。返回 undefined 表示无法解析。 */
 export function decodeJsonRpc(text: Bytes | string): RpcMessage | undefined {
   let object: JsonObject;
@@ -90,7 +103,7 @@ export function decodeJsonRpc(text: Bytes | string): RpcMessage | undefined {
           params: d.params ?? {}
         };
       case RpcOp.RequestResponse: {
-        const status = typeof d.status === "number" ? d.status >>> 0 : ErrorCode.Success;
+        const status = parseResponseStatus(d.status);
         return {
           op,
           sid,
@@ -132,7 +145,10 @@ export function encodeJsonRpc(msg: RpcMessage): Bytes {
       return toBytes(JSON.stringify({ sid: msg.sid, op: msg.op, d }));
     }
     case RpcOp.RequestResponse: {
-      const d: JsonObject = { id: msg.requestId, status: msg.status };
+      const d: JsonObject = {
+        id: msg.requestId,
+        status: { ok: msg.status === ErrorCode.Success, code: msg.status }
+      };
       if (msg.status === ErrorCode.Success && msg.result !== undefined)
         d.result = msg.result as JsonValue;
       return toBytes(JSON.stringify({ sid: msg.sid, op: msg.op, d }));

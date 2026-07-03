@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { AXTP_SPEC_VERSION } from "../../src/protocol/generated/axtpVersion.js";
+import { AXTP_GENERATED_VERSION } from "../../src/protocol/generated/axtpGeneratedVersion.js";
 import {
   RpcOp,
   helloMsg,
@@ -55,6 +56,22 @@ describe("Handshake — Logical Client", () => {
     expect(r.outbound?.op).toBe(RpcOp.Identify);
   });
 
+  it("handle(Hello 锁定 spec 版本) → 兼容旧实现误用 specVersion 的握手", () => {
+    const h = new Handshake("client", 1);
+    h.onLinkReady();
+    const r = h.handle(helloMsg("", AXTP_GENERATED_VERSION.specVersion));
+    expect(r.becameReady).toBe(false);
+    expect(r.outbound?.op).toBe(RpcOp.Identify);
+  });
+
+  it("handle(Hello 非锁定 0.x minor) → error", () => {
+    const h = new Handshake("client", 1);
+    h.onLinkReady();
+    const r = h.handle(helloMsg("", "0.12.0"));
+    expect(r.error).toBeDefined();
+    expect(r.outbound).toBeUndefined();
+  });
+
   it("handle(Hello 不兼容主版本) → error", () => {
     const h = new Handshake("client", 1);
     h.onLinkReady();
@@ -79,7 +96,17 @@ describe("Handshake — Logical Client", () => {
     expect(h.state).toBe("APP_READY");
   });
 
-  it("handle(Identified 非法 sid) → error（zero / 非 hex / 长度错）", () => {
+  it("handle(Identified 短 sid) → becameReady、sid 原样记录", () => {
+    const h = new Handshake("client", 1);
+    h.onLinkReady();
+    h.handle(helloMsg("", "1.0.0")); // 推进到等 Identified
+    const r = h.handle(identifiedMsg("3"));
+    expect(r.becameReady).toBe(true);
+    expect(h.sid).toBe("3");
+    expect(h.state).toBe("APP_READY");
+  });
+
+  it("handle(Identified 非法 sid) → error（empty / zero）", () => {
     const h = () => {
       const x = new Handshake("client", 1);
       x.onLinkReady();
@@ -87,8 +114,7 @@ describe("Handshake — Logical Client", () => {
       return x;
     };
     expect(h().handle(identifiedMsg("00000000")).error).toBeDefined();
-    expect(h().handle(identifiedMsg("nothex!!")).error).toBeDefined();
-    expect(h().handle(identifiedMsg("123")).error).toBeDefined();
+    expect(h().handle(identifiedMsg("")).error).toBeDefined();
   });
 });
 

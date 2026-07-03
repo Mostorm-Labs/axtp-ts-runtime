@@ -172,4 +172,25 @@ describe("AxtpCore — unframed client 端到端", () => {
     expect(ev[0]).toMatchObject({ kind: "handshakeReady", sid: "1234abcd" });
     expect(core.isAppReady).toBe(true);
   });
+
+  it("收短 sid Identified 后，用同一 sid 的业务消息可继续路由", async () => {
+    const core = new AxtpCore({
+      profile: unframedJsonProfile(),
+      physicalRole: "client",
+      logicalRole: "client",
+      maxFrameSize: 4096,
+      heartbeatIntervalMs: 1000
+    });
+    core.markLinkReady();
+    await readEvents(core, 1); // linkReady
+    const w = core.inbound.writable.getWriter();
+    void w.write(encodeJsonRpc(helloMsg("", "1.0.0")));
+    await readOut(core, 1); // Identify
+    void w.write(encodeJsonRpc(identifiedMsg("3")));
+    const ready = await readEvents(core, 1);
+    expect(ready[0]).toMatchObject({ kind: "handshakeReady", sid: "3" });
+
+    void w.write(encodeJsonRpc(requestMsg("3", 1, "audio.get", {})));
+    expect((await readEvents(core, 1))[0]).toMatchObject({ kind: "rpcRequest" });
+  });
 });

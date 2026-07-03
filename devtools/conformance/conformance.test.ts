@@ -399,7 +399,7 @@ async function caseRequestIdMatch(): Promise<boolean> {
   });
 }
 
-// error.standard_error_shape：错误响应 status 为 uint errorCode（number），非 {code,message} 对象。
+// error.standard_error_shape：错误响应 status 为 {ok, code} 对象，code 映射到 AxtpError.code。
 async function caseStandardErrorShape(): Promise<boolean> {
   return withPair(async (client) => {
     try {
