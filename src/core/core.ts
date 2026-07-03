@@ -38,6 +38,25 @@ import type { WireAdapter, WireSink } from "./wire/adapter.js";
 import { FramedWireAdapter } from "./wire/framed.js";
 import { UnframedWireAdapter } from "./wire/unframed.js";
 
+function formatErrorDetail(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value !== "object") return undefined;
+
+  const object = value as Record<string, unknown>;
+  for (const key of ["message", "reason", "error", "detail", "details"]) {
+    const detail = object[key];
+    if (typeof detail === "string" && detail.length > 0) return detail;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+}
+
 export interface CoreOptions {
   readonly profile: TransportProfile;
   readonly physicalRole: PhysicalRole;
@@ -151,7 +170,9 @@ export class AxtpCore {
     );
     return promise.then((resp) => {
       if (resp.status !== ErrorCode.Success) {
-        throw new AxtpError(resp.status, `call ${method} failed`, undefined, resp.requestId);
+        const detail = formatErrorDetail(resp.result) ?? ErrorCode[resp.status];
+        const message = detail ? `call ${method} failed: ${detail}` : `call ${method} failed`;
+        throw new AxtpError(resp.status, message, resp.result, resp.requestId);
       }
       return resp.result ?? {};
     });
