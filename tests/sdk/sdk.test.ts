@@ -4,8 +4,10 @@
 import { describe, expect, it } from "vitest";
 import { AxtpClient } from "../../src/sdk/client.js";
 import { AxtpServer } from "../../src/sdk/server.js";
+import type { StreamClientTransport } from "../../src/transport/contract.js";
 import { ErrorCode } from "../../src/types/error.js";
 import { createMockStreamLoopback } from "../../src/transport/mock/mockStreamTransport.js";
+import { framedBinaryProfile } from "../../src/transport/profile.js";
 import { once } from "../helpers/eventStreamHelpers.js";
 
 /** 标准 TCP 拓扑：server=device（logicalRole server 发 Hello），client=app（logicalRole client 发 Identify）。 */
@@ -153,6 +155,30 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
 
     await expect(emitted).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
     await expect(called).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
+  });
+
+  it("rejects queued client events when reconnect attempts are exhausted", async () => {
+    const failingTransport: StreamClientTransport = {
+      profile: framedBinaryProfile("AXTP-TCP"),
+      connect: () => Promise.reject(new Error("offline"))
+    };
+    const client = new AxtpClient(failingTransport, {
+      logicalRole: "client",
+      reconnect: {
+        enabled: true,
+        initialDelayMs: 1,
+        maxDelayMs: 1,
+        maxAttempts: 1,
+        jitter: false
+      },
+      outbox: { enabled: true }
+    });
+
+    const connected = client.connect(50);
+    const emitted = client.emitRaw("queued", { n: 1 });
+
+    await expect(connected).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
+    await expect(emitted).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
   });
 
   it("client.emit → server.on 收到", async () => {

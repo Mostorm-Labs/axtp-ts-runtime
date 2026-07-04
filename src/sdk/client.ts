@@ -208,8 +208,10 @@ export class AxtpClient {
   }
 
   private handleReconnectFailed(): void {
-    this.failReady(new AxtpError(ErrorCode.TransportDisconnected, "reconnect attempts exhausted"));
+    const err = new AxtpError(ErrorCode.TransportDisconnected, "reconnect attempts exhausted");
+    this.failReady(err);
     this.setState("closed");
+    this.rejectOutbox(err);
     this.onReconnectFailed.emit(undefined);
   }
 
