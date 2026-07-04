@@ -6,9 +6,9 @@ import type { AxtpDiagnosticEntry } from "../../src/diagnostics.js";
 import { AxtpClient } from "../../src/sdk/client.js";
 import { AxtpServer } from "../../src/sdk/server.js";
 import type { StreamClientTransport } from "../../src/transport/contract.js";
-import { ErrorCode } from "../../src/types/error.js";
 import { createMockStreamLoopback } from "../../src/transport/mock/mockStreamTransport.js";
 import { framedBinaryProfile } from "../../src/transport/profile.js";
+import { ErrorCode } from "../../src/types/error.js";
 import { once } from "../helpers/eventStreamHelpers.js";
 
 /** 标准 TCP 拓扑：server=device（logicalRole server 发 Hello），client=app（logicalRole client 发 Identify）。 */
@@ -43,7 +43,10 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
   it("queues client events emitted before ready when outbox is enabled", async () => {
     let received: unknown;
     const loop = createMockStreamLoopback();
-    const server = new AxtpServer(loop.server, { logicalRole: "server", heartbeatIntervalMs: 60000 });
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000
+    });
     const client = new AxtpClient(loop.client, {
       logicalRole: "client",
       heartbeatIntervalMs: 60000,
@@ -84,7 +87,10 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
   it("drops newest client events when configured outbox overflow is drop-newest", async () => {
     const loop = createMockStreamLoopback();
     const received: unknown[] = [];
-    const server = new AxtpServer(loop.server, { logicalRole: "server", heartbeatIntervalMs: 60000 });
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000
+    });
     const client = new AxtpClient(loop.client, {
       logicalRole: "client",
       heartbeatIntervalMs: 60000,
@@ -107,7 +113,10 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
   it("drops oldest client events when configured outbox overflow is drop-oldest", async () => {
     const loop = createMockStreamLoopback();
     const received: unknown[] = [];
-    const server = new AxtpServer(loop.server, { logicalRole: "server", heartbeatIntervalMs: 60000 });
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000
+    });
     const client = new AxtpClient(loop.client, {
       logicalRole: "client",
       heartbeatIntervalMs: 60000,
@@ -130,8 +139,14 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
 
   it("waits until ready before sending calls when offlinePolicy is wait-ready", async () => {
     const loop = createMockStreamLoopback();
-    const server = new AxtpServer(loop.server, { logicalRole: "server", heartbeatIntervalMs: 60000 });
-    const client = new AxtpClient(loop.client, { logicalRole: "client", heartbeatIntervalMs: 60000 });
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000
+    });
     server.handleRaw("add", (_ctx, p) => (p as { a: number }).a + (p as { b: number }).b);
 
     await server.listen();
@@ -141,6 +156,185 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
 
     await client.close();
     await server.close();
+  });
+
+  it("queues RPC calls until ready when offlinePolicy is queue", async () => {
+    const loop = createMockStreamLoopback();
+    const received: unknown[] = [];
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000
+    });
+    server.handleRaw("setName", (_ctx, p) => {
+      received.push(p);
+      return (p as { name: string }).name;
+    });
+
+    await server.listen();
+    const called = client.callRaw("setName", { name: "Room A" }, { offlinePolicy: "queue" });
+    await client.connect();
+
+    await expect(called).resolves.toBe("Room A");
+    expect(received).toEqual([{ name: "Room A" }]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("coalesces queued RPC calls by coalesceKey and resolves previous calls with the newest result", async () => {
+    const loop = createMockStreamLoopback();
+    const received: unknown[] = [];
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000
+    });
+    server.handleRaw("setName", (_ctx, p) => {
+      received.push(p);
+      return `applied:${(p as { name: string }).name}`;
+    });
+
+    await server.listen();
+    const first = client.callRaw(
+      "setName",
+      { name: "Room A" },
+      { offlinePolicy: "queue", coalesceKey: "setName", coalescePrevious: "resolve-with-next" }
+    );
+    const second = client.callRaw(
+      "setName",
+      { name: "Room B" },
+      { offlinePolicy: "queue", coalesceKey: "setName", coalescePrevious: "resolve-with-next" }
+    );
+    const third = client.callRaw(
+      "setName",
+      { name: "Room C" },
+      { offlinePolicy: "queue", coalesceKey: "setName", coalescePrevious: "resolve-with-next" }
+    );
+
+    await client.connect();
+
+    await expect(first).resolves.toBe("applied:Room C");
+    await expect(second).resolves.toBe("applied:Room C");
+    await expect(third).resolves.toBe("applied:Room C");
+    expect(received).toEqual([{ name: "Room C" }]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("rejects previous queued RPC calls when coalescePrevious is reject", async () => {
+    const loop = createMockStreamLoopback();
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000
+    });
+    server.handleRaw("setName", (_ctx, p) => (p as { name: string }).name);
+
+    await server.listen();
+    const first = client.callRaw(
+      "setName",
+      { name: "Room A" },
+      { offlinePolicy: "queue", coalesceKey: "setName", coalescePrevious: "reject" }
+    );
+    const second = client.callRaw(
+      "setName",
+      { name: "Room B" },
+      { offlinePolicy: "queue", coalesceKey: "setName", coalescePrevious: "reject" }
+    );
+
+    await expect(first).rejects.toMatchObject({ code: ErrorCode.InvalidState });
+    await client.connect();
+    await expect(second).resolves.toBe("Room B");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("drops previous queued RPC calls when coalescePrevious is drop", async () => {
+    const loop = createMockStreamLoopback();
+    const received: unknown[] = [];
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000
+    });
+    server.handleRaw("setName", (_ctx, p) => {
+      received.push(p);
+      return (p as { name: string }).name;
+    });
+
+    await server.listen();
+    const first = client.callRaw(
+      "setName",
+      { name: "Room A" },
+      { offlinePolicy: "queue", coalesceKey: "setName", coalescePrevious: "drop" }
+    );
+    const second = client.callRaw(
+      "setName",
+      { name: "Room B" },
+      { offlinePolicy: "queue", coalesceKey: "setName", coalescePrevious: "drop" }
+    );
+
+    await expect(first).resolves.toBeUndefined();
+    await client.connect();
+    await expect(second).resolves.toBe("Room B");
+    expect(received).toEqual([{ name: "Room B" }]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("rejects new queued RPC calls when the call queue is full", async () => {
+    const loop = createMockStreamLoopback();
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      calls: { queue: { maxSize: 1, overflow: "reject" } }
+    });
+
+    const first = client.callRaw("setName", { name: "Room A" }, { offlinePolicy: "queue" });
+    await expect(
+      client.callRaw("setName", { name: "Room B" }, { offlinePolicy: "queue" })
+    ).rejects.toMatchObject({ code: ErrorCode.InvalidState });
+
+    await client.close();
+    await expect(first).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
+  });
+
+  it("rejects queued RPC calls when reconnect attempts are exhausted", async () => {
+    const failingTransport: StreamClientTransport = {
+      profile: framedBinaryProfile("AXTP-TCP"),
+      connect: () => Promise.reject(new Error("offline"))
+    };
+    const client = new AxtpClient(failingTransport, {
+      logicalRole: "client",
+      reconnect: {
+        enabled: true,
+        initialDelayMs: 1,
+        maxDelayMs: 1,
+        maxAttempts: 1,
+        jitter: false
+      }
+    });
+
+    const connected = client.connect(50);
+    const called = client.callRaw("setName", { name: "Room A" }, { offlinePolicy: "queue" });
+
+    await expect(connected).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
+    await expect(called).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
   });
 
   it("rejects queued client events and wait-ready calls when closed before ready", async () => {

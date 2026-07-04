@@ -3,7 +3,13 @@
 
 // ===== SDK 门面 =====
 export { AxtpClient } from "./sdk/client.js";
-export type { ClientOptions, ClientState } from "./sdk/client.js";
+export type {
+  ClientCallQueueOptions,
+  ClientCallsOptions,
+  ClientOptions,
+  ClientOutboxOptions,
+  ClientState
+} from "./sdk/client.js";
 export { AxtpServer } from "./sdk/server.js";
 export type { ServerOptions } from "./sdk/server.js";
 
@@ -16,7 +22,12 @@ export { Stream } from "./endpoint/stream.js";
 export type { StreamStats } from "./endpoint/stream.js";
 
 // ===== handler / call 类型 =====
-export type { CallContext, CallOptions } from "./sdk/types.js";
+export type {
+  CallContext,
+  CallOfflinePolicy,
+  CallOptions,
+  QueuedCallCoalescePrevious
+} from "./sdk/types.js";
 export type {
   AxtpDiagnosticEntry,
   AxtpDiagnosticLevel,

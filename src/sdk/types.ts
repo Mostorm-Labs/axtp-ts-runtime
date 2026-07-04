@@ -3,9 +3,12 @@
 export type { CallContext } from "../broker/context.js";
 export type { Stream } from "../endpoint/stream.js";
 
-export type CallOfflinePolicy = "fail-fast" | "wait-ready";
+export type CallOfflinePolicy = "fail-fast" | "wait-ready" | "queue";
+export type QueuedCallCoalescePrevious = "resolve-with-next" | "reject" | "drop";
 
 export interface CallOptions {
   timeoutMs?: number;
   offlinePolicy?: CallOfflinePolicy;
+  coalesceKey?: string;
+  coalescePrevious?: QueuedCallCoalescePrevious;
 }
