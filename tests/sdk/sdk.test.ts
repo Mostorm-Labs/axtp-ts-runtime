@@ -4,7 +4,10 @@
 import { describe, expect, it } from "vitest";
 import { AxtpClient } from "../../src/sdk/client.js";
 import { AxtpServer } from "../../src/sdk/server.js";
+import type { StreamClientTransport } from "../../src/transport/contract.js";
+import { ErrorCode } from "../../src/types/error.js";
 import { createMockStreamLoopback } from "../../src/transport/mock/mockStreamTransport.js";
+import { framedBinaryProfile } from "../../src/transport/profile.js";
 import { once } from "../helpers/eventStreamHelpers.js";
 
 /** 标准 TCP 拓扑：server=device（logicalRole server 发 Hello），client=app（logicalRole client 发 Identify）。 */
@@ -34,6 +37,148 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     expect(result).toBe(5);
     await client.close();
     await server.close();
+  });
+
+  it("queues client events emitted before ready when outbox is enabled", async () => {
+    let received: unknown;
+    const loop = createMockStreamLoopback();
+    const server = new AxtpServer(loop.server, { logicalRole: "server", heartbeatIntervalMs: 60000 });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000,
+      outbox: { enabled: true }
+    });
+    server.onRaw("early", (data) => {
+      received = data;
+    });
+
+    await server.listen();
+    const connected = client.connect();
+    const emitted = client.emitRaw("early", { queued: true });
+
+    await connected;
+    await emitted;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(received).toEqual({ queued: true });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("rejects new client events when the outbox is full", async () => {
+    const loop = createMockStreamLoopback();
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      outbox: { enabled: true, maxSize: 1, overflow: "reject" }
+    });
+
+    const first = client.emitRaw("queued", { n: 1 });
+    await expect(client.emitRaw("queued", { n: 2 })).rejects.toMatchObject({
+      code: ErrorCode.InvalidState
+    });
+    await client.close();
+    await expect(first).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
+  });
+
+  it("drops newest client events when configured outbox overflow is drop-newest", async () => {
+    const loop = createMockStreamLoopback();
+    const received: unknown[] = [];
+    const server = new AxtpServer(loop.server, { logicalRole: "server", heartbeatIntervalMs: 60000 });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000,
+      outbox: { enabled: true, maxSize: 1, overflow: "drop-newest" }
+    });
+    server.onRaw("queued", (data) => received.push(data));
+
+    await server.listen();
+    const first = client.emitRaw("queued", { n: 1 });
+    await expect(client.emitRaw("queued", { n: 2 })).resolves.toBeUndefined();
+    await client.connect();
+    await first;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(received).toEqual([{ n: 1 }]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("drops oldest client events when configured outbox overflow is drop-oldest", async () => {
+    const loop = createMockStreamLoopback();
+    const received: unknown[] = [];
+    const server = new AxtpServer(loop.server, { logicalRole: "server", heartbeatIntervalMs: 60000 });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000,
+      outbox: { enabled: true, maxSize: 1, overflow: "drop-oldest" }
+    });
+    server.onRaw("queued", (data) => received.push(data));
+
+    await server.listen();
+    const first = client.emitRaw("queued", { n: 1 });
+    const second = client.emitRaw("queued", { n: 2 });
+    await expect(first).resolves.toBeUndefined();
+    await client.connect();
+    await second;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(received).toEqual([{ n: 2 }]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("waits until ready before sending calls when offlinePolicy is wait-ready", async () => {
+    const loop = createMockStreamLoopback();
+    const server = new AxtpServer(loop.server, { logicalRole: "server", heartbeatIntervalMs: 60000 });
+    const client = new AxtpClient(loop.client, { logicalRole: "client", heartbeatIntervalMs: 60000 });
+    server.handleRaw("add", (_ctx, p) => (p as { a: number }).a + (p as { b: number }).b);
+
+    await server.listen();
+    const called = client.callRaw("add", { a: 4, b: 6 }, { offlinePolicy: "wait-ready" });
+    await client.connect();
+    await expect(called).resolves.toBe(10);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("rejects queued client events and wait-ready calls when closed before ready", async () => {
+    const loop = createMockStreamLoopback();
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      outbox: { enabled: true }
+    });
+
+    const emitted = client.emitRaw("queued", { n: 1 });
+    const called = client.callRaw("add", { a: 1, b: 2 }, { offlinePolicy: "wait-ready" });
+    await client.close();
+
+    await expect(emitted).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
+    await expect(called).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
+  });
+
+  it("rejects queued client events when reconnect attempts are exhausted", async () => {
+    const failingTransport: StreamClientTransport = {
+      profile: framedBinaryProfile("AXTP-TCP"),
+      connect: () => Promise.reject(new Error("offline"))
+    };
+    const client = new AxtpClient(failingTransport, {
+      logicalRole: "client",
+      reconnect: {
+        enabled: true,
+        initialDelayMs: 1,
+        maxDelayMs: 1,
+        maxAttempts: 1,
+        jitter: false
+      },
+      outbox: { enabled: true }
+    });
+
+    const connected = client.connect(50);
+    const emitted = client.emitRaw("queued", { n: 1 });
+
+    await expect(connected).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
+    await expect(emitted).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
   });
 
   it("client.emit → server.on 收到", async () => {

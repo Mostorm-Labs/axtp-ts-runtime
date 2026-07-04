@@ -80,7 +80,10 @@ import { NodeWsClientTransport } from "@axtp/ts-sdk/node";
 
 const client = new AxtpClient(new NodeWsClientTransport({ url: "ws://localhost:8080" }), {
   defaultTimeoutMs: 5_000,
-  reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 5_000, maxAttempts: 5 }
+  reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 5_000, maxAttempts: 5 },
+  // Optional in-memory event outbox: emit() calls made while connecting/reconnecting
+  // are flushed after the next ready connection.
+  outbox: { enabled: true, maxSize: 1000, overflow: "reject" }
 });
 await client.connect();
 ```
@@ -144,9 +147,49 @@ Construct with a `StreamClientTransport` (from `@axtp/ts-sdk/node` or `@axtp/ts-
 | getters       | `sid`, `isReady`, `isClosed`                                                                                                   |
 | event streams | `onStateChange`, `onConnect`, `onDisconnect({remote})`, `onReconnect({attempt})`, `onReconnectFailed`, `onError`               |
 
-`ClientOptions`: `logicalRole?`, `defaultTimeoutMs?`, `handshakeTimeoutMs?`, `heartbeatIntervalMs?`, `maxFrameSize?`, `reconnect?: ReconnectPolicy`.
+`ClientOptions`: `logicalRole?`, `defaultTimeoutMs?`, `handshakeTimeoutMs?`, `heartbeatIntervalMs?`, `maxFrameSize?`, `reconnect?: ReconnectPolicy`, `outbox?: ClientOutboxOptions`.
+
+`ClientOutboxOptions`: `{ enabled?: boolean; maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" }`. Defaults are `enabled: false`, `maxSize: 1000`, and `overflow: "reject"`.
 
 `ReconnectPolicy`: `{ enabled: boolean; initialDelayMs?; maxDelayMs?; maxAttempts?; multiplier?; jitter? }`.
+
+#### Offline send behavior
+
+By default, client sends are fail-fast: `call`/`emit` require a ready connection and throw/reject while connecting or reconnecting.
+
+Enable the in-memory event outbox when UI or app code may emit before the socket is ready:
+
+```ts
+const client = new AxtpClient(transport, {
+  reconnect: { enabled: true },
+  outbox: { enabled: true, maxSize: 1000, overflow: "reject" }
+});
+
+const connecting = client.connect();
+await client.emitRaw("device.stateChanged", { online: true }); // queued until ready
+await connecting;
+```
+
+Outbox notes:
+
+- It applies to `emit`/`emitRaw` only.
+- It is in-memory only; process restart loses queued events.
+- The returned promise resolves when the SDK queues/drops/flushes the event to a ready endpoint, **not** when the peer acknowledges delivery. AXTP events are still fire-and-forget unless your application adds its own ack.
+- Overflow strategies:
+  - `"reject"` rejects the new event when full.
+  - `"drop-newest"` resolves the new event without enqueueing it.
+  - `"drop-oldest"` drops the oldest queued event and enqueues the new one.
+
+For RPC calls, automatic replay is intentionally not the default because a disconnected response does not prove the peer did not execute the request. For safe/idempotent calls, opt into waiting for readiness before the call is sent:
+
+```ts
+const info = await client.callRaw("device.getInfo", {}, {
+  offlinePolicy: "wait-ready",
+  timeoutMs: 5_000
+});
+```
+
+`offlinePolicy: "wait-ready"` waits for the next ready endpoint and then sends the call exactly once. `timeoutMs` applies to the RPC after ready; it does not include the time spent waiting for a connection.
 
 ### `AxtpServer` (many connections)
 
@@ -217,7 +260,7 @@ import {
 
 `CallContext` (passed to method handlers): `{ requestId: number; sid: string; id?: number; emit(event, payload); emitRaw(event, payload) }` — `id` is the server-assigned endpoint id (only when running under `AxtpServer`), letting a handler issue targeted `server.emitTo(id, ...)` / `server.callRaw(id, ...)`.
 
-`CallOptions`: `{ timeoutMs?: number }`.
+`CallOptions`: `{ timeoutMs?: number; offlinePolicy?: "fail-fast" | "wait-ready" }`.
 
 ## See also
 
