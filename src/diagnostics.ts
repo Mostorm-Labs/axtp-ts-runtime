@@ -43,7 +43,11 @@ export function emitDiagnostic(
   if (diagnostics === undefined || diagnostics.enabled === false) return;
   const minLevel = diagnostics.level ?? "debug";
   if (LEVEL_ORDER[entry.level] < LEVEL_ORDER[minLevel]) return;
-  diagnostics.logger({ ts: Date.now(), ...entry });
+  try {
+    diagnostics.logger({ ts: Date.now(), ...entry });
+  } catch {
+    /* diagnostics must not affect runtime behavior */
+  }
 }
 
 export function diagnosticData(

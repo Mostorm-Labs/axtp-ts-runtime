@@ -443,4 +443,46 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await client.close();
     await server.close();
   });
+
+  it("diagnostics logger errors do not break runtime event flow", async () => {
+    let received: unknown;
+    const loop = createMockStreamLoopback();
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000,
+      diagnostics: {
+        includePayload: true,
+        logger: () => {
+          throw new Error("logger failed");
+        }
+      }
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000,
+      diagnostics: {
+        logger: () => {
+          throw new Error("logger failed");
+        }
+      }
+    });
+
+    expect(() => client.onRaw("safe", (data) => {
+      received = data;
+    })).not.toThrow();
+
+    const clientReady = once(client.onConnect);
+    const serverReady = once(server.onConnect);
+    await server.listen();
+    void client.connect().catch(() => {});
+    await clientReady;
+    await serverReady;
+
+    await expect(server.emitRaw("safe", { ok: true })).resolves.toBeUndefined();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(received).toEqual({ ok: true });
+
+    await client.close();
+    await server.close();
+  });
 });
