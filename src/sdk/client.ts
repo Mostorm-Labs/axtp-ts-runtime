@@ -89,6 +89,7 @@ export class AxtpClient {
   private coordinator: ReconnectCoordinator | undefined;
   private readonly eventOutbox: QueuedEvent[] = [];
   private readonly callQueue: QueuedCall[] = [];
+  private flushingCallQueue = false;
   /** connect() 等待首次 ready 的 resolver（首次 ready resolve；close/重连耗尽 reject）。 */
   private readyWait: { resolve: () => void; reject: (e: AxtpError) => void } | undefined;
 
@@ -373,22 +374,29 @@ export class AxtpClient {
     });
   }
 
-  private flushCallQueue(): void {
-    while (this.state === "ready" && this.endpoint !== undefined && this.callQueue.length > 0) {
-      const item = this.callQueue.shift() as QueuedCall;
-      const ep = this.endpoint;
-      ep.call(item.method, item.params, item.timeoutMs).then(
-        (value) => {
+  private async flushCallQueue(): Promise<void> {
+    if (this.flushingCallQueue) return;
+    this.flushingCallQueue = true;
+    try {
+      while (this.state === "ready" && this.endpoint !== undefined && this.callQueue.length > 0) {
+        const ep = this.endpoint;
+        const item = this.callQueue.shift() as QueuedCall;
+        try {
+          const value = await ep.call(item.method, item.params, item.timeoutMs);
           for (const waiter of item.waiters) waiter.resolve(value);
-        },
-        (err) => {
+        } catch (err) {
           const axtpErr =
             err instanceof AxtpError
               ? err
               : new AxtpError(ErrorCode.TransportDisconnected, "failed to flush call queue", err);
           for (const waiter of item.waiters) waiter.reject(axtpErr);
         }
-      );
+      }
+    } finally {
+      this.flushingCallQueue = false;
+      if (this.state === "ready" && this.endpoint !== undefined && this.callQueue.length > 0) {
+        void this.flushCallQueue();
+      }
     }
   }
 

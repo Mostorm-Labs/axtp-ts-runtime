@@ -298,6 +298,45 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await server.close();
   });
 
+  it("keeps unsent queued RPC calls queued when the endpoint disconnects during flush", async () => {
+    const loop = createMockStreamLoopback();
+    const received: Array<{ id: number | undefined; params: unknown }> = [];
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000,
+      reconnect: { enabled: true, initialDelayMs: 1, maxDelayMs: 1, jitter: false }
+    });
+
+    server.handleRaw("setName", async (ctx, p) => {
+      received.push({ id: ctx.id, params: p });
+      if ((p as { name: string }).name === "Room A") {
+        server.getEndpoint(ctx.id as number)?.close(false, true);
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      return (p as { name: string }).name;
+    });
+
+    await server.listen();
+    const first = client.callRaw("setName", { name: "Room A" }, { offlinePolicy: "queue" });
+    const second = client.callRaw("setName", { name: "Room B" }, { offlinePolicy: "queue" });
+
+    await client.connect();
+
+    await expect(first).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
+    await expect(second).resolves.toBe("Room B");
+    expect(received).toHaveLength(2);
+    expect(received[0]).toEqual({ id: expect.any(Number), params: { name: "Room A" } });
+    expect(received[1]).toEqual({ id: expect.any(Number), params: { name: "Room B" } });
+    expect(received[1].id).not.toBe(received[0].id);
+
+    await client.close();
+    await server.close();
+  });
+
   it("rejects new queued RPC calls when the call queue is full", async () => {
     const loop = createMockStreamLoopback();
     const client = new AxtpClient(loop.client, {
@@ -661,9 +700,11 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
       }
     });
 
-    expect(() => client.onRaw("safe", (data) => {
-      received = data;
-    })).not.toThrow();
+    expect(() =>
+      client.onRaw("safe", (data) => {
+        received = data;
+      })
+    ).not.toThrow();
 
     const clientReady = once(client.onConnect);
     const serverReady = once(server.onConnect);
