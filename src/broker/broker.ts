@@ -12,6 +12,7 @@ import {
   type RequestPayload,
   type RpcMessage
 } from "../protocol/model.js";
+import { diagnosticData, emitDiagnostic, type AxtpDiagnostics } from "../diagnostics.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import type {
   CallContext,
@@ -34,6 +35,8 @@ export class BasicBroker {
   emit: ((event: string, payload: unknown) => void) | undefined;
   /** Server 注入：endpoint localId，传入 CallContext 供 handler 做 server 级定向操作。 */
   id: number | undefined;
+  /** Endpoint 注入：诊断日志。 */
+  diagnostics: AxtpDiagnostics | undefined;
 
   constructor(globalSource?: GlobalHandlerSource) {
     this.router = new HandlerRouter(globalSource);
@@ -91,6 +94,16 @@ export class BasicBroker {
   /** 入站 Event 分发：多 handler 同步调用，单个抛错不影响其它。 */
   dispatchEvent(msg: EventPayload): void {
     const handlers = this.router.getEventHandlers(msg.eventName);
+    emitDiagnostic(this.diagnostics, {
+      level: handlers.size === 0 ? "warn" : "debug",
+      scope: "broker",
+      event: "event.dispatch",
+      sid: msg.sid,
+      endpointId: this.id,
+      name: msg.eventName,
+      handlerCount: handlers.size,
+      data: diagnosticData(this.diagnostics, msg.data)
+    });
     for (const h of handlers) {
       try {
         h(msg.data);

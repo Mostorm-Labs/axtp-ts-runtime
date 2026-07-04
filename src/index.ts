@@ -18,6 +18,12 @@ export type { StreamStats } from "./endpoint/stream.js";
 // ===== handler / call 类型 =====
 export type { CallContext, CallOptions } from "./sdk/types.js";
 export type {
+  AxtpDiagnosticEntry,
+  AxtpDiagnosticLevel,
+  AxtpDiagnosticScope,
+  AxtpDiagnostics
+} from "./diagnostics.js";
+export type {
   UntypedEventHandler,
   UntypedMethodHandler,
   GlobalHandlerSource

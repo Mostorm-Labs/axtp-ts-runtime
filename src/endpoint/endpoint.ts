@@ -10,6 +10,7 @@
 import { AxtpCore } from "../core/core.js";
 import type { CoreEvent } from "../core/events.js";
 import { BasicBroker } from "../broker/broker.js";
+import type { AxtpDiagnostics } from "../diagnostics.js";
 import type {
   GlobalHandlerSource,
   UntypedEventHandler,
@@ -43,6 +44,7 @@ export interface EndpointOptions {
   readonly globalHandlers?: GlobalHandlerSource;
   readonly handshakeSeed?: number;
   readonly eventMasks?: string;
+  readonly diagnostics?: AxtpDiagnostics;
   /** Server 管理时的 endpoint localId（传入 broker → CallContext.id 供 handler 定向操作）。 */
   readonly id?: number;
 }
@@ -76,7 +78,8 @@ export class AxtpEndpoint {
       maxFrameSize: opts.maxFrameSize,
       heartbeatIntervalMs: opts.heartbeatIntervalMs,
       handshakeSeed: opts.handshakeSeed,
-      eventMasks: opts.eventMasks
+      eventMasks: opts.eventMasks,
+      diagnostics: opts.diagnostics
     });
     this.broker = new BasicBroker(opts.globalHandlers);
     this.broker.setSink({
@@ -85,6 +88,7 @@ export class AxtpEndpoint {
     });
     this.broker.emit = (event, payload) => this.core.emit(event, payload);
     this.broker.id = opts.id;
+    this.broker.diagnostics = opts.diagnostics;
     this.streamMgr = new StreamManager((sp) => this.core.sendStream(sp));
   }
 
