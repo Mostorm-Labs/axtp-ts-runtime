@@ -31,6 +31,15 @@ export interface ClientOutboxOptions {
   overflow?: "drop-oldest" | "drop-newest" | "reject";
 }
 
+export interface ClientCallQueueOptions {
+  maxSize?: number;
+  overflow?: "drop-oldest" | "drop-newest" | "reject";
+}
+
+export interface ClientCallsOptions {
+  queue?: ClientCallQueueOptions;
+}
+
 export interface ClientOptions {
   logicalRole?: LogicalRole;
   defaultTimeoutMs?: number;
@@ -39,6 +48,7 @@ export interface ClientOptions {
   maxFrameSize?: number;
   reconnect?: ReconnectPolicy;
   outbox?: ClientOutboxOptions;
+  calls?: ClientCallsOptions;
   diagnostics?: AxtpDiagnostics;
 }
 
@@ -56,6 +66,19 @@ type QueuedEvent = {
   reject: (err: AxtpError) => void;
 };
 
+type QueuedCallWaiter = {
+  resolve: (value: unknown) => void;
+  reject: (err: AxtpError) => void;
+};
+
+type QueuedCall = {
+  method: string;
+  params: unknown;
+  timeoutMs: number | undefined;
+  coalesceKey: string | undefined;
+  waiters: QueuedCallWaiter[];
+};
+
 export class AxtpClient {
   /** handler 路由：跨连接复用（作为每个 Endpoint 的 globalHandlers）。 */
   private readonly router = new HandlerRouter();
@@ -65,6 +88,8 @@ export class AxtpClient {
   private firstReady = true;
   private coordinator: ReconnectCoordinator | undefined;
   private readonly eventOutbox: QueuedEvent[] = [];
+  private readonly callQueue: QueuedCall[] = [];
+  private flushingCallQueue = false;
   /** connect() 等待首次 ready 的 resolver（首次 ready resolve；close/重连耗尽 reject）。 */
   private readyWait: { resolve: () => void; reject: (e: AxtpError) => void } | undefined;
 
@@ -118,6 +143,7 @@ export class AxtpClient {
     await this.awaitReady(timeoutMs);
     this.setState("ready");
     this.flushOutbox();
+    this.flushCallQueue();
     this.onConnect.emit(undefined);
   }
 
@@ -180,6 +206,7 @@ export class AxtpClient {
       this.onReconnect.emit({ attempt: this.coordinator?.attemptCount ?? 0 });
     }
     this.flushOutbox();
+    this.flushCallQueue();
   }
 
   private onEndpointClose(remote: boolean): void {
@@ -213,6 +240,7 @@ export class AxtpClient {
   private handleReconnectFailed(): void {
     const err = new AxtpError(ErrorCode.TransportDisconnected, "reconnect attempts exhausted");
     this.failReady(err);
+    this.rejectCallQueue(err);
     this.setState("closed");
     this.rejectOutbox(err);
     this.onReconnectFailed.emit(undefined);
@@ -274,8 +302,109 @@ export class AxtpClient {
 
   /** 弱类型 call：method 为任意 string、params 为 unknown。动态/自定义方法名走这里。 */
   async callRaw(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
-    const ep = options?.offlinePolicy === "wait-ready" ? await this.waitForUsable() : this.requireUsable();
+    if (options?.offlinePolicy === "wait-ready") {
+      const ep = await this.waitForUsable();
+      return ep.call(method, params, options.timeoutMs);
+    }
+    if (options?.offlinePolicy === "queue") {
+      const ep = this.endpoint;
+      if (this.state === "ready" && ep !== undefined)
+        return ep.call(method, params, options.timeoutMs);
+      return this.enqueueCall(method, params, options);
+    }
+    const ep = this.requireUsable();
     return ep.call(method, params, options?.timeoutMs);
+  }
+
+  private enqueueCall(method: string, params: unknown, options: CallOptions): Promise<unknown> {
+    if (this.state === "closed")
+      return Promise.reject(new AxtpError(ErrorCode.TransportDisconnected, "client closed"));
+
+    return new Promise<unknown>((resolve, reject) => {
+      const waiter: QueuedCallWaiter = { resolve, reject };
+      if (options.coalesceKey !== undefined) {
+        const existing = this.callQueue.find((item) => item.coalesceKey === options.coalesceKey);
+        if (existing !== undefined) {
+          const previousWaiters = existing.waiters.splice(0);
+          if ((options.coalescePrevious ?? "reject") === "resolve-with-next") {
+            existing.waiters.push(...previousWaiters, waiter);
+          } else {
+            const replacement =
+              options.coalescePrevious === "drop"
+                ? undefined
+                : new AxtpError(ErrorCode.InvalidState, "queued call superseded");
+            for (const previous of previousWaiters) {
+              if (replacement === undefined) previous.resolve(undefined);
+              else previous.reject(replacement);
+            }
+            existing.waiters.push(waiter);
+          }
+          existing.method = method;
+          existing.params = params;
+          existing.timeoutMs = options.timeoutMs;
+          this.flushCallQueue();
+          return;
+        }
+      }
+
+      const queue = this.options.calls?.queue;
+      const maxSize = queue?.maxSize ?? 1000;
+      const overflow = queue?.overflow ?? "reject";
+      if (this.callQueue.length >= maxSize) {
+        if (overflow === "reject") {
+          reject(new AxtpError(ErrorCode.InvalidState, "client call queue full"));
+          return;
+        }
+        if (overflow === "drop-newest") {
+          resolve(undefined);
+          return;
+        }
+        const dropped = this.callQueue.shift();
+        for (const previous of dropped?.waiters ?? []) previous.resolve(undefined);
+      }
+
+      this.callQueue.push({
+        method,
+        params,
+        timeoutMs: options.timeoutMs,
+        coalesceKey: options.coalesceKey,
+        waiters: [waiter]
+      });
+      this.flushCallQueue();
+    });
+  }
+
+  private async flushCallQueue(): Promise<void> {
+    if (this.flushingCallQueue) return;
+    this.flushingCallQueue = true;
+    try {
+      while (this.state === "ready" && this.endpoint !== undefined && this.callQueue.length > 0) {
+        const ep = this.endpoint;
+        const item = this.callQueue.shift() as QueuedCall;
+        try {
+          const value = await ep.call(item.method, item.params, item.timeoutMs);
+          for (const waiter of item.waiters) waiter.resolve(value);
+        } catch (err) {
+          const axtpErr =
+            err instanceof AxtpError
+              ? err
+              : new AxtpError(ErrorCode.TransportDisconnected, "failed to flush call queue", err);
+          for (const waiter of item.waiters) waiter.reject(axtpErr);
+        }
+      }
+    } finally {
+      this.flushingCallQueue = false;
+      if (this.state === "ready" && this.endpoint !== undefined && this.callQueue.length > 0) {
+        void this.flushCallQueue();
+      }
+    }
+  }
+
+  private rejectCallQueue(err: AxtpError): void {
+    const queued = this.callQueue.splice(0);
+    for (const item of queued) {
+      for (const waiter of item.waiters) waiter.reject(err);
+    }
   }
 
   handle<K extends MethodName>(
@@ -400,6 +529,7 @@ export class AxtpClient {
     this.endpoint?.close();
     const err = new AxtpError(ErrorCode.TransportDisconnected, "closed");
     this.failReady(err);
+    this.rejectCallQueue(err);
     this.rejectOutbox(err);
   }
 

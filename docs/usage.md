@@ -147,9 +147,11 @@ Construct with a `StreamClientTransport` (from `@axtp/ts-sdk/node` or `@axtp/ts-
 | getters       | `sid`, `isReady`, `isClosed`                                                                                                   |
 | event streams | `onStateChange`, `onConnect`, `onDisconnect({remote})`, `onReconnect({attempt})`, `onReconnectFailed`, `onError`               |
 
-`ClientOptions`: `logicalRole?`, `defaultTimeoutMs?`, `handshakeTimeoutMs?`, `heartbeatIntervalMs?`, `maxFrameSize?`, `reconnect?: ReconnectPolicy`, `outbox?: ClientOutboxOptions`.
+`ClientOptions`: `logicalRole?`, `defaultTimeoutMs?`, `handshakeTimeoutMs?`, `heartbeatIntervalMs?`, `maxFrameSize?`, `reconnect?: ReconnectPolicy`, `outbox?: ClientOutboxOptions`, `calls?: ClientCallsOptions`.
 
 `ClientOutboxOptions`: `{ enabled?: boolean; maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" }`. Defaults are `enabled: false`, `maxSize: 1000`, and `overflow: "reject"`.
+
+`ClientCallsOptions`: `{ queue?: { maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" } }`. RPC queue defaults are `maxSize: 1000` and `overflow: "reject"`.
 
 `ReconnectPolicy`: `{ enabled: boolean; initialDelayMs?; maxDelayMs?; maxAttempts?; multiplier?; jitter? }`.
 
@@ -180,16 +182,53 @@ Outbox notes:
   - `"drop-newest"` resolves the new event without enqueueing it.
   - `"drop-oldest"` drops the oldest queued event and enqueues the new one.
 
-For RPC calls, automatic replay is intentionally not the default because a disconnected response does not prove the peer did not execute the request. For safe/idempotent calls, opt into waiting for readiness before the call is sent:
+For RPC calls, automatic replay is intentionally not the default because a disconnected response does not prove the peer did not execute the request. Use one of three explicit policies:
+
+- `"fail-fast"` (default): require a ready endpoint and reject while connecting/reconnecting. Use this for unsafe or non-idempotent methods.
+- `"wait-ready"`: wait for the next ready endpoint and then send the call exactly once. Use this for safe/idempotent queries.
+- `"queue"`: enqueue a call that has not been written to an endpoint yet, optionally coalescing queued state-setting calls before the next ready endpoint.
+
+For safe/idempotent calls, opt into waiting for readiness before the call is sent:
 
 ```ts
-const info = await client.callRaw("device.getInfo", {}, {
-  offlinePolicy: "wait-ready",
-  timeoutMs: 5_000
-});
+const info = await client.callRaw(
+  "device.getInfo",
+  {},
+  {
+    offlinePolicy: "wait-ready",
+    timeoutMs: 5_000
+  }
+);
 ```
 
 `offlinePolicy: "wait-ready"` waits for the next ready endpoint and then sends the call exactly once. `timeoutMs` applies to the RPC after ready; it does not include the time spent waiting for a connection.
+
+For state-setting RPC calls where only the latest queued value should be applied after reconnect, use `offlinePolicy: "queue"` with a caller-defined `coalesceKey`:
+
+```ts
+await client.callRaw(
+  "cast.setAirPlayName",
+  { displayName: name, apply: "immediate" },
+  {
+    offlinePolicy: "queue",
+    coalesceKey: "cast.setAirPlayName",
+    coalescePrevious: "resolve-with-next"
+  }
+);
+```
+
+RPC queue notes:
+
+- Queueing is opt-in per call; default behavior remains fail-fast.
+- Queueing only applies before a call is written to an endpoint. Calls already sent to an endpoint are not replayed automatically after disconnect.
+- Queued calls flush FIFO after the client becomes ready. If the client leaves ready while flushing, unsent calls remain queued.
+- Calls with the same `coalesceKey` replace the previous queued call. The SDK never infers which method names are safe to coalesce.
+- `coalescePrevious` controls the replaced call's promise:
+  - `"resolve-with-next"` resolves/rejects previous promises with the newer call result.
+  - `"reject"` rejects previous promises with an `AxtpError`.
+  - `"drop"` resolves previous promises with `undefined` without sending them.
+- `close()` and reconnect exhaustion reject all queued calls, so queued call promises do not hang indefinitely.
+- `timeoutMs` applies to the RPC after ready; it does not include offline queue time.
 
 ### `AxtpServer` (many connections)
 
@@ -260,7 +299,7 @@ import {
 
 `CallContext` (passed to method handlers): `{ requestId: number; sid: string; id?: number; emit(event, payload); emitRaw(event, payload) }` — `id` is the server-assigned endpoint id (only when running under `AxtpServer`), letting a handler issue targeted `server.emitTo(id, ...)` / `server.callRaw(id, ...)`.
 
-`CallOptions`: `{ timeoutMs?: number; offlinePolicy?: "fail-fast" | "wait-ready" }`.
+`CallOptions`: `{ timeoutMs?: number; offlinePolicy?: "fail-fast" | "wait-ready" | "queue"; coalesceKey?: string; coalescePrevious?: "resolve-with-next" | "reject" | "drop" }`.
 
 ## See also
 
