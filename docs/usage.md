@@ -153,17 +153,13 @@ Construct with a `StreamClientTransport` (from `@axtp/ts-sdk/node` or `@axtp/ts-
 | getters       | `sid`, `isReady`, `isClosed`                                                                                                   |
 | event streams | `onStateChange`, `onConnect`, `onDisconnect({remote})`, `onReconnect({attempt})`, `onReconnectFailed`, `onError`               |
 
-`ClientOptions`: `logicalRole?`, `defaultTimeoutMs?`, `handshakeTimeoutMs?`, `heartbeatIntervalMs?`, `maxFrameSize?`, `reconnect?: ReconnectPolicy`, `delivery?: ClientDeliveryOptions`, `outbox?: ClientOutboxOptions`, `calls?: ClientCallsOptions`.
+`ClientOptions`: `logicalRole?`, `defaultTimeoutMs?`, `handshakeTimeoutMs?`, `heartbeatIntervalMs?`, `maxFrameSize?`, `reconnect?: ReconnectPolicy`, `delivery?: ClientDeliveryOptions`.
 
 `ClientDeliveryOptions`: `{ events?: EventDeliveryPolicy; calls?: CallDeliveryPolicy }`.
 
 `EventDeliveryPolicy`: `{ offline?: "fail-fast" | "queue"; queue?: { maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" } }`.
 
 `CallDeliveryPolicy`: `{ default?: { timeoutMs?: number; offlinePolicy?: "fail-fast" | "wait-ready" | "queue" }; queue?: { maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" }; methods?: Record<string, { timeoutMs?: number; offlinePolicy?: "fail-fast" | "wait-ready" | "queue"; coalesceKey?: string; coalescePrevious?: "resolve-with-next" | "reject" | "drop" }> }`.
-
-`ClientOutboxOptions`: `{ enabled?: boolean; maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" }`. Defaults are `enabled: false`, `maxSize: 1000`, and `overflow: "reject"`. This legacy option remains supported as an alias for `delivery.events`; new code should prefer `delivery.events`. When `delivery.events` is present, it owns event delivery resolution and missing queue fields use SDK defaults instead of inheriting legacy `outbox` queue fields.
-
-`ClientCallsOptions`: `{ queue?: { maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" } }`. RPC queue defaults are `maxSize: 1000` and `overflow: "reject"`. New code should prefer `delivery.calls.queue`.
 
 `ReconnectPolicy`: `{ enabled: boolean; initialDelayMs?; maxDelayMs?; maxAttempts?; multiplier?; jitter? }`.
 
@@ -189,9 +185,7 @@ await client.emitRaw("device.stateChanged", { online: true }); // queued until r
 await connecting;
 ```
 
-`outbox: { enabled: true }` remains supported for compatibility, but `delivery.events` is the recommended API for new code.
-
-Outbox notes:
+Event delivery queue notes:
 
 - It applies to `emit`/`emitRaw` only.
 - It is in-memory only; process restart loses queued events.

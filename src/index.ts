@@ -7,12 +7,9 @@ export type {
   CallDeliveryDefaults,
   CallDeliveryPolicy,
   CallMethodDeliveryPolicy,
-  ClientCallQueueOptions,
   ClientDeliveryOptions,
   ClientDeliveryQueueOptions,
-  ClientCallsOptions,
   ClientOptions,
-  ClientOutboxOptions,
   ClientState,
   EventDeliveryPolicy
 } from "./sdk/client.js";

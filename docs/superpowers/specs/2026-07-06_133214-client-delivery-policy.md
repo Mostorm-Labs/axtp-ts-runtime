@@ -289,16 +289,6 @@ export interface ClientOptions {
   maxFrameSize?: number;
   reconnect?: ReconnectPolicy;
 
-  /**
-   * @deprecated Use delivery.events instead.
-   */
-  outbox?: ClientOutboxOptions;
-
-  /**
-   * Legacy call queue options. Prefer delivery.calls.queue.
-   */
-  calls?: ClientCallsOptions;
-
   delivery?: ClientDeliveryOptions;
   diagnostics?: AxtpDiagnostics;
 }
@@ -314,7 +304,7 @@ export interface ClientOptions {
 per-call options
 > delivery.calls.methods[method]
 > delivery.calls.default
-> legacy / SDK defaults
+> SDK defaults
 ```
 
 推荐实现：
@@ -359,7 +349,6 @@ methods: {
 
 ```text
 delivery.calls.queue
-> legacy calls.queue
 > SDK default { maxSize: 1000, overflow: "reject" }
 ```
 
@@ -369,7 +358,6 @@ event offline 策略优先级：
 
 ```text
 delivery.events
-> legacy outbox
 > SDK default fail-fast
 ```
 
@@ -377,16 +365,12 @@ delivery.events
 
 ```ts
 private resolveEventDeliveryPolicy(): Required<EventDeliveryPolicy> {
-  const legacyOutbox = this.options.outbox;
   const eventPolicy = this.options.delivery?.events;
-
   return {
-    offline:
-      eventPolicy?.offline ??
-      (legacyOutbox?.enabled === true ? "queue" : "fail-fast"),
+    offline: eventPolicy?.offline ?? "fail-fast",
     queue: {
-      maxSize: eventPolicy?.queue?.maxSize ?? legacyOutbox?.maxSize ?? 1000,
-      overflow: eventPolicy?.queue?.overflow ?? legacyOutbox?.overflow ?? "reject"
+      maxSize: eventPolicy?.queue?.maxSize ?? 1000,
+      overflow: eventPolicy?.queue?.overflow ?? "reject"
     }
   };
 }
@@ -425,13 +409,7 @@ new AxtpClient(transport, {
 });
 ```
 
-行为等价于当前：
-
-```ts
-new AxtpClient(transport, {
-  outbox: { enabled: true, maxSize: 1, overflow: "drop-oldest" }
-});
-```
+这是旧 `outbox: { enabled: true, maxSize: 1, overflow: "drop-oldest" }` 的 replacement；旧写法在本 breaking change 中不再支持。
 
 ### 7.3 `delivery.calls.default.offlinePolicy = "wait-ready"`
 
@@ -545,52 +523,78 @@ const third = client.callRaw("cast.setAirPlayName", { name: "Room C" });
 - 只发送最后一次 `{ name: "Room C" }`。
 - `first` / `second` / `third` 都 resolve 为最后一次调用的结果。
 
-## 8. 兼容性与迁移
+## 8. Breaking Change 与迁移
 
-### 8.1 v1：新增 `delivery`，保留旧 API
+### 8.1 直接删除旧 API
 
-保留：
+本设计选择 breaking change：不再保留旧配置入口。
+
+删除：
 
 ```ts
 outbox?: ClientOutboxOptions;
 calls?: ClientCallsOptions;
+ClientOutboxOptions;
+ClientCallsOptions;
+ClientCallQueueOptions;
 ```
 
-新增：
+保留并推荐：
 
 ```ts
 delivery?: ClientDeliveryOptions;
 ```
 
-优先级：
+迁移规则：
 
 ```text
-delivery.events > outbox
-delivery.calls.queue > calls.queue
+outbox.enabled/maxSize/overflow -> delivery.events.offline/queue
+calls.queue                  -> delivery.calls.queue
+per-call CallOptions          -> 保留，继续作为单次 override
 ```
 
-### 8.2 文档标记 deprecated
+### 8.2 迁移示例
 
-`outbox` 建议标记：
+旧写法：
 
 ```ts
-/**
- * @deprecated Use delivery.events instead.
- */
-outbox?: ClientOutboxOptions;
+new AxtpClient(transport, {
+  outbox: { enabled: true, maxSize: 1000, overflow: "reject" },
+  calls: { queue: { maxSize: 1000, overflow: "reject" } }
+});
 ```
 
-`calls.queue` 可暂不 deprecated，或标记为 legacy：
+新写法：
 
 ```ts
-/** Prefer delivery.calls.queue for new code. */
-calls?: ClientCallsOptions;
+new AxtpClient(transport, {
+  delivery: {
+    events: {
+      offline: "queue",
+      queue: { maxSize: 1000, overflow: "reject" }
+    },
+    calls: {
+      queue: { maxSize: 1000, overflow: "reject" }
+    }
+  }
+});
 ```
 
-### 8.3 v2 / v3 后续
+### 8.3 删除兼容 fallback
 
-- v2：文档中将 `delivery` 作为主推荐 API，`outbox` 只作为 legacy alias。
-- v3：若需要 breaking change，再考虑删除 `outbox`。
+实现不应写成：
+
+```ts
+this.options.delivery?.calls?.queue ?? this.options.calls?.queue;
+```
+
+而应只读取：
+
+```ts
+this.options.delivery?.calls?.queue;
+```
+
+同理，event delivery 不应再读取 `this.options.outbox`。旧配置在 TypeScript 层直接报错，让调用方显式迁移。
 
 ## 9. 实施建议
 
@@ -633,12 +637,11 @@ private resolveEventDeliveryPolicy(): {
   queue: Required<ClientDeliveryQueueOptions>;
 } {
   const eventPolicy = this.options.delivery?.events;
-  const legacyOutbox = this.options.outbox;
   return {
-    offline: eventPolicy?.offline ?? (legacyOutbox?.enabled === true ? "queue" : "fail-fast"),
+    offline: eventPolicy?.offline ?? "fail-fast",
     queue: {
-      maxSize: eventPolicy?.queue?.maxSize ?? legacyOutbox?.maxSize ?? 1000,
-      overflow: eventPolicy?.queue?.overflow ?? legacyOutbox?.overflow ?? "reject"
+      maxSize: eventPolicy?.queue?.maxSize ?? 1000,
+      overflow: eventPolicy?.queue?.overflow ?? "reject"
     }
   };
 }
@@ -648,7 +651,7 @@ private resolveEventDeliveryPolicy(): {
 
 ```ts
 private resolveCallQueueOptions(): Required<ClientDeliveryQueueOptions> {
-  const queue = this.options.delivery?.calls?.queue ?? this.options.calls?.queue;
+  const queue = this.options.delivery?.calls?.queue;
   return {
     maxSize: queue?.maxSize ?? 1000,
     overflow: queue?.overflow ?? "reject"
@@ -698,15 +701,7 @@ async callRaw(method: string, params: unknown, options?: CallOptions): Promise<u
 
 ### Step 4：改 `enqueueCall()` queue 配置来源
 
-当前：
-
-```ts
-const queue = this.options.calls?.queue;
-const maxSize = queue?.maxSize ?? 1000;
-const overflow = queue?.overflow ?? "reject";
-```
-
-改为：
+改为只读取 `delivery.calls.queue`：
 
 ```ts
 const queue = this.resolveCallQueueOptions();
@@ -716,9 +711,7 @@ const overflow = queue.overflow;
 
 ### Step 5：改 `enqueueEvent()` policy 来源
 
-当前通过 `this.options.outbox` 判断是否 enable。
-
-改为：
+改为只读取 `delivery.events`，不再读取旧 `outbox`：
 
 ```ts
 const policy = this.resolveEventDeliveryPolicy();
@@ -744,7 +737,7 @@ const overflow = policy.queue.overflow;
 1. `ClientOptions` 表格加入 `delivery?: ClientDeliveryOptions`。
 2. 将推荐示例从 `outbox` 改为 `delivery.events`。
 3. 增加 `delivery.calls.default` / `delivery.calls.methods` 示例。
-4. 明确旧 `outbox` 仍可用但 deprecated。
+4. 明确旧 `outbox` / `calls.queue` 已删除，必须迁移到 `delivery`。
 5. 明确 RPC 默认仍为 `fail-fast`。
 
 ## 10. 测试计划
@@ -756,8 +749,8 @@ const overflow = policy.queue.overflow;
 新增测试：
 
 - `queues client events before ready when delivery.events.offline is queue`
-- `delivery.events.queue overflow drop-oldest matches legacy outbox behavior`
-- `delivery.events takes precedence over legacy outbox`
+- `delivery.events.queue overflow drop-oldest`
+- old `outbox` no longer appears in runtime tests because it is removed from `ClientOptions`
 
 关键断言：
 
@@ -833,19 +826,6 @@ delivery: {
 
 复用现有 coalesce 测试，只把 per-call options 移到 client options。
 
-### 10.6 delivery.calls.queue 优先于 legacy calls.queue
-
-新增测试：
-
-```ts
-new AxtpClient(loop.client, {
-  calls: { queue: { maxSize: 2, overflow: "reject" } },
-  delivery: { calls: { queue: { maxSize: 1, overflow: "reject" } } }
-});
-```
-
-断言第二个 queued call 被 reject，证明 `delivery.calls.queue` 优先。
-
 ## 11. 验证命令
 
 建议执行：
@@ -868,13 +848,12 @@ pnpm build
 - 文档强调只有 safe/idempotent method 应配置 wait-ready / queue。
 - method-level override 用于保护危险方法。
 
-### 风险 2：`delivery` 与旧 `outbox` / `calls.queue` 同时存在时语义混乱
+### 风险 2：breaking change 影响现有调用方
 
 缓解：
 
-- 明确优先级：`delivery` 优先。
-- 文档标注 legacy alias。
-- 测试覆盖 precedence。
+- spec 和 usage 文档提供明确迁移示例。
+- TypeScript 层删除旧字段，让调用方在升级时尽早发现并迁移。
 
 ### 风险 3：通配符 method policy 复杂化
 

@@ -40,7 +40,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await server.close();
   });
 
-  it("queues client events emitted before ready when outbox is enabled", async () => {
+  it("queues client events emitted before ready when delivery.events offline is queue", async () => {
     let received: unknown;
     const loop = createMockStreamLoopback();
     const server = new AxtpServer(loop.server, {
@@ -50,7 +50,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     const client = new AxtpClient(loop.client, {
       logicalRole: "client",
       heartbeatIntervalMs: 60000,
-      outbox: { enabled: true }
+      delivery: { events: { offline: "queue" } }
     });
     server.onRaw("early", (data) => {
       received = data;
@@ -103,45 +103,11 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await server.close();
   });
 
-  it("uses delivery.events before legacy outbox options", async () => {
+  it("rejects new client events when the delivery event queue is full", async () => {
     const loop = createMockStreamLoopback();
     const client = new AxtpClient(loop.client, {
       logicalRole: "client",
-      outbox: { enabled: true, maxSize: 1000, overflow: "reject" },
-      delivery: {
-        events: { offline: "fail-fast" }
-      }
-    });
-
-    await expect(client.emitRaw("early", { queued: false })).rejects.toMatchObject({
-      code: ErrorCode.InvalidState
-    });
-    await client.close();
-  });
-
-  it("does not inherit legacy outbox queue options when delivery.events is present", async () => {
-    const loop = createMockStreamLoopback();
-    const client = new AxtpClient(loop.client, {
-      logicalRole: "client",
-      outbox: { enabled: true, maxSize: 1, overflow: "reject" },
-      delivery: {
-        events: { offline: "queue" }
-      }
-    });
-
-    const first = client.emitRaw("queued", { n: 1 });
-    const second = client.emitRaw("queued", { n: 2 });
-
-    await client.close();
-    await expect(first).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
-    await expect(second).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
-  });
-
-  it("rejects new client events when the outbox is full", async () => {
-    const loop = createMockStreamLoopback();
-    const client = new AxtpClient(loop.client, {
-      logicalRole: "client",
-      outbox: { enabled: true, maxSize: 1, overflow: "reject" }
+      delivery: { events: { offline: "queue", queue: { maxSize: 1, overflow: "reject" } } }
     });
 
     const first = client.emitRaw("queued", { n: 1 });
@@ -152,7 +118,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await expect(first).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
   });
 
-  it("drops newest client events when configured outbox overflow is drop-newest", async () => {
+  it("drops newest client events when configured delivery event queue overflow is drop-newest", async () => {
     const loop = createMockStreamLoopback();
     const received: unknown[] = [];
     const server = new AxtpServer(loop.server, {
@@ -162,7 +128,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     const client = new AxtpClient(loop.client, {
       logicalRole: "client",
       heartbeatIntervalMs: 60000,
-      outbox: { enabled: true, maxSize: 1, overflow: "drop-newest" }
+      delivery: { events: { offline: "queue", queue: { maxSize: 1, overflow: "drop-newest" } } }
     });
     server.onRaw("queued", (data) => received.push(data));
 
@@ -178,7 +144,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await server.close();
   });
 
-  it("drops oldest client events when configured outbox overflow is drop-oldest", async () => {
+  it("drops oldest client events when configured delivery event queue overflow is drop-oldest", async () => {
     const loop = createMockStreamLoopback();
     const received: unknown[] = [];
     const server = new AxtpServer(loop.server, {
@@ -188,7 +154,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     const client = new AxtpClient(loop.client, {
       logicalRole: "client",
       heartbeatIntervalMs: 60000,
-      outbox: { enabled: true, maxSize: 1, overflow: "drop-oldest" }
+      delivery: { events: { offline: "queue", queue: { maxSize: 1, overflow: "drop-oldest" } } }
     });
     server.onRaw("queued", (data) => received.push(data));
 
@@ -472,7 +438,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     const loop = createMockStreamLoopback();
     const client = new AxtpClient(loop.client, {
       logicalRole: "client",
-      calls: { queue: { maxSize: 1, overflow: "reject" } }
+      delivery: { calls: { queue: { maxSize: 1, overflow: "reject" } } }
     });
 
     const first = client.callRaw("setName", { name: "Room A" }, { offlinePolicy: "queue" });
@@ -527,27 +493,6 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await server.close();
   });
 
-  it("uses delivery.calls.queue before legacy calls.queue", async () => {
-    const loop = createMockStreamLoopback();
-    const client = new AxtpClient(loop.client, {
-      logicalRole: "client",
-      calls: { queue: { maxSize: 2, overflow: "reject" } },
-      delivery: {
-        calls: {
-          queue: { maxSize: 1, overflow: "reject" }
-        }
-      }
-    });
-
-    const first = client.callRaw("setName", { name: "Room A" }, { offlinePolicy: "queue" });
-    await expect(
-      client.callRaw("setName", { name: "Room B" }, { offlinePolicy: "queue" })
-    ).rejects.toMatchObject({ code: ErrorCode.InvalidState });
-
-    await client.close();
-    await expect(first).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
-  });
-
   it("rejects queued RPC calls when reconnect attempts are exhausted", async () => {
     const failingTransport: StreamClientTransport = {
       profile: framedBinaryProfile("AXTP-TCP"),
@@ -575,7 +520,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     const loop = createMockStreamLoopback();
     const client = new AxtpClient(loop.client, {
       logicalRole: "client",
-      outbox: { enabled: true }
+      delivery: { events: { offline: "queue" } }
     });
 
     const emitted = client.emitRaw("queued", { n: 1 });
@@ -600,7 +545,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
         maxAttempts: 1,
         jitter: false
       },
-      outbox: { enabled: true }
+      delivery: { events: { offline: "queue" } }
     });
 
     const connected = client.connect(50);

@@ -1,6 +1,6 @@
 # AXTP Client Delivery Policy Implementation Plan
 
-> **For Hermes:** Implement this plan task-by-task. Keep the existing safety default (`fail-fast`) intact and preserve backward compatibility for `outbox` and `calls.queue`.
+> **For Hermes:** Implement this plan task-by-task. Keep the existing safety default (`fail-fast`) intact and remove the old `outbox` / `calls.queue` configuration APIs in favor of `delivery`.
 
 **Spec:** `docs/superpowers/specs/2026-07-06_133214-client-delivery-policy.md`
 
@@ -22,7 +22,7 @@ Relevant files:
 - `src/sdk/types.ts`
   - owns public `CallOptions`, `CallOfflinePolicy`, `QueuedCallCoalescePrevious`
 - `tests/sdk/sdk.test.ts`
-  - already covers legacy outbox, explicit `offlinePolicy`, RPC queue, coalescing, overflow, reconnect exhaustion
+  - already covers delivery event queue, explicit `offlinePolicy`, RPC queue, coalescing, overflow, reconnect exhaustion
 - `docs/usage.md`
   - documents current public SDK options and offline behavior
 - `src/index.ts`
@@ -35,7 +35,7 @@ Non-goals for this implementation:
 - No replay of RPCs already written to an endpoint.
 - No stream delivery behavior yet.
 - No wildcard method matching in the first pass.
-- Do not remove `outbox` or `calls.queue`.
+- Remove `outbox` and top-level `calls.queue`; migrate tests/docs to `delivery`.
 
 ---
 
@@ -54,7 +54,6 @@ per-call options
 
 ```text
 delivery.calls.queue
-> legacy calls.queue
 > { maxSize: 1000, overflow: "reject" }
 ```
 
@@ -62,7 +61,6 @@ delivery.calls.queue
 
 ```text
 delivery.events
-> legacy outbox
 > default fail-fast
 ```
 
@@ -70,7 +68,7 @@ delivery.events
 
 Without `delivery`, current behavior must remain:
 
-- `emit` / `emitRaw` before ready rejects unless legacy `outbox.enabled === true`.
+- `emit` / `emitRaw` before ready rejects unless `delivery.events.offline === "queue"`.
 - `call` / `callRaw` before ready rejects unless explicit per-call `offlinePolicy` says otherwise.
 - RPC queue capacity defaults to `1000`, overflow defaults to `"reject"`.
 
@@ -78,7 +76,7 @@ Without `delivery`, current behavior must remain:
 
 ## Task 1: Add failing tests for `delivery.events`
 
-**Objective:** Prove the new event delivery namespace can replace legacy `outbox` and takes precedence over it.
+**Objective:** Prove the new event delivery namespace replaces the removed `outbox` API.
 
 **Files:**
 
@@ -124,27 +122,7 @@ it("queues client events emitted before ready when delivery.events offline is qu
 });
 ```
 
-**Step 2: Add test for `delivery.events` precedence over legacy `outbox`**
-
-```ts
-it("uses delivery.events before legacy outbox options", async () => {
-  const loop = createMockStreamLoopback();
-  const client = new AxtpClient(loop.client, {
-    logicalRole: "client",
-    outbox: { enabled: true, maxSize: 1000, overflow: "reject" },
-    delivery: {
-      events: { offline: "fail-fast" }
-    }
-  });
-
-  await expect(client.emitRaw("early", { queued: false })).rejects.toMatchObject({
-    code: ErrorCode.InvalidState
-  });
-  await client.close();
-});
-```
-
-**Step 3: Run targeted tests and verify failure**
+**Step 2: Run targeted tests and verify failure**
 
 ```bash
 pnpm test tests/sdk/sdk.test.ts
@@ -304,32 +282,7 @@ it("coalesces queued RPC calls using delivery.calls.methods policy", async () =>
 });
 ```
 
-**Step 2: Add call queue precedence test**
-
-```ts
-it("uses delivery.calls.queue before legacy calls.queue", async () => {
-  const loop = createMockStreamLoopback();
-  const client = new AxtpClient(loop.client, {
-    logicalRole: "client",
-    calls: { queue: { maxSize: 2, overflow: "reject" } },
-    delivery: {
-      calls: {
-        queue: { maxSize: 1, overflow: "reject" }
-      }
-    }
-  });
-
-  const first = client.callRaw("setName", { name: "Room A" }, { offlinePolicy: "queue" });
-  await expect(
-    client.callRaw("setName", { name: "Room B" }, { offlinePolicy: "queue" })
-  ).rejects.toMatchObject({ code: ErrorCode.InvalidState });
-
-  await client.close();
-  await expect(first).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
-});
-```
-
-**Step 3: Run targeted tests and verify failure**
+**Step 2: Run targeted tests and verify failure**
 
 ```bash
 pnpm test tests/sdk/sdk.test.ts
@@ -411,11 +364,6 @@ export interface ClientOptions {
   heartbeatIntervalMs?: number;
   maxFrameSize?: number;
   reconnect?: ReconnectPolicy;
-  /**
-   * @deprecated Use delivery.events instead.
-   */
-  outbox?: ClientOutboxOptions;
-  calls?: ClientCallsOptions;
   delivery?: ClientDeliveryOptions;
   diagnostics?: AxtpDiagnostics;
 }
@@ -458,7 +406,7 @@ private resolveCallOptions(method: string, options?: CallOptions): CallOptions {
 }
 
 private resolveCallQueueOptions(): Required<ClientDeliveryQueueOptions> {
-  const queue = this.options.delivery?.calls?.queue ?? this.options.calls?.queue;
+  const queue = this.options.delivery?.calls?.queue;
   return {
     maxSize: queue?.maxSize ?? 1000,
     overflow: queue?.overflow ?? "reject"
@@ -467,12 +415,11 @@ private resolveCallQueueOptions(): Required<ClientDeliveryQueueOptions> {
 
 private resolveEventDeliveryPolicy(): ResolvedEventDeliveryPolicy {
   const eventPolicy = this.options.delivery?.events;
-  const legacyOutbox = this.options.outbox;
   return {
-    offline: eventPolicy?.offline ?? (legacyOutbox?.enabled === true ? "queue" : "fail-fast"),
+    offline: eventPolicy?.offline ?? "fail-fast",
     queue: {
-      maxSize: eventPolicy?.queue?.maxSize ?? legacyOutbox?.maxSize ?? 1000,
-      overflow: eventPolicy?.queue?.overflow ?? legacyOutbox?.overflow ?? "reject"
+      maxSize: eventPolicy?.queue?.maxSize ?? 1000,
+      overflow: eventPolicy?.queue?.overflow ?? "reject"
     }
   };
 }
@@ -526,9 +473,9 @@ async callRaw(method: string, params: unknown, options?: CallOptions): Promise<u
 Replace:
 
 ```ts
-const queue = this.options.calls?.queue;
-const maxSize = queue?.maxSize ?? 1000;
-const overflow = queue?.overflow ?? "reject";
+const queue = this.resolveCallQueueOptions();
+const maxSize = queue.maxSize;
+const overflow = queue.overflow;
 ```
 
 with:
@@ -551,7 +498,7 @@ Expected: call delivery tests pass; event delivery tests may still fail until Ta
 
 ## Task 7: Route `enqueueEvent()` through resolved delivery policy
 
-**Objective:** Make `delivery.events` replace legacy `outbox` while preserving backward compatibility.
+**Objective:** Make `delivery.events` the only event offline queue policy source.
 
 **Files:**
 
@@ -562,8 +509,8 @@ Expected: call delivery tests pass; event delivery tests may still fail until Ta
 Replace the current `enqueueEvent()` policy block:
 
 ```ts
-const outbox = this.options.outbox;
-if (outbox?.enabled !== true) {
+const policy = this.resolveEventDeliveryPolicy();
+if (policy.offline !== "queue") {
   try {
     this.requireUsable();
   } catch (err) {
@@ -601,7 +548,7 @@ Expected: all SDK tests pass.
 
 ## Task 8: Update usage documentation
 
-**Objective:** Make `delivery` the recommended public API while keeping legacy docs clear.
+**Objective:** Document `delivery` as the public API and remove old `outbox` / top-level `calls.queue` references.
 
 **Files:**
 
@@ -639,10 +586,10 @@ const client = new AxtpClient(new NodeWsClientTransport({ url: "ws://localhost:8
 `CallDeliveryPolicy`: `{ default?: { timeoutMs?: number; offlinePolicy?: "fail-fast" | "wait-ready" | "queue" }; queue?: { maxSize?: number; overflow?: ... }; methods?: Record<string, CallMethodDeliveryPolicy> }`.
 ```
 
-4. Mark `outbox` as legacy/deprecated in prose:
+4. Document that old `outbox` / top-level `calls.queue` are removed:
 
 ```md
-`outbox` remains supported as a legacy alias for `delivery.events`, but new code should prefer `delivery.events`.
+Old `outbox` is removed; use `delivery.events` instead.
 ```
 
 5. Add a default/method-level call policy example:
@@ -748,8 +695,8 @@ Expected:
 ## Review Checklist
 
 - [ ] No behavior change when `delivery` is omitted.
-- [ ] `delivery.events` takes precedence over legacy `outbox`.
-- [ ] `delivery.calls.queue` takes precedence over legacy `calls.queue`.
+- [ ] `delivery.events` is the only event delivery policy source.
+- [ ] `delivery.calls.queue` is the only RPC queue capacity policy source.
 - [ ] `delivery.calls.default` applies when no per-call options are passed.
 - [ ] `delivery.calls.methods[method]` overrides default policy.
 - [ ] Per-call `CallOptions` overrides both method and default policy.
@@ -764,7 +711,7 @@ Expected:
 
 1. Should `ClientDeliveryOptions.streams` be omitted entirely for now instead of included as `unknown` reserved field?
    - Recommendation: omit from public type until stream policy has a real spec, unless we explicitly want to reserve the namespace.
-2. Should `calls.queue` be marked deprecated immediately?
-   - Recommendation: do not deprecate hard yet; say “prefer `delivery.calls.queue` for new code”.
+2. Should old top-level `calls.queue` be retained?
+   - Decision: no; remove it and require `delivery.calls.queue`.
 3. Should method policy support wildcard keys later?
    - Recommendation: separate future spec because wildcard ordering/conflict rules need their own tests.

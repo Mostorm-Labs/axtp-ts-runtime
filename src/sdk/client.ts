@@ -31,21 +31,9 @@ import type {
   Stream
 } from "./types.js";
 
-export interface ClientOutboxOptions {
-  enabled?: boolean;
-  maxSize?: number;
-  overflow?: "drop-oldest" | "drop-newest" | "reject";
-}
-
 export interface ClientDeliveryQueueOptions {
   maxSize?: number;
   overflow?: "drop-oldest" | "drop-newest" | "reject";
-}
-
-export type ClientCallQueueOptions = ClientDeliveryQueueOptions;
-
-export interface ClientCallsOptions {
-  queue?: ClientCallQueueOptions;
 }
 
 export interface EventDeliveryPolicy {
@@ -81,11 +69,6 @@ export interface ClientOptions {
   heartbeatIntervalMs?: number;
   maxFrameSize?: number;
   reconnect?: ReconnectPolicy;
-  /**
-   * @deprecated Use delivery.events instead.
-   */
-  outbox?: ClientOutboxOptions;
-  calls?: ClientCallsOptions;
   delivery?: ClientDeliveryOptions;
   diagnostics?: AxtpDiagnostics;
 }
@@ -342,7 +325,7 @@ export class AxtpClient {
   }
 
   private resolveCallQueueOptions(): Required<ClientDeliveryQueueOptions> {
-    const queue = this.options.delivery?.calls?.queue ?? this.options.calls?.queue;
+    const queue = this.options.delivery?.calls?.queue;
     return {
       maxSize: queue?.maxSize ?? 1000,
       overflow: queue?.overflow ?? "reject"
@@ -351,13 +334,11 @@ export class AxtpClient {
 
   private resolveEventDeliveryPolicy(): ResolvedEventDeliveryPolicy {
     const eventPolicy = this.options.delivery?.events;
-    const legacyOutbox = this.options.outbox;
-    const queue = eventPolicy !== undefined ? eventPolicy.queue : legacyOutbox;
     return {
-      offline: eventPolicy?.offline ?? (legacyOutbox?.enabled === true ? "queue" : "fail-fast"),
+      offline: eventPolicy?.offline ?? "fail-fast",
       queue: {
-        maxSize: queue?.maxSize ?? 1000,
-        overflow: queue?.overflow ?? "reject"
+        maxSize: eventPolicy?.queue?.maxSize ?? 1000,
+        overflow: eventPolicy?.queue?.overflow ?? "reject"
       }
     };
   }
