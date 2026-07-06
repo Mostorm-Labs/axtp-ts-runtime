@@ -1,6 +1,6 @@
 # AXTP Client Delivery Policy Spec
 
-> 保存位置：`docs/superpowers/specs/2026-07-06_133214-client-delivery-policy.md`  
+> 保存位置：`docs/superpowers/specs/2026-07-06_133214-client-delivery-policy.md`
 > 来源：对「每次 call RPC 显式设定太麻烦」以及「outbox 和 call options 是否可合并」brainstorming 的分析与规格化。
 
 ## 1. 背景与问题
@@ -194,8 +194,8 @@ await client.callRaw("device.getInfo", {});
 - 自动 replay 已经写入 endpoint 的 RPC。
 - 持久化 outbox / RPC queue 到磁盘。
 - 改变默认安全行为。
-- 删除旧 `outbox` / `calls.queue` API。
-- 一次性完成 stream delivery policy。
+- 保留旧 `outbox` / 顶层 `calls.queue` API；本方案是 breaking change，旧配置入口会被删除。
+- 暴露或实现 stream delivery policy；本 PR 不在 `ClientDeliveryOptions` 上提供 `streams` 字段。
 
 ## 5. API 设计
 
@@ -273,8 +273,6 @@ export interface CallDeliveryPolicy {
 export interface ClientDeliveryOptions {
   events?: EventDeliveryPolicy;
   calls?: CallDeliveryPolicy;
-  /** reserved for future; do not implement behavior in this spec */
-  streams?: unknown;
 }
 ```
 

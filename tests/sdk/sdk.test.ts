@@ -40,7 +40,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await server.close();
   });
 
-  it("queues client events emitted before ready when delivery.events offline is queue", async () => {
+  it("queues client events emitted before ready using default delivery event queue options", async () => {
     let received: unknown;
     const loop = createMockStreamLoopback();
     const server = new AxtpServer(loop.server, {
@@ -69,7 +69,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await server.close();
   });
 
-  it("queues client events emitted before ready when delivery.events offline is queue", async () => {
+  it("queues client events emitted before ready using explicit delivery event queue options", async () => {
     let received: unknown;
     const loop = createMockStreamLoopback();
     const server = new AxtpServer(loop.server, {

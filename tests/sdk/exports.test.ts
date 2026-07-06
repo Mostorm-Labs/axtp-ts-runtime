@@ -6,6 +6,14 @@ import * as mockEntry from "../../src/mock.js";
 import * as nodeEntry from "../../src/node.js";
 import * as protocolEntry from "../../src/protocol.js";
 import * as transportEntry from "../../src/transport.js";
+import type {
+  CallDeliveryDefaults,
+  CallDeliveryPolicy,
+  CallMethodDeliveryPolicy,
+  ClientDeliveryOptions,
+  ClientDeliveryQueueOptions,
+  EventDeliveryPolicy
+} from "../../src/index.js";
 
 describe("public exports: 主入口聚合 SDK 核心 + 子入口", () => {
   it("主入口导出 SDK 核心", () => {
@@ -29,6 +37,28 @@ describe("public exports: 主入口聚合 SDK 核心 + 子入口", () => {
     expect(main.framedBinaryProfile).toBeDefined();
     expect(main.createMockStreamLoopback).toBeDefined();
     expect(main.toBytes).toBeDefined();
+  });
+
+  it("主入口导出 client delivery policy 类型", () => {
+    const queue = { maxSize: 1, overflow: "reject" } satisfies ClientDeliveryQueueOptions;
+    const events = { offline: "queue", queue } satisfies EventDeliveryPolicy;
+    const defaults = {
+      offlinePolicy: "wait-ready",
+      timeoutMs: 5_000
+    } satisfies CallDeliveryDefaults;
+    const method = {
+      ...defaults,
+      coalesceKey: "setName",
+      coalescePrevious: "resolve-with-next"
+    } satisfies CallMethodDeliveryPolicy;
+    const calls = {
+      default: defaults,
+      queue,
+      methods: { setName: method }
+    } satisfies CallDeliveryPolicy;
+    const delivery = { events, calls } satisfies ClientDeliveryOptions;
+
+    expect(delivery.calls?.methods?.setName?.coalesceKey).toBe("setName");
   });
 
   it("./node 仅 Node stream 传输，不含 SDK 核心", () => {
