@@ -69,6 +69,56 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await server.close();
   });
 
+  it("queues client events emitted before ready when delivery.events offline is queue", async () => {
+    let received: unknown;
+    const loop = createMockStreamLoopback();
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000,
+      delivery: {
+        events: {
+          offline: "queue",
+          queue: { maxSize: 1000, overflow: "reject" }
+        }
+      }
+    });
+    server.onRaw("early", (data) => {
+      received = data;
+    });
+
+    await server.listen();
+    const connected = client.connect();
+    const emitted = client.emitRaw("early", { queued: true });
+
+    await connected;
+    await emitted;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(received).toEqual({ queued: true });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("uses delivery.events before legacy outbox options", async () => {
+    const loop = createMockStreamLoopback();
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      outbox: { enabled: true, maxSize: 1000, overflow: "reject" },
+      delivery: {
+        events: { offline: "fail-fast" }
+      }
+    });
+
+    await expect(client.emitRaw("early", { queued: false })).rejects.toMatchObject({
+      code: ErrorCode.InvalidState
+    });
+    await client.close();
+  });
+
   it("rejects new client events when the outbox is full", async () => {
     const loop = createMockStreamLoopback();
     const client = new AxtpClient(loop.client, {
@@ -156,6 +206,69 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
 
     await client.close();
     await server.close();
+  });
+
+  it("uses delivery.calls.default for wait-ready calls", async () => {
+    const loop = createMockStreamLoopback();
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000,
+      delivery: {
+        calls: {
+          default: { offlinePolicy: "wait-ready", timeoutMs: 5_000 }
+        }
+      }
+    });
+    server.handleRaw("add", (_ctx, p) => (p as { a: number }).a + (p as { b: number }).b);
+
+    await server.listen();
+    const called = client.callRaw("add", { a: 4, b: 6 });
+    await client.connect();
+    await expect(called).resolves.toBe(10);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("uses delivery.calls.methods to override call default policy", async () => {
+    const loop = createMockStreamLoopback();
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      delivery: {
+        calls: {
+          default: { offlinePolicy: "wait-ready" },
+          methods: {
+            "dangerous.deleteFile": { offlinePolicy: "fail-fast" }
+          }
+        }
+      }
+    });
+
+    await expect(client.callRaw("dangerous.deleteFile", { path: "/tmp/a" })).rejects.toMatchObject({
+      code: ErrorCode.InvalidState
+    });
+    await client.close();
+  });
+
+  it("uses per-call options before delivery call policy", async () => {
+    const loop = createMockStreamLoopback();
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      delivery: {
+        calls: {
+          default: { offlinePolicy: "wait-ready" }
+        }
+      }
+    });
+
+    await expect(
+      client.callRaw("device.getInfo", {}, { offlinePolicy: "fail-fast" })
+    ).rejects.toMatchObject({ code: ErrorCode.InvalidState });
+    await client.close();
   });
 
   it("queues RPC calls until ready when offlinePolicy is queue", async () => {
@@ -342,6 +455,70 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     const client = new AxtpClient(loop.client, {
       logicalRole: "client",
       calls: { queue: { maxSize: 1, overflow: "reject" } }
+    });
+
+    const first = client.callRaw("setName", { name: "Room A" }, { offlinePolicy: "queue" });
+    await expect(
+      client.callRaw("setName", { name: "Room B" }, { offlinePolicy: "queue" })
+    ).rejects.toMatchObject({ code: ErrorCode.InvalidState });
+
+    await client.close();
+    await expect(first).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
+  });
+
+  it("coalesces queued RPC calls using delivery.calls.methods policy", async () => {
+    const loop = createMockStreamLoopback();
+    const received: unknown[] = [];
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000,
+      delivery: {
+        calls: {
+          methods: {
+            setName: {
+              offlinePolicy: "queue",
+              coalesceKey: "setName",
+              coalescePrevious: "resolve-with-next"
+            }
+          }
+        }
+      }
+    });
+    server.handleRaw("setName", (_ctx, p) => {
+      received.push(p);
+      return `applied:${(p as { name: string }).name}`;
+    });
+
+    await server.listen();
+    const first = client.callRaw("setName", { name: "Room A" });
+    const second = client.callRaw("setName", { name: "Room B" });
+    const third = client.callRaw("setName", { name: "Room C" });
+
+    await client.connect();
+
+    await expect(first).resolves.toBe("applied:Room C");
+    await expect(second).resolves.toBe("applied:Room C");
+    await expect(third).resolves.toBe("applied:Room C");
+    expect(received).toEqual([{ name: "Room C" }]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("uses delivery.calls.queue before legacy calls.queue", async () => {
+    const loop = createMockStreamLoopback();
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      calls: { queue: { maxSize: 2, overflow: "reject" } },
+      delivery: {
+        calls: {
+          queue: { maxSize: 1, overflow: "reject" }
+        }
+      }
     });
 
     const first = client.callRaw("setName", { name: "Room A" }, { offlinePolicy: "queue" });

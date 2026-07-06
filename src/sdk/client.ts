@@ -23,7 +23,13 @@ import type {
   MethodResponse
 } from "../types/registry.js";
 import { computeEventMasks, EVENT_REGISTRY } from "../types/registry.js";
-import type { CallContext, CallOptions, Stream } from "./types.js";
+import type {
+  CallContext,
+  CallOfflinePolicy,
+  CallOptions,
+  QueuedCallCoalescePrevious,
+  Stream
+} from "./types.js";
 
 export interface ClientOutboxOptions {
   enabled?: boolean;
@@ -31,13 +37,41 @@ export interface ClientOutboxOptions {
   overflow?: "drop-oldest" | "drop-newest" | "reject";
 }
 
-export interface ClientCallQueueOptions {
+export interface ClientDeliveryQueueOptions {
   maxSize?: number;
   overflow?: "drop-oldest" | "drop-newest" | "reject";
 }
 
+export type ClientCallQueueOptions = ClientDeliveryQueueOptions;
+
 export interface ClientCallsOptions {
   queue?: ClientCallQueueOptions;
+}
+
+export interface EventDeliveryPolicy {
+  offline?: "fail-fast" | "queue";
+  queue?: ClientDeliveryQueueOptions;
+}
+
+export interface CallDeliveryDefaults {
+  timeoutMs?: number;
+  offlinePolicy?: CallOfflinePolicy;
+}
+
+export interface CallMethodDeliveryPolicy extends CallDeliveryDefaults {
+  coalesceKey?: string;
+  coalescePrevious?: QueuedCallCoalescePrevious;
+}
+
+export interface CallDeliveryPolicy {
+  default?: CallDeliveryDefaults;
+  queue?: ClientDeliveryQueueOptions;
+  methods?: Record<string, CallMethodDeliveryPolicy>;
+}
+
+export interface ClientDeliveryOptions {
+  events?: EventDeliveryPolicy;
+  calls?: CallDeliveryPolicy;
 }
 
 export interface ClientOptions {
@@ -47,8 +81,12 @@ export interface ClientOptions {
   heartbeatIntervalMs?: number;
   maxFrameSize?: number;
   reconnect?: ReconnectPolicy;
+  /**
+   * @deprecated Use delivery.events instead.
+   */
   outbox?: ClientOutboxOptions;
   calls?: ClientCallsOptions;
+  delivery?: ClientDeliveryOptions;
   diagnostics?: AxtpDiagnostics;
 }
 
@@ -77,6 +115,11 @@ type QueuedCall = {
   timeoutMs: number | undefined;
   coalesceKey: string | undefined;
   waiters: QueuedCallWaiter[];
+};
+
+type ResolvedEventDeliveryPolicy = {
+  offline: "fail-fast" | "queue";
+  queue: Required<ClientDeliveryQueueOptions>;
 };
 
 export class AxtpClient {
@@ -290,6 +333,34 @@ export class AxtpClient {
     }
   }
 
+  private resolveCallOptions(method: string, options?: CallOptions): CallOptions {
+    return {
+      ...this.options.delivery?.calls?.default,
+      ...this.options.delivery?.calls?.methods?.[method],
+      ...options
+    };
+  }
+
+  private resolveCallQueueOptions(): Required<ClientDeliveryQueueOptions> {
+    const queue = this.options.delivery?.calls?.queue ?? this.options.calls?.queue;
+    return {
+      maxSize: queue?.maxSize ?? 1000,
+      overflow: queue?.overflow ?? "reject"
+    };
+  }
+
+  private resolveEventDeliveryPolicy(): ResolvedEventDeliveryPolicy {
+    const eventPolicy = this.options.delivery?.events;
+    const legacyOutbox = this.options.outbox;
+    return {
+      offline: eventPolicy?.offline ?? (legacyOutbox?.enabled === true ? "queue" : "fail-fast"),
+      queue: {
+        maxSize: eventPolicy?.queue?.maxSize ?? legacyOutbox?.maxSize ?? 1000,
+        overflow: eventPolicy?.queue?.overflow ?? legacyOutbox?.overflow ?? "reject"
+      }
+    };
+  }
+
   // ===== 四件套 =====
 
   call<K extends MethodName>(
@@ -302,18 +373,19 @@ export class AxtpClient {
 
   /** 弱类型 call：method 为任意 string、params 为 unknown。动态/自定义方法名走这里。 */
   async callRaw(method: string, params: unknown, options?: CallOptions): Promise<unknown> {
-    if (options?.offlinePolicy === "wait-ready") {
+    const resolvedOptions = this.resolveCallOptions(method, options);
+    if (resolvedOptions.offlinePolicy === "wait-ready") {
       const ep = await this.waitForUsable();
-      return ep.call(method, params, options.timeoutMs);
+      return ep.call(method, params, resolvedOptions.timeoutMs);
     }
-    if (options?.offlinePolicy === "queue") {
+    if (resolvedOptions.offlinePolicy === "queue") {
       const ep = this.endpoint;
       if (this.state === "ready" && ep !== undefined)
-        return ep.call(method, params, options.timeoutMs);
-      return this.enqueueCall(method, params, options);
+        return ep.call(method, params, resolvedOptions.timeoutMs);
+      return this.enqueueCall(method, params, resolvedOptions);
     }
     const ep = this.requireUsable();
-    return ep.call(method, params, options?.timeoutMs);
+    return ep.call(method, params, resolvedOptions.timeoutMs);
   }
 
   private enqueueCall(method: string, params: unknown, options: CallOptions): Promise<unknown> {
@@ -347,9 +419,9 @@ export class AxtpClient {
         }
       }
 
-      const queue = this.options.calls?.queue;
-      const maxSize = queue?.maxSize ?? 1000;
-      const overflow = queue?.overflow ?? "reject";
+      const queue = this.resolveCallQueueOptions();
+      const maxSize = queue.maxSize;
+      const overflow = queue.overflow;
       if (this.callQueue.length >= maxSize) {
         if (overflow === "reject") {
           reject(new AxtpError(ErrorCode.InvalidState, "client call queue full"));
@@ -439,16 +511,16 @@ export class AxtpClient {
   private enqueueEvent(event: string, payload: unknown): Promise<void> {
     if (this.state === "closed")
       return Promise.reject(new AxtpError(ErrorCode.TransportDisconnected, "client closed"));
-    const outbox = this.options.outbox;
-    if (outbox?.enabled !== true) {
+    const policy = this.resolveEventDeliveryPolicy();
+    if (policy.offline !== "queue") {
       try {
         this.requireUsable();
       } catch (err) {
         return Promise.reject(err);
       }
     }
-    const maxSize = outbox?.maxSize ?? 1000;
-    const overflow = outbox?.overflow ?? "reject";
+    const maxSize = policy.queue.maxSize;
+    const overflow = policy.queue.overflow;
     if (this.eventOutbox.length >= maxSize) {
       if (overflow === "reject") {
         return Promise.reject(new AxtpError(ErrorCode.InvalidState, "client event outbox full"));

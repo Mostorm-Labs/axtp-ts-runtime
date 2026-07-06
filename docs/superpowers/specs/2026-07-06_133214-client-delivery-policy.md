@@ -37,10 +37,14 @@
 现在若用户希望大量 safe/idempotent RPC 在连接未 ready 时等待，需要每次写：
 
 ```ts
-await client.callRaw("device.getInfo", {}, {
-  offlinePolicy: "wait-ready",
-  timeoutMs: 5_000
-});
+await client.callRaw(
+  "device.getInfo",
+  {},
+  {
+    offlinePolicy: "wait-ready",
+    timeoutMs: 5_000
+  }
+);
 ```
 
 这使得调用点重复、容易漏写，也很难统一调整策略。
@@ -395,7 +399,7 @@ private resolveEventDeliveryPolicy(): Required<EventDeliveryPolicy> {
 未配置 `delivery` 时：
 
 ```ts
-new AxtpClient(transport)
+new AxtpClient(transport);
 ```
 
 行为保持：
@@ -454,10 +458,14 @@ await expect(p).resolves.toBe(10);
 应等价于旧写法：
 
 ```ts
-client.callRaw("add", { a: 4, b: 6 }, {
-  offlinePolicy: "wait-ready",
-  timeoutMs: 5_000
-});
+client.callRaw(
+  "add",
+  { a: 4, b: 6 },
+  {
+    offlinePolicy: "wait-ready",
+    timeoutMs: 5_000
+  }
+);
 ```
 
 ### 7.4 method policy 覆盖 default
