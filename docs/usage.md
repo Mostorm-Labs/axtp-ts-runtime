@@ -81,9 +81,15 @@ import { NodeWsClientTransport } from "@axtp/ts-sdk/node";
 const client = new AxtpClient(new NodeWsClientTransport({ url: "ws://localhost:8080" }), {
   defaultTimeoutMs: 5_000,
   reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 5_000, maxAttempts: 5 },
-  // Optional in-memory event outbox: emit() calls made while connecting/reconnecting
-  // are flushed after the next ready connection.
-  outbox: { enabled: true, maxSize: 1000, overflow: "reject" }
+  delivery: {
+    events: {
+      offline: "queue",
+      queue: { maxSize: 1000, overflow: "reject" }
+    },
+    calls: {
+      default: { offlinePolicy: "fail-fast" }
+    }
+  }
 });
 await client.connect();
 ```
@@ -147,11 +153,13 @@ Construct with a `StreamClientTransport` (from `@axtp/ts-sdk/node` or `@axtp/ts-
 | getters       | `sid`, `isReady`, `isClosed`                                                                                                   |
 | event streams | `onStateChange`, `onConnect`, `onDisconnect({remote})`, `onReconnect({attempt})`, `onReconnectFailed`, `onError`               |
 
-`ClientOptions`: `logicalRole?`, `defaultTimeoutMs?`, `handshakeTimeoutMs?`, `heartbeatIntervalMs?`, `maxFrameSize?`, `reconnect?: ReconnectPolicy`, `outbox?: ClientOutboxOptions`, `calls?: ClientCallsOptions`.
+`ClientOptions`: `logicalRole?`, `defaultTimeoutMs?`, `handshakeTimeoutMs?`, `heartbeatIntervalMs?`, `maxFrameSize?`, `reconnect?: ReconnectPolicy`, `delivery?: ClientDeliveryOptions`.
 
-`ClientOutboxOptions`: `{ enabled?: boolean; maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" }`. Defaults are `enabled: false`, `maxSize: 1000`, and `overflow: "reject"`.
+`ClientDeliveryOptions`: `{ events?: EventDeliveryPolicy; calls?: CallDeliveryPolicy }`.
 
-`ClientCallsOptions`: `{ queue?: { maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" } }`. RPC queue defaults are `maxSize: 1000` and `overflow: "reject"`.
+`EventDeliveryPolicy`: `{ offline?: "fail-fast" | "queue"; queue?: { maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" } }`.
+
+`CallDeliveryPolicy`: `{ default?: { timeoutMs?: number; offlinePolicy?: "fail-fast" | "wait-ready" | "queue" }; queue?: { maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" }; methods?: Record<string, { timeoutMs?: number; offlinePolicy?: "fail-fast" | "wait-ready" | "queue"; coalesceKey?: string; coalescePrevious?: "resolve-with-next" | "reject" | "drop" }> }`.
 
 `ReconnectPolicy`: `{ enabled: boolean; initialDelayMs?; maxDelayMs?; maxAttempts?; multiplier?; jitter? }`.
 
@@ -164,7 +172,12 @@ Enable the in-memory event outbox when UI or app code may emit before the socket
 ```ts
 const client = new AxtpClient(transport, {
   reconnect: { enabled: true },
-  outbox: { enabled: true, maxSize: 1000, overflow: "reject" }
+  delivery: {
+    events: {
+      offline: "queue",
+      queue: { maxSize: 1000, overflow: "reject" }
+    }
+  }
 });
 
 const connecting = client.connect();
@@ -172,7 +185,7 @@ await client.emitRaw("device.stateChanged", { online: true }); // queued until r
 await connecting;
 ```
 
-Outbox notes:
+Event delivery queue notes:
 
 - It applies to `emit`/`emitRaw` only.
 - It is in-memory only; process restart loses queued events.
@@ -188,7 +201,29 @@ For RPC calls, automatic replay is intentionally not the default because a disco
 - `"wait-ready"`: wait for the next ready endpoint and then send the call exactly once. Use this for safe/idempotent queries.
 - `"queue"`: enqueue a call that has not been written to an endpoint yet, optionally coalescing queued state-setting calls before the next ready endpoint.
 
-For safe/idempotent calls, opt into waiting for readiness before the call is sent:
+For safe/idempotent calls, opt into waiting for readiness before the call is sent. Use `delivery.calls.default` or `delivery.calls.methods` when many calls should share the same policy:
+
+```ts
+const client = new AxtpClient(transport, {
+  delivery: {
+    calls: {
+      default: { offlinePolicy: "wait-ready", timeoutMs: 5_000 },
+      methods: {
+        "device.factoryReset": { offlinePolicy: "fail-fast" },
+        "cast.setAirPlayName": {
+          offlinePolicy: "queue",
+          coalesceKey: "cast.setAirPlayName",
+          coalescePrevious: "resolve-with-next"
+        }
+      }
+    }
+  }
+});
+
+const info = await client.callRaw("device.getInfo", {});
+```
+
+Single-call `CallOptions` still work and override method/default delivery policy:
 
 ```ts
 const info = await client.callRaw(
@@ -219,7 +254,7 @@ await client.callRaw(
 
 RPC queue notes:
 
-- Queueing is opt-in per call; default behavior remains fail-fast.
+- Queueing is opt-in per call or per declared delivery call policy; default behavior remains fail-fast.
 - Queueing only applies before a call is written to an endpoint. Calls already sent to an endpoint are not replayed automatically after disconnect.
 - Queued calls flush FIFO after the client becomes ready. If the client leaves ready while flushing, unsent calls remain queued.
 - Calls with the same `coalesceKey` replace the previous queued call. The SDK never infers which method names are safe to coalesce.

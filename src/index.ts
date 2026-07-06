@@ -4,11 +4,14 @@
 // ===== SDK 门面 =====
 export { AxtpClient } from "./sdk/client.js";
 export type {
-  ClientCallQueueOptions,
-  ClientCallsOptions,
+  CallDeliveryDefaults,
+  CallDeliveryPolicy,
+  CallMethodDeliveryPolicy,
+  ClientDeliveryOptions,
+  ClientDeliveryQueueOptions,
   ClientOptions,
-  ClientOutboxOptions,
-  ClientState
+  ClientState,
+  EventDeliveryPolicy
 } from "./sdk/client.js";
 export { AxtpServer } from "./sdk/server.js";
 export type { ServerOptions } from "./sdk/server.js";
