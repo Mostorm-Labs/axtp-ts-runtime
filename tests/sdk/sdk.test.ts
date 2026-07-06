@@ -119,6 +119,24 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await client.close();
   });
 
+  it("does not inherit legacy outbox queue options when delivery.events is present", async () => {
+    const loop = createMockStreamLoopback();
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      outbox: { enabled: true, maxSize: 1, overflow: "reject" },
+      delivery: {
+        events: { offline: "queue" }
+      }
+    });
+
+    const first = client.emitRaw("queued", { n: 1 });
+    const second = client.emitRaw("queued", { n: 2 });
+
+    await client.close();
+    await expect(first).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
+    await expect(second).rejects.toMatchObject({ code: ErrorCode.TransportDisconnected });
+  });
+
   it("rejects new client events when the outbox is full", async () => {
     const loop = createMockStreamLoopback();
     const client = new AxtpClient(loop.client, {

@@ -161,7 +161,7 @@ Construct with a `StreamClientTransport` (from `@axtp/ts-sdk/node` or `@axtp/ts-
 
 `CallDeliveryPolicy`: `{ default?: { timeoutMs?: number; offlinePolicy?: "fail-fast" | "wait-ready" | "queue" }; queue?: { maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" }; methods?: Record<string, { timeoutMs?: number; offlinePolicy?: "fail-fast" | "wait-ready" | "queue"; coalesceKey?: string; coalescePrevious?: "resolve-with-next" | "reject" | "drop" }> }`.
 
-`ClientOutboxOptions`: `{ enabled?: boolean; maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" }`. Defaults are `enabled: false`, `maxSize: 1000`, and `overflow: "reject"`. This legacy option remains supported as an alias for `delivery.events`; new code should prefer `delivery.events`.
+`ClientOutboxOptions`: `{ enabled?: boolean; maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" }`. Defaults are `enabled: false`, `maxSize: 1000`, and `overflow: "reject"`. This legacy option remains supported as an alias for `delivery.events`; new code should prefer `delivery.events`. When `delivery.events` is present, it owns event delivery resolution and missing queue fields use SDK defaults instead of inheriting legacy `outbox` queue fields.
 
 `ClientCallsOptions`: `{ queue?: { maxSize?: number; overflow?: "reject" | "drop-newest" | "drop-oldest" } }`. RPC queue defaults are `maxSize: 1000` and `overflow: "reject"`. New code should prefer `delivery.calls.queue`.
 

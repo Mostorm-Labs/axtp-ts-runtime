@@ -352,11 +352,12 @@ export class AxtpClient {
   private resolveEventDeliveryPolicy(): ResolvedEventDeliveryPolicy {
     const eventPolicy = this.options.delivery?.events;
     const legacyOutbox = this.options.outbox;
+    const queue = eventPolicy !== undefined ? eventPolicy.queue : legacyOutbox;
     return {
       offline: eventPolicy?.offline ?? (legacyOutbox?.enabled === true ? "queue" : "fail-fast"),
       queue: {
-        maxSize: eventPolicy?.queue?.maxSize ?? legacyOutbox?.maxSize ?? 1000,
-        overflow: eventPolicy?.queue?.overflow ?? legacyOutbox?.overflow ?? "reject"
+        maxSize: queue?.maxSize ?? 1000,
+        overflow: queue?.overflow ?? "reject"
       }
     };
   }
