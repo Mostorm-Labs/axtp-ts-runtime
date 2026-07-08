@@ -39,6 +39,8 @@ import type { WireAdapter, WireSink } from "./wire/adapter.js";
 import { FramedWireAdapter } from "./wire/framed.js";
 import { UnframedWireAdapter } from "./wire/unframed.js";
 
+type RpcDiagnosticDirection = "in" | "out";
+
 function formatErrorDetail(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value === "string") return value;
@@ -56,6 +58,10 @@ function formatErrorDetail(value: unknown): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function rpcOpName(op: RpcOp): string {
+  return RpcOp[op] ?? String(op);
 }
 
 export interface CoreOptions {
@@ -107,8 +113,14 @@ export class AxtpCore {
           onSendBytes: (body) => this.sendControlBody(body),
           onLinkReady: (neg) => this.onLinkReadyInternal(neg.maxFrameSize, neg.heartbeatIntervalMs),
           onOpenRejected: (sc) => this.enqueue({ kind: "linkOpenRejected", statusCode: sc }),
-          onHeartbeat: (cid) => this.sendControlBody(encodeHeartbeatAck(cid)),
-          onHeartbeatAck: () => this.enqueue({ kind: "heartbeatAck" }),
+          onHeartbeat: (cid) => {
+            this.emitControlDiagnostic("in", "heartbeat", cid);
+            this.sendControlBody(encodeHeartbeatAck(cid), "heartbeatAck", cid);
+          },
+          onHeartbeatAck: (cid) => {
+            this.emitControlDiagnostic("in", "heartbeatAck", cid);
+            this.enqueue({ kind: "heartbeatAck" });
+          },
           onClosing: () => this.enqueue({ kind: "linkClosing" }),
           onError: (err) => this.enqueue({ kind: "error", err })
         },
@@ -185,20 +197,20 @@ export class AxtpCore {
 
   /** 出站事件（fire-and-forget）。 */
   emit(event: string, payload: unknown): void {
-    emitDiagnostic(this.diagnostics, {
-      level: "debug",
-      scope: "core",
-      event: "rpc.out.event",
-      direction: "out",
-      sid: this.handshake.sid,
-      name: event,
-      data: diagnosticData(this.diagnostics, payload)
-    });
     this.sendRpc(eventMsg(this.handshake.sid, event, payload));
   }
 
   /** 出站 STREAM 数据（framed）。 */
   sendStream(msg: StreamPayload): void {
+    emitDiagnostic(this.diagnostics, {
+      level: "debug",
+      scope: "core",
+      event: "stream.out.data",
+      direction: "out",
+      sid: this.handshake.sid,
+      streamId: msg.streamId,
+      bytes: msg.data.byteLength
+    });
     this.send({ kind: "stream", msg });
   }
 
@@ -217,7 +229,7 @@ export class AxtpCore {
     const control = this.control;
     if (control === undefined) return;
     const cid = control.allocControlId();
-    this.sendControlBody(encodeHeartbeat(cid));
+    this.sendControlBody(encodeHeartbeat(cid), "heartbeat", cid);
   }
 
   /** 断连/关闭：reject 所有 pending（Endpoint 在 disconnect 时调用）。 */
@@ -229,10 +241,12 @@ export class AxtpCore {
 
   /** 出站 RPC 消息（request/response/event/handshake）—— Endpoint 的 broker 回流也经此。 */
   sendRpc(msg: RpcMessage): void {
+    this.emitRpcDiagnostic("out", msg);
     this.send({ kind: "rpc", msg });
   }
 
-  private sendControlBody(body: Bytes): void {
+  private sendControlBody(body: Bytes, name?: string, controlId?: number): void {
+    if (name !== undefined) this.emitControlDiagnostic("out", name, controlId);
     this.send({ kind: "controlBody", body });
   }
 
@@ -264,6 +278,78 @@ export class AxtpCore {
     }
   }
 
+  private emitRpcDiagnostic(direction: RpcDiagnosticDirection, msg: RpcMessage): void {
+    switch (msg.op) {
+      case RpcOp.Request:
+        emitDiagnostic(this.diagnostics, {
+          level: "debug",
+          scope: "core",
+          event: `rpc.${direction}.request`,
+          direction,
+          sid: msg.sid,
+          op: rpcOpName(msg.op),
+          requestId: msg.requestId,
+          name: msg.method,
+          data: diagnosticData(this.diagnostics, msg.params)
+        });
+        break;
+      case RpcOp.RequestResponse:
+        emitDiagnostic(this.diagnostics, {
+          level: "debug",
+          scope: "core",
+          event: `rpc.${direction}.response`,
+          direction,
+          sid: msg.sid,
+          op: rpcOpName(msg.op),
+          requestId: msg.requestId,
+          status: msg.status,
+          data: diagnosticData(this.diagnostics, msg.result)
+        });
+        break;
+      case RpcOp.Event:
+        emitDiagnostic(this.diagnostics, {
+          level: "debug",
+          scope: "core",
+          event: `rpc.${direction}.event`,
+          direction,
+          sid: msg.sid,
+          op: rpcOpName(msg.op),
+          name: msg.eventName,
+          data: diagnosticData(this.diagnostics, msg.data)
+        });
+        break;
+      case RpcOp.Hello:
+      case RpcOp.Identify:
+      case RpcOp.Identified:
+        emitDiagnostic(this.diagnostics, {
+          level: "debug",
+          scope: "core",
+          event: `handshake.${direction}`,
+          direction,
+          sid: msg.sid,
+          op: rpcOpName(msg.op),
+          data: diagnosticData(this.diagnostics, msg)
+        });
+        break;
+    }
+  }
+
+  private emitControlDiagnostic(
+    direction: RpcDiagnosticDirection,
+    name: string,
+    controlId: number | undefined
+  ): void {
+    emitDiagnostic(this.diagnostics, {
+      level: "debug",
+      scope: "core",
+      event: `control.${direction}.${name}`,
+      direction,
+      sid: this.handshake.sid,
+      name,
+      controlId
+    });
+  }
+
   private onLinkReadyInternal(maxFrameSize: number | undefined, heartbeatIntervalMs: number): void {
     if (this.gate !== "LINK_CONNECTED") return;
     if (maxFrameSize !== undefined) this.framed?.setMaxFrameSize(maxFrameSize);
@@ -278,6 +364,7 @@ export class AxtpCore {
   }
 
   private handleRpc(msg: RpcMessage): void {
+    this.emitRpcDiagnostic("in", msg);
     const d = classifyInbound(this.gate, msg.op);
     switch (d.kind) {
       case "handshake":
@@ -303,6 +390,12 @@ export class AxtpCore {
     if (r.outbound !== undefined) this.sendRpc(r.outbound);
     if (r.becameReady) {
       this.gate = "APP_READY";
+      emitDiagnostic(this.diagnostics, {
+        level: "debug",
+        scope: "core",
+        event: "handshake.ready",
+        sid: this.handshake.sid
+      });
       this.enqueue({ kind: "handshakeReady", sid: this.handshake.sid });
     }
     if (r.error !== undefined) this.enqueue({ kind: "handshakeError", err: r.error });
@@ -322,15 +415,6 @@ export class AxtpCore {
         this.enqueue({ kind: "rpcRequest", msg });
         break;
       case RpcOp.Event:
-        emitDiagnostic(this.diagnostics, {
-          level: "debug",
-          scope: "core",
-          event: "rpc.in.event",
-          direction: "in",
-          sid: msg.sid,
-          name: msg.eventName,
-          data: diagnosticData(this.diagnostics, msg.data)
-        });
         this.enqueue({ kind: "rpcEvent", msg });
         break;
       case RpcOp.RequestResponse:
@@ -341,6 +425,15 @@ export class AxtpCore {
 
   private handleStream(msg: StreamPayload): void {
     if (this.gate !== "APP_READY") return; // pre-ready stream 丢弃
+    emitDiagnostic(this.diagnostics, {
+      level: "debug",
+      scope: "core",
+      event: "stream.in.data",
+      direction: "in",
+      sid: this.handshake.sid,
+      streamId: msg.streamId,
+      bytes: msg.data.byteLength
+    });
     this.enqueue({ kind: "streamData", msg });
   }
 }
