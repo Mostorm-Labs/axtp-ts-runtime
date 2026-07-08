@@ -3,7 +3,14 @@
 
 export type AxtpDiagnosticLevel = "debug" | "info" | "warn" | "error";
 
-export type AxtpDiagnosticScope = "client" | "server" | "endpoint" | "core" | "broker";
+export type AxtpDiagnosticScope =
+  | "client"
+  | "server"
+  | "endpoint"
+  | "core"
+  | "broker"
+  | "transport"
+  | "wire";
 
 export interface AxtpDiagnosticEntry {
   readonly ts: number;
@@ -14,6 +21,12 @@ export interface AxtpDiagnosticEntry {
   readonly endpointId?: number;
   readonly direction?: "in" | "out";
   readonly name?: string;
+  readonly op?: string;
+  readonly requestId?: number;
+  readonly streamId?: number;
+  readonly controlId?: number;
+  readonly bytes?: number;
+  readonly status?: number;
   readonly known?: boolean;
   readonly handlerCount?: number;
   readonly data?: unknown;

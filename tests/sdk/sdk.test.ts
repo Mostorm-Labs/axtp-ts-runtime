@@ -817,6 +817,190 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await server.close();
   });
 
+  it("diagnostics records protocol request and response flow without payloads by default", async () => {
+    const clientLogs: AxtpDiagnosticEntry[] = [];
+    const serverLogs: AxtpDiagnosticEntry[] = [];
+    const loop = createMockStreamLoopback();
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000,
+      diagnostics: {
+        logger: (entry) => serverLogs.push(entry)
+      }
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000,
+      diagnostics: {
+        logger: (entry) => clientLogs.push(entry)
+      }
+    });
+
+    server.handleRaw("diagnostics.add", (_ctx, p) => {
+      const params = p as { a: number; b: number };
+      return { total: params.a + params.b };
+    });
+
+    const clientReady = once(client.onConnect);
+    const serverReady = once(server.onConnect);
+    await server.listen();
+    void client.connect().catch(() => {});
+    await clientReady;
+    await serverReady;
+
+    await expect(client.callRaw("diagnostics.add", { a: 2, b: 4 })).resolves.toEqual({ total: 6 });
+
+    expect(clientLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "core",
+        event: "rpc.out.request",
+        direction: "out",
+        name: "diagnostics.add",
+        requestId: expect.any(Number)
+      })
+    );
+    expect(serverLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "core",
+        event: "rpc.in.request",
+        direction: "in",
+        name: "diagnostics.add",
+        requestId: expect.any(Number)
+      })
+    );
+    expect(serverLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "core",
+        event: "rpc.out.response",
+        direction: "out",
+        requestId: expect.any(Number),
+        status: ErrorCode.Success
+      })
+    );
+    expect(clientLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "core",
+        event: "rpc.in.response",
+        direction: "in",
+        requestId: expect.any(Number),
+        status: ErrorCode.Success
+      })
+    );
+    expect(clientLogs.find((entry) => entry.event === "rpc.out.request")?.data).toBeUndefined();
+    expect(serverLogs.find((entry) => entry.event === "rpc.out.response")?.data).toBeUndefined();
+
+    await client.close();
+    await server.close();
+  });
+
+  it("diagnostics includes protocol payloads only when includePayload is enabled", async () => {
+    const clientLogs: AxtpDiagnosticEntry[] = [];
+    const serverLogs: AxtpDiagnosticEntry[] = [];
+    const loop = createMockStreamLoopback();
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 60000,
+      diagnostics: {
+        includePayload: true,
+        logger: (entry) => serverLogs.push(entry)
+      }
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 60000,
+      diagnostics: {
+        includePayload: true,
+        logger: (entry) => clientLogs.push(entry)
+      }
+    });
+
+    server.handleRaw("diagnostics.echo", (_ctx, p) => ({ echoed: p }));
+
+    const clientReady = once(client.onConnect);
+    const serverReady = once(server.onConnect);
+    await server.listen();
+    void client.connect().catch(() => {});
+    await clientReady;
+    await serverReady;
+
+    await expect(client.callRaw("diagnostics.echo", { secret: "visible-in-test" })).resolves.toEqual({
+      echoed: { secret: "visible-in-test" }
+    });
+
+    expect(clientLogs).toContainEqual(
+      expect.objectContaining({
+        event: "rpc.out.request",
+        data: { secret: "visible-in-test" }
+      })
+    );
+    expect(serverLogs).toContainEqual(
+      expect.objectContaining({
+        event: "rpc.out.response",
+        data: { echoed: { secret: "visible-in-test" } }
+      })
+    );
+
+    await client.close();
+    await server.close();
+  });
+
+  it("diagnostics records control heartbeat probes and acknowledgements", async () => {
+    const clientLogs: AxtpDiagnosticEntry[] = [];
+    const serverLogs: AxtpDiagnosticEntry[] = [];
+    const loop = createMockStreamLoopback();
+    const server = new AxtpServer(loop.server, {
+      logicalRole: "server",
+      heartbeatIntervalMs: 500,
+      diagnostics: {
+        logger: (entry) => serverLogs.push(entry)
+      }
+    });
+    const client = new AxtpClient(loop.client, {
+      logicalRole: "client",
+      heartbeatIntervalMs: 500,
+      diagnostics: {
+        logger: (entry) => clientLogs.push(entry)
+      }
+    });
+
+    const clientReady = once(client.onConnect);
+    const serverReady = once(server.onConnect);
+    await server.listen();
+    void client.connect().catch(() => {});
+    await clientReady;
+    await serverReady;
+
+    await new Promise((resolve) => setTimeout(resolve, 650));
+
+    expect(clientLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "core",
+        event: "control.out.heartbeat",
+        direction: "out",
+        controlId: expect.any(Number)
+      })
+    );
+    expect(serverLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "core",
+        event: "control.in.heartbeat",
+        direction: "in",
+        controlId: expect.any(Number)
+      })
+    );
+    expect(clientLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "core",
+        event: "control.in.heartbeatAck",
+        direction: "in",
+        controlId: expect.any(Number)
+      })
+    );
+
+    await client.close();
+    await server.close();
+  });
+
   it("diagnostics logger errors do not break runtime event flow", async () => {
     let received: unknown;
     const loop = createMockStreamLoopback();
