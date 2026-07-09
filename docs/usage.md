@@ -35,6 +35,7 @@ pnpm add @axtp/ts-sdk
 | `@axtp/ts-sdk/protocol`  | Low-level payload model for advanced users: `PayloadType`, `ControlOpcode`, `RpcOp`, `RpcEncoding`, frame/message types, and payload factories (`helloMsg`, `requestMsg`, `responseMsg`, `eventMsg`, `identifyMsg`).                                                     |
 | `@axtp/ts-sdk/mock`      | In-memory loopback for tests: `createMockStreamLoopback()`.                                                                                                                                                                                                              |
 | `@axtp/ts-sdk/io`        | Byte helpers: `toBytes`, `bytesToHex`, `hexToBytes`, `concatBytes`, `bytesToText`, type `Bytes`.                                                                                                                                                                         |
+| `@axtp/ts-sdk/debug`     | Optional Node-only diagnostics webserver: `createAxtpDebugServer()` and `createAxtpDiagnosticsCollector()`. Use this entry only in debug tooling or controlled environments.                                                                                             |
 
 ## Quick start
 
@@ -110,6 +111,52 @@ await server.listen();
 // ...or target one endpoint by its server-assigned id:
 // await server.emitTo(server.getId(endpoint)!, "device.stateChanged", { online: true });
 ```
+
+### AXTP Telemetry debug server
+
+Use the optional Node-only debug entry when you want a local web UI for AXTP communication logs without wiring your own logger. The debug server consumes the SDK's structured `diagnostics` events and serves a lightweight telemetry panel with counters, filters, raw JSON expansion, copy/clear controls, and SSE live updates.
+
+```ts
+import { AxtpClient } from "@axtp/ts-sdk";
+import { createAxtpDebugServer } from "@axtp/ts-sdk/debug";
+import { NodeWsClientTransport } from "@axtp/ts-sdk/node";
+
+const debug = createAxtpDebugServer({
+  enabled: process.env.AXTP_DEBUG === "1",
+  // Default is 127.0.0.1. Use 0.0.0.0 only for controlled LAN debugging.
+  host: "127.0.0.1",
+  port: 0,
+  // Debug mode includes payloads by default. Disable if payloads may contain secrets.
+  includePayload: true,
+  // Required when NODE_ENV=production unless unsafeAllowNoAuth is explicitly true.
+  token: process.env.AXTP_DEBUG_TOKEN
+});
+
+const client = new AxtpClient(new NodeWsClientTransport({ url: "ws://localhost:8080" }), {
+  diagnostics: debug.diagnostics
+});
+
+await debug.listen();
+await client.connect();
+
+console.log("AXTP telemetry:", debug.url);
+```
+
+You can attach the same diagnostics object on server side:
+
+```ts
+const server = new AxtpServer(new NodeWsServerTransport({ port: 8080 }), {
+  diagnostics: debug.diagnostics
+});
+```
+
+Security defaults:
+
+- `enabled` defaults to `false`; opt in explicitly.
+- `host` defaults to `127.0.0.1` to avoid accidental LAN exposure.
+- `includePayload` defaults to `true` for debug visibility; set `includePayload: false` to hide payload data.
+- In `NODE_ENV=production`, a `token` is required unless you explicitly pass `unsafeAllowNoAuth: true`.
+- If auth is configured, pass the token in the query string (`?token=...`) or with an `Authorization` bearer header.
 
 ### Bidirectional streaming
 
