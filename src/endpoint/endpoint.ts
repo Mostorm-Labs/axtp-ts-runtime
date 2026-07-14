@@ -55,6 +55,8 @@ export class AxtpEndpoint {
   readonly onReady = new EventStream<void>();
   readonly onClose = new EventStream<{ remote: boolean }>();
   readonly onError = new EventStream<AxtpError>();
+  /** 确定性握手校验失败；连接方可据此停止无意义重连。 */
+  readonly onHandshakeError = new EventStream<AxtpError>();
 
   private readonly transport: StreamTransport;
   private readonly physicalRole: PhysicalRole;
@@ -168,6 +170,10 @@ export class AxtpEndpoint {
         this.close(true);
         break;
       case "handshakeError":
+        this.onHandshakeError.emit(ev.err);
+        this.onError.emit(ev.err);
+        this.close(false, true);
+        break;
       case "error":
         this.onError.emit(ev.err);
         break;
@@ -263,6 +269,7 @@ export class AxtpEndpoint {
     this.onReady.close();
     this.onClose.close();
     this.onError.close();
+    this.onHandshakeError.close();
   }
 
   private requireReady(): void {

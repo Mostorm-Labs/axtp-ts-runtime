@@ -45,6 +45,9 @@
     "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
     "test:conformance": "vitest run --config devtools/conformance/vitest.config.ts",
+    "playground": "node devtools/playground/connect.mjs",
+    "playground:loopback": "node devtools/playground/loopback.mjs",
+    "playground:incompatible": "node devtools/playground/incompatible-peer.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
