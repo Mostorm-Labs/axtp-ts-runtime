@@ -13,6 +13,11 @@ import {
 } from "../../src/protocol/model.js";
 import { Handshake } from "../../src/core/handshake.js";
 
+function incompatibleZeroMajorVersion(): string {
+  const [, minor = "0"] = AXTP_GENERATED_VERSION.specVersion.split(".");
+  return `0.${Number.parseInt(minor, 10) + 1}.0`;
+}
+
 describe("Handshake — Logical Server", () => {
   it("onLinkReady → FRAMING_READY；startHello 产出空 sid + 协议版本", () => {
     const h = new Handshake("server", 1);
@@ -67,7 +72,7 @@ describe("Handshake — Logical Client", () => {
   it("handle(Hello 非锁定 0.x minor) → error", () => {
     const h = new Handshake("client", 1);
     h.onLinkReady();
-    const r = h.handle(helloMsg("", "0.12.0"));
+    const r = h.handle(helloMsg("", incompatibleZeroMajorVersion()));
     expect(r.error).toBeDefined();
     expect(r.outbound).toBeUndefined();
   });
