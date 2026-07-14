@@ -1,8 +1,11 @@
 import { WebSocketServer } from "ws";
 import { ErrorCode } from "../../dist/index.js";
+import { AXTP_GENERATED_VERSION } from "../../dist/protocol/generated/axtpGeneratedVersion.js";
 import { RpcOp } from "../../dist/protocol.js";
 import { createPlaygroundClient } from "./shared.mjs";
 
+const [, lockedMinor = "0"] = AXTP_GENERATED_VERSION.specVersion.split(".");
+const incompatibleVersion = `0.${Number.parseInt(lockedMinor, 10) + 1}.0`;
 const peer = new WebSocketServer({ host: "127.0.0.1", port: 0 });
 await new Promise((resolve, reject) => {
   peer.once("listening", resolve);
@@ -12,7 +15,9 @@ const address = peer.address();
 if (typeof address !== "object" || address === null) throw new Error("missing peer address");
 
 peer.on("connection", (socket) => {
-  socket.send(JSON.stringify({ sid: "", op: RpcOp.Hello, d: { axtpVersion: "0.12.0" } }));
+  socket.send(
+    JSON.stringify({ sid: "", op: RpcOp.Hello, d: { axtpVersion: incompatibleVersion } })
+  );
 });
 
 let playground;

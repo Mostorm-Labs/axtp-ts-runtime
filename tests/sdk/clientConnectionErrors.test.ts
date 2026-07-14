@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { AxtpDiagnosticEntry } from "../../src/diagnostics.js";
+import { AXTP_GENERATED_VERSION } from "../../src/protocol/generated/axtpGeneratedVersion.js";
 import { RpcOp } from "../../src/protocol/model.js";
 import { AxtpClient } from "../../src/sdk/client.js";
 import { NodeWsClientTransport } from "../../src/transport/ws/nodeWsTransport.js";
@@ -40,6 +41,11 @@ function sendHello(socket: WebSocket, version: string): void {
   socket.send(JSON.stringify({ sid: "", op: RpcOp.Hello, d: { axtpVersion: version } }));
 }
 
+function incompatibleZeroMajorVersion(): string {
+  const [, minor = "0"] = AXTP_GENERATED_VERSION.specVersion.split(".");
+  return `0.${Number.parseInt(minor, 10) + 1}.0`;
+}
+
 async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
@@ -58,7 +64,8 @@ describe("AxtpClient connection errors over real WebSocket", () => {
   });
 
   it("rejects connect with the original incompatible-version error and records structured diagnostics", async () => {
-    const peer = await startRawPeer((socket) => sendHello(socket, "0.12.0"));
+    const incompatibleVersion = incompatibleZeroMajorVersion();
+    const peer = await startRawPeer((socket) => sendHello(socket, incompatibleVersion));
     peers.push(peer);
     const diagnostics: AxtpDiagnosticEntry[] = [];
     const client = new AxtpClient(new NodeWsClientTransport({ url: peer.url }), {
@@ -76,7 +83,7 @@ describe("AxtpClient connection errors over real WebSocket", () => {
 
     await expect(client.connect(1_000)).rejects.toMatchObject({
       code: ErrorCode.RpcPayloadInvalid,
-      message: "unsupported or missing axtpVersion: 0.12.0"
+      message: `unsupported or missing axtpVersion: ${incompatibleVersion}`
     });
     lifecycle.push("rejected");
 
@@ -84,7 +91,7 @@ describe("AxtpClient connection errors over real WebSocket", () => {
     expect(lifecycle).toEqual(["state:connecting", "state:closed", "error", "rejected"]);
     expect(observedErrors[0]).toMatchObject({
       code: ErrorCode.RpcPayloadInvalid,
-      message: "unsupported or missing axtpVersion: 0.12.0"
+      message: `unsupported or missing axtpVersion: ${incompatibleVersion}`
     });
     expect(client.isClosed).toBe(true);
     expect(diagnostics).toContainEqual(
@@ -93,7 +100,7 @@ describe("AxtpClient connection errors over real WebSocket", () => {
         scope: "core",
         event: "handshake.error",
         code: ErrorCode.RpcPayloadInvalid,
-        message: "unsupported or missing axtpVersion: 0.12.0",
+        message: `unsupported or missing axtpVersion: ${incompatibleVersion}`,
         phase: "handshake",
         retryable: false
       })
@@ -101,7 +108,7 @@ describe("AxtpClient connection errors over real WebSocket", () => {
   });
 
   it("does not retry a deterministic handshake version failure", async () => {
-    const peer = await startRawPeer((socket) => sendHello(socket, "0.12.0"));
+    const peer = await startRawPeer((socket) => sendHello(socket, incompatibleZeroMajorVersion()));
     peers.push(peer);
     const client = new AxtpClient(new NodeWsClientTransport({ url: peer.url }), {
       logicalRole: "client",
@@ -124,6 +131,7 @@ describe("AxtpClient connection errors over real WebSocket", () => {
   });
 
   it("stops reconnecting when a later endpoint fails deterministic handshake validation", async () => {
+    const incompatibleVersion = incompatibleZeroMajorVersion();
     let connection = 0;
     const peer = await startRawPeer((socket) => {
       connection += 1;
@@ -134,7 +142,7 @@ describe("AxtpClient connection errors over real WebSocket", () => {
           setTimeout(() => socket.close(), 5);
         });
       } else {
-        sendHello(socket, "0.12.0");
+        sendHello(socket, incompatibleVersion);
       }
     });
     peers.push(peer);
@@ -153,7 +161,9 @@ describe("AxtpClient connection errors over real WebSocket", () => {
     client.onError.subscribe((error) => observedErrors.push(error));
 
     await client.connect(1_000);
-    await waitFor(() => observedErrors.some((error) => error.message.includes("0.12.0")));
+    await waitFor(() =>
+      observedErrors.some((error) => error.message.includes(incompatibleVersion))
+    );
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     expect(peer.connectionCount()).toBe(2);
