@@ -158,6 +158,36 @@ Security defaults:
 - In `NODE_ENV=production`, a `token` is required unless you explicitly pass `unsafeAllowNoAuth: true`.
 - If auth is configured, pass the token in the query string (`?token=...`) or with an `Authorization` bearer header.
 
+### Real WebSocket playground
+
+Build the package first so the playground exercises the same `dist` entry points that consumers import:
+
+```bash
+npm run build
+```
+
+Connect directly to a running AXTP service (defaults to `ws://127.0.0.1:7020`):
+
+```bash
+npm run playground
+# or pass another target after --
+npm run playground -- ws://127.0.0.1:7020
+```
+
+The command starts the diagnostics webserver, prints its Telemetry URL, performs a real `NodeWsClientTransport` connection, and opens a small interactive shell. Available commands are `state`, `errors`, `call <method> <json>`, `emit <event> <json>`, `reconnect`, `clear`, and `quit`. If the initial connection fails, the shell and Telemetry page remain available so the target can be fixed or started before running `reconnect`.
+
+Two deterministic smoke modes are also available:
+
+```bash
+# Real Node WebSocket server + client, handshake, RPC, and telemetry
+npm run playground:loopback
+
+# Real WebSocket peer advertising AXTP 0.12.0 to verify version-error visibility
+npm run playground:incompatible
+```
+
+The playground is development tooling under `devtools/playground/`; it is not exported as SDK runtime API.
+
 ### Bidirectional streaming
 
 ```ts

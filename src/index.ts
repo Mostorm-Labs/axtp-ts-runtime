@@ -34,6 +34,7 @@ export type {
 export type {
   AxtpDiagnosticEntry,
   AxtpDiagnosticLevel,
+  AxtpDiagnosticPhase,
   AxtpDiagnosticScope,
   AxtpDiagnostics
 } from "./diagnostics.js";

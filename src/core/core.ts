@@ -398,7 +398,19 @@ export class AxtpCore {
       });
       this.enqueue({ kind: "handshakeReady", sid: this.handshake.sid });
     }
-    if (r.error !== undefined) this.enqueue({ kind: "handshakeError", err: r.error });
+    if (r.error !== undefined) {
+      emitDiagnostic(this.diagnostics, {
+        level: "error",
+        scope: "core",
+        event: "handshake.error",
+        sid: this.handshake.sid,
+        code: r.error.code,
+        message: r.error.message,
+        phase: "handshake",
+        retryable: false
+      });
+      this.enqueue({ kind: "handshakeError", err: r.error });
+    }
   }
 
   private dispatchBusiness(msg: RpcMessage): void {

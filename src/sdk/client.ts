@@ -116,6 +116,7 @@ export class AxtpClient {
   private readonly eventOutbox: QueuedEvent[] = [];
   private readonly callQueue: QueuedCall[] = [];
   private flushingCallQueue = false;
+  private handshakeTimer: ReturnType<typeof setTimeout> | undefined;
   /** connect() 等待首次 ready 的 resolver（首次 ready resolve；close/重连耗尽 reject）。 */
   private readyWait: { resolve: () => void; reject: (e: AxtpError) => void } | undefined;
 
@@ -219,10 +220,50 @@ export class AxtpClient {
     ep.onReady.subscribe(() => this.onEndpointReady());
     ep.onClose.subscribe(({ remote }) => this.onEndpointClose(remote));
     ep.onError.subscribe((e) => this.onError.emit(e));
+    ep.onHandshakeError.subscribe((e) => this.onFatalHandshakeError(ep, e));
+    this.armHandshakeTimeout(ep);
     ep.start();
   }
 
+  private armHandshakeTimeout(ep: AxtpEndpoint): void {
+    this.clearHandshakeTimeout();
+    const timeoutMs = this.options.handshakeTimeoutMs;
+    if (timeoutMs === undefined || timeoutMs === Number.POSITIVE_INFINITY) return;
+    this.handshakeTimer = setTimeout(
+      () => {
+        if (this.endpoint !== ep || ep.isReady || this.state === "closed") return;
+        const error = new AxtpError(ErrorCode.Timeout, `handshake timed out after ${timeoutMs}ms`);
+        this.onError.emit(error);
+        if (this.coordinator === undefined) {
+          this.failReady(error);
+          this.rejectCallQueue(error);
+          this.rejectOutbox(error);
+          this.setState("closed");
+        }
+        ep.close(false, true);
+      },
+      Math.max(0, timeoutMs)
+    );
+  }
+
+  private clearHandshakeTimeout(): void {
+    if (this.handshakeTimer === undefined) return;
+    clearTimeout(this.handshakeTimer);
+    this.handshakeTimer = undefined;
+  }
+
+  private onFatalHandshakeError(ep: AxtpEndpoint, error: AxtpError): void {
+    if (this.endpoint !== ep || this.state === "closed") return;
+    this.clearHandshakeTimeout();
+    this.coordinator?.stop();
+    this.failReady(error);
+    this.rejectCallQueue(error);
+    this.rejectOutbox(error);
+    this.setState("closed");
+  }
+
   private onEndpointReady(): void {
+    this.clearHandshakeTimeout();
     this.coordinator?.onSuccess();
     if (this.firstReady) {
       this.firstReady = false;
@@ -236,6 +277,7 @@ export class AxtpClient {
   }
 
   private onEndpointClose(remote: boolean): void {
+    this.clearHandshakeTimeout();
     if (this.state === "closed") return;
     this.endpoint = undefined;
     if (this.firstReady) {
@@ -579,6 +621,7 @@ export class AxtpClient {
   /** 主动关闭，不再重连。 */
   async close(): Promise<void> {
     this.coordinator?.stop();
+    this.clearHandshakeTimeout();
     this.setState("closed");
     this.endpoint?.close();
     const err = new AxtpError(ErrorCode.TransportDisconnected, "closed");
