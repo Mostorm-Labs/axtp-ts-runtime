@@ -512,6 +512,12 @@ export interface CastSetMutedParams {
   scope?: string;
 }
 
+export interface CastSetAudioDelayParams {
+  audioDelayMs: number;
+  sessionId?: string;
+  scope?: string;
+}
+
 export interface CastAudioState {
   enabled: boolean;
   muted: boolean;
@@ -522,6 +528,7 @@ export interface CastAudioState {
   reason?: string;
   changedFields?: string[];
   updatedAt?: string;
+  audioDelayMs?: number;
 }
 
 export interface CastAudioChangedEvent {
@@ -761,6 +768,9 @@ export interface CastAudioCapability {
   defaultEnabled?: boolean;
   supportsMute?: boolean;
   reportsEffectivePlayback?: boolean;
+  supportsAudioDelay?: boolean;
+  defaultAudioDelayMs?: number;
+  maxAudioDelayMs?: number;
 }
 
 export interface CastPinCodeCapability {
