@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { AxtpDiagnosticEntry } from "../../src/diagnostics.js";
-import { AXTP_GENERATED_VERSION } from "../../src/protocol/generated/axtpGeneratedVersion.js";
 import { RpcOp } from "../../src/protocol/model.js";
 import { AxtpClient } from "../../src/sdk/client.js";
 import { NodeWsClientTransport } from "../../src/transport/ws/nodeWsTransport.js";
@@ -41,19 +39,6 @@ function sendHello(socket: WebSocket, version: string): void {
   socket.send(JSON.stringify({ sid: "", op: RpcOp.Hello, d: { axtpVersion: version } }));
 }
 
-function incompatibleZeroMajorVersion(): string {
-  const [, minor = "0"] = AXTP_GENERATED_VERSION.specVersion.split(".");
-  return `0.${Number.parseInt(minor, 10) + 1}.0`;
-}
-
-async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition not reached before timeout");
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
-
 describe("AxtpClient connection errors over real WebSocket", () => {
   const peers: RawPeer[] = [];
   const clients: AxtpClient[] = [];
@@ -63,87 +48,47 @@ describe("AxtpClient connection errors over real WebSocket", () => {
     while (peers.length > 0) await peers.pop()?.close();
   });
 
-  it("rejects connect with the original incompatible-version error and records structured diagnostics", async () => {
-    const incompatibleVersion = incompatibleZeroMajorVersion();
-    const peer = await startRawPeer((socket) => sendHello(socket, incompatibleVersion));
+  it("accepts an incompatible advisory version when the peer completes the handshake", async () => {
+    const peer = await startRawPeer((socket) => {
+      sendHello(socket, "2.0.0");
+      socket.once("message", () => {
+        socket.send(JSON.stringify({ sid: "advisory", op: RpcOp.Identified, d: {} }));
+      });
+    });
     peers.push(peer);
-    const diagnostics: AxtpDiagnosticEntry[] = [];
     const client = new AxtpClient(new NodeWsClientTransport({ url: peer.url }), {
-      logicalRole: "client",
-      diagnostics: { logger: (entry) => diagnostics.push(entry) }
+      logicalRole: "client"
     });
     clients.push(client);
-    const observedErrors: Error[] = [];
-    const lifecycle: string[] = [];
-    client.onError.subscribe((error) => {
-      lifecycle.push("error");
-      observedErrors.push(error);
-    });
-    client.onStateChange.subscribe((state) => lifecycle.push(`state:${state}`));
-
-    await expect(client.connect(1_000)).rejects.toMatchObject({
-      code: ErrorCode.RpcPayloadInvalid,
-      message: `unsupported or missing axtpVersion: ${incompatibleVersion}`
-    });
-    lifecycle.push("rejected");
-
-    expect(observedErrors).toHaveLength(1);
-    expect(lifecycle).toEqual(["state:connecting", "state:closed", "error", "rejected"]);
-    expect(observedErrors[0]).toMatchObject({
-      code: ErrorCode.RpcPayloadInvalid,
-      message: `unsupported or missing axtpVersion: ${incompatibleVersion}`
-    });
-    expect(client.isClosed).toBe(true);
-    expect(diagnostics).toContainEqual(
-      expect.objectContaining({
-        level: "error",
-        scope: "core",
-        event: "handshake.error",
-        code: ErrorCode.RpcPayloadInvalid,
-        message: `unsupported or missing axtpVersion: ${incompatibleVersion}`,
-        phase: "handshake",
-        retryable: false
-      })
-    );
+    await client.connect(1_000);
+    expect(client.isReady).toBe(true);
   });
 
-  it("does not retry a deterministic handshake version failure", async () => {
-    const peer = await startRawPeer((socket) => sendHello(socket, incompatibleZeroMajorVersion()));
+  it("does not reject a major-different advisory version", async () => {
+    const peer = await startRawPeer((socket) => {
+      sendHello(socket, "2.0.0");
+      socket.once("message", () => {
+        socket.send(JSON.stringify({ sid: "major-different", op: RpcOp.Identified, d: {} }));
+      });
+    });
     peers.push(peer);
     const client = new AxtpClient(new NodeWsClientTransport({ url: peer.url }), {
       logicalRole: "client",
-      reconnect: {
-        enabled: true,
-        initialDelayMs: 1,
-        maxDelayMs: 1,
-        maxAttempts: 3,
-        jitter: false
-      }
+      reconnect: { enabled: true, initialDelayMs: 1, maxDelayMs: 1, maxAttempts: 3, jitter: false }
     });
     clients.push(client);
 
-    await expect(client.connect(1_000)).rejects.toMatchObject({
-      code: ErrorCode.RpcPayloadInvalid
-    });
-    await new Promise((resolve) => setTimeout(resolve, 30));
-
+    await client.connect(1_000);
+    expect(client.isReady).toBe(true);
     expect(peer.connectionCount()).toBe(1);
   });
 
-  it("stops reconnecting when a later endpoint fails deterministic handshake validation", async () => {
-    const incompatibleVersion = incompatibleZeroMajorVersion();
-    let connection = 0;
+  it("accepts an incompatible advisory version after reconnect", async () => {
     const peer = await startRawPeer((socket) => {
-      connection += 1;
-      if (connection === 1) {
-        sendHello(socket, "1.0.0");
-        socket.once("message", () => {
-          socket.send(JSON.stringify({ sid: "playground", op: RpcOp.Identified, d: {} }));
-          setTimeout(() => socket.close(), 5);
-        });
-      } else {
-        sendHello(socket, incompatibleVersion);
-      }
+      sendHello(socket, "2.0.0");
+      socket.once("message", () => {
+        socket.send(JSON.stringify({ sid: "reconnected", op: RpcOp.Identified, d: {} }));
+      });
     });
     peers.push(peer);
     const client = new AxtpClient(new NodeWsClientTransport({ url: peer.url }), {
@@ -157,17 +102,9 @@ describe("AxtpClient connection errors over real WebSocket", () => {
       }
     });
     clients.push(client);
-    const observedErrors: Error[] = [];
-    client.onError.subscribe((error) => observedErrors.push(error));
-
     await client.connect(1_000);
-    await waitFor(() =>
-      observedErrors.some((error) => error.message.includes(incompatibleVersion))
-    );
-    await new Promise((resolve) => setTimeout(resolve, 30));
-
-    expect(peer.connectionCount()).toBe(2);
-    expect(client.isClosed).toBe(true);
+    expect(peer.connectionCount()).toBe(1);
+    expect(client.isReady).toBe(true);
   });
 
   it("retries a handshake timeout and succeeds on the next real WebSocket connection", async () => {
