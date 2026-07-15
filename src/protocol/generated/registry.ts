@@ -77,6 +77,7 @@ export const METHOD_REGISTRY = {
   "cast.setRenderFps": { id: 0x1610, status: "draft", bitOffset: 15, request: typeOnly<AxtpSchemas.CastSetRenderFpsParams>(), response: typeOnly<AxtpSchemas.CastFlowControlState>() },
   "cast.setFlowPolicy": { id: 0x1611, status: "draft", bitOffset: 16, request: typeOnly<AxtpSchemas.CastSetFlowPolicyParams>(), response: typeOnly<AxtpSchemas.CastFlowControlState>() },
   "cast.getStatus": { id: 0x1612, status: "draft", bitOffset: 17, request: typeOnly<AxtpSchemas.CastGetStatusParams>(), response: typeOnly<AxtpSchemas.CastStatus>() },
+  "cast.setAudioDelay": { id: 0x1613, status: "draft", bitOffset: 18, request: typeOnly<AxtpSchemas.CastSetAudioDelayParams>(), response: typeOnly<AxtpSchemas.CastAudioState>() },
   "software.getConfig": { id: 0x1701, status: "draft", bitOffset: 0, request: typeOnly<AxtpSchemas.SoftwareGetConfigParams>(), response: typeOnly<AxtpSchemas.SoftwareConfig>() },
   "software.setConfig": { id: 0x1702, status: "draft", bitOffset: 1, request: typeOnly<AxtpSchemas.SoftwareSetConfigParams>(), response: typeOnly<AxtpSchemas.SoftwareSetConfigResult>() },
   "software.resetConfig": { id: 0x1703, status: "draft", bitOffset: 2, request: typeOnly<AxtpSchemas.SoftwareResetConfigParams>(), response: typeOnly<AxtpSchemas.SoftwareConfig>() },
