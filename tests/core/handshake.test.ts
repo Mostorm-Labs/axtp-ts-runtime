@@ -3,7 +3,6 @@
 
 import { describe, expect, it } from "vitest";
 import { AXTP_SPEC_VERSION } from "../../src/protocol/generated/axtpVersion.js";
-import { AXTP_GENERATED_VERSION } from "../../src/protocol/generated/axtpGeneratedVersion.js";
 import {
   RpcOp,
   helloMsg,
@@ -36,6 +35,30 @@ describe("Handshake — Logical Server", () => {
     expect(h.sid).not.toBe("00000000");
   });
 
+  it("handle(Reidentify) on an identified server preserves sid and returns Identified", () => {
+    const h = new Handshake("server", 1);
+    h.onLinkReady();
+    h.handle(identifyMsg("", 2));
+    const sid = h.sid;
+    const result = h.handle({ op: RpcOp.Reidentify, sid });
+    expect(result.outbound).toEqual(identifiedMsg(sid));
+    expect(h.sid).toBe(sid);
+    expect(h.isReady).toBe(true);
+  });
+
+  it("tracks absent, empty, and nonempty subscription masks across Identify/Reidentify", () => {
+    const h = new Handshake("server", 1);
+    h.onLinkReady();
+    h.handle(identifyMsg("", 2, "deadbeef"));
+    const sid = h.sid;
+    expect(h.eventMasks).toBe("deadbeef");
+    expect(h.handle({ op: RpcOp.Reidentify, sid, eventMasks: "" }).outbound).toEqual(identifiedMsg(sid));
+    expect(h.eventMasks).toBe("");
+    expect(h.handle({ op: RpcOp.Reidentify, sid }).outbound).toEqual(identifiedMsg(sid));
+    expect(h.eventMasks).toBeUndefined();
+    expect(h.sid).toBe(sid);
+  });
+
   it("sid 由 randomSeed ⊕ 本地熵 决定（同种子确定性）", () => {
     const seed = 0xabcdef00;
     const make = (): string => {
@@ -48,43 +71,19 @@ describe("Handshake — Logical Server", () => {
 });
 
 describe("Handshake — Logical Client", () => {
-  it("handle(Hello 兼容版本) → 回 Identify、未 ready", () => {
-    const h = new Handshake("client", 1);
-    h.onLinkReady();
-    const r = h.handle(helloMsg("", "1.0.0"));
-    expect(r.becameReady).toBe(false);
-    expect(r.outbound?.op).toBe(RpcOp.Identify);
-  });
-
-  it("handle(Hello 锁定 spec 版本) → 兼容旧实现误用 specVersion 的握手", () => {
-    const h = new Handshake("client", 1);
-    h.onLinkReady();
-    const r = h.handle(helloMsg("", AXTP_GENERATED_VERSION.specVersion));
-    expect(r.becameReady).toBe(false);
-    expect(r.outbound?.op).toBe(RpcOp.Identify);
-  });
-
-  it("handle(Hello 非锁定 0.x minor) → error", () => {
-    const h = new Handshake("client", 1);
-    h.onLinkReady();
-    const r = h.handle(helloMsg("", "0.12.0"));
-    expect(r.error).toBeDefined();
-    expect(r.outbound).toBeUndefined();
-  });
-
-  it("handle(Hello 不兼容主版本) → error", () => {
-    const h = new Handshake("client", 1);
-    h.onLinkReady();
-    const r = h.handle(helloMsg("", "2.0.0"));
-    expect(r.error).toBeDefined();
-    expect(r.outbound).toBeUndefined();
-  });
-
-  it("handle(Hello 缺版本) → error", () => {
-    const h = new Handshake("client", 1);
-    h.onLinkReady();
-    expect(h.handle(helloMsg("", "")).error).toBeDefined();
-  });
+  it.each(["1.0.0", "1.1.0", "1.0.1", "2.0.0", "malformed", ""])(
+    "treats Hello.axtpVersion=%j as advisory and continues to Identify/Identified",
+    (version) => {
+      const h = new Handshake("client", 1);
+      h.onLinkReady();
+      const hello = h.handle(helloMsg("", version));
+      expect(hello.error).toBeUndefined();
+      expect(hello.outbound?.op).toBe(RpcOp.Identify);
+      const identified = h.handle(identifiedMsg("1234abcd"));
+      expect(identified.becameReady).toBe(true);
+      expect(h.state).toBe("APP_READY");
+    }
+  );
 
   it("handle(Identified 合法 sid) → becameReady、sid 记录", () => {
     const h = new Handshake("client", 1);

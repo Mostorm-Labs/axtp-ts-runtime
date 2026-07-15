@@ -48,6 +48,21 @@ describe("BasicBroker — dispatchRequest", () => {
     expect((results[0] as ResponsePayload).status).toBe(ErrorCode.RpcMethodNotFound);
   });
 
+  it("registered method without a runtime handler returns common NotSupported", async () => {
+    const { broker, results } = capture();
+    broker.dispatchRequest(requestMsg("12345678", 1, "audio.getAlgorithmConfig", {}));
+    await tick();
+    expect((results[0] as ResponsePayload).status).toBe(ErrorCode.NotSupported);
+  });
+
+  it("explicit profile-unavailable operation returns common NotSupported", async () => {
+    const { broker, results } = capture();
+    broker.setMethodUnavailable("stream.getCapabilities");
+    broker.dispatchRequest(requestMsg("12345678", 1, "stream.getCapabilities", {}));
+    await tick();
+    expect((results[0] as ResponsePayload).status).toBe(ErrorCode.NotSupported);
+  });
+
   it("handler 抛 AxtpError → onResult(其 code + 错误详情) + onError", async () => {
     const { broker, results, stats } = capture();
     broker.setMethod("boom", () => {
@@ -92,11 +107,11 @@ describe("BasicBroker — dispatchEvent", () => {
   it("多 handler 都调用；单个抛错不影响其它 + onError", () => {
     const { broker, stats } = capture();
     let n = 0;
-    broker.addEventListener("e", () => {
+    broker.addEventListener("audio.algorithmConfigChanged", () => {
       throw new Error("x");
     });
-    broker.addEventListener("e", () => (n += 1));
-    broker.dispatchEvent(eventMsg("12345678", "e", { d: 1 }));
+    broker.addEventListener("audio.algorithmConfigChanged", () => (n += 1));
+    broker.dispatchEvent(eventMsg("12345678", "audio.algorithmConfigChanged", { d: 1 }));
     expect(n).toBe(1);
     expect(stats.errs).toBe(1);
   });
@@ -105,5 +120,13 @@ describe("BasicBroker — dispatchEvent", () => {
     const { broker, stats } = capture();
     expect(() => broker.dispatchEvent(eventMsg("12345678", "none", {}))).not.toThrow();
     expect(stats.errs).toBe(0);
+  });
+
+  it("unknown event never dispatches to an application listener", () => {
+    const { broker } = capture();
+    let calls = 0;
+    broker.addEventListener("vendor.unknown", () => (calls += 1));
+    broker.dispatchEvent(eventMsg("12345678", "vendor.unknown", {}));
+    expect(calls).toBe(0);
   });
 });

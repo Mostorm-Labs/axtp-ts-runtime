@@ -51,7 +51,7 @@ export interface Message {
 export interface HelloPayload {
   readonly op: RpcOp.Hello;
   readonly sid: string;
-  readonly axtpVersion: string;
+  readonly axtpVersion?: string;
 }
 export interface IdentifyPayload {
   readonly op: RpcOp.Identify;
@@ -62,6 +62,11 @@ export interface IdentifyPayload {
 export interface IdentifiedPayload {
   readonly op: RpcOp.Identified;
   readonly sid: string;
+}
+export interface ReidentifyPayload {
+  readonly op: RpcOp.Reidentify;
+  readonly sid: string;
+  readonly eventMasks?: string;
 }
 export interface EventPayload {
   readonly op: RpcOp.Event;
@@ -87,6 +92,7 @@ export type RpcMessage =
   | HelloPayload
   | IdentifyPayload
   | IdentifiedPayload
+  | ReidentifyPayload
   | EventPayload
   | RequestPayload
   | ResponsePayload;
@@ -126,8 +132,10 @@ export function controlPayload(init: {
 
 // RpcMessage 构造工厂（字段默认值收敛于此；内部核心通路构造用）。
 
-export function helloMsg(sid: string, axtpVersion: string): HelloPayload {
-  return { op: RpcOp.Hello, sid, axtpVersion };
+export function helloMsg(sid: string, axtpVersion?: string): HelloPayload {
+  return axtpVersion === undefined
+    ? { op: RpcOp.Hello, sid }
+    : { op: RpcOp.Hello, sid, axtpVersion };
 }
 export function identifyMsg(sid: string, randomSeed: number, eventMasks?: string): IdentifyPayload {
   return eventMasks !== undefined

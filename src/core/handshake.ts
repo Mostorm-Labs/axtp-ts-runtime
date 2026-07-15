@@ -2,12 +2,11 @@
 // 不掺 wire 差异：收到的都是解码好的 RpcMessage。Runtime gate 4 态：
 //   LINK_CONNECTED → FRAMING_READY → APP_READY → CLOSING。
 //
-// 角色：Logical Server 发 Hello/Identified、生成 sid；Logical Client 发 Identify、校验 axtpVersion。
+// 角色：Logical Server 发 Hello/Identified、生成 sid；Logical Client 发 Identify。
 // Hello 发送方 = Logical Server（与 Physical 角色正交）。本端生成 sid 时使用 8 位 hex，混合 randomSeed（spec:207）。
 // 由 Core inbound transform 编排：link ready 后 server 发 startHello()，handle() 的 outbound 由 Core 发出。
 
 import { AXTP_SPEC_VERSION } from "../protocol/generated/axtpVersion.js";
-import { AXTP_GENERATED_VERSION } from "../protocol/generated/axtpGeneratedVersion.js";
 import type {
   HelloPayload,
   IdentifyPayload,
@@ -18,24 +17,6 @@ import { RpcOp, helloMsg, identifiedMsg, identifyMsg } from "../protocol/model.j
 import type { LogicalRole } from "../transport/contract.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
 import type { GateState } from "./runtimeGate.js";
-
-function parseVersionParts(version: string): readonly [number, number] | undefined {
-  const [majorPart, minorPart = "0"] = version.split(".");
-  const major = Number.parseInt(majorPart, 10);
-  const minor = Number.parseInt(minorPart, 10);
-  if (!Number.isInteger(major) || !Number.isInteger(minor)) return undefined;
-  return [major, minor];
-}
-
-/** axtpVersion 兼容判定：主版本=1 即接受；兼容旧实现误填的当前锁定 spec 0.x minor。 */
-function isAxtpVersionCompatible(version: string): boolean {
-  const incoming = parseVersionParts(version);
-  if (incoming === undefined) return false;
-  const [major, minor] = incoming;
-  if (major === 1) return true;
-  const locked = parseVersionParts(AXTP_GENERATED_VERSION.specVersion);
-  return locked !== undefined && major === 0 && locked[0] === 0 && minor === locked[1];
-}
 
 export interface HandshakeResult {
   /** 待发送的 RpcMessage（若有），由 Core 负责发出。undefined 表示无需回复。 */
@@ -49,7 +30,7 @@ export class Handshake {
   private sidValue = "";
   private readonly localEntropy: number;
   /** client 在 Identify 携带的 eventMasks（订阅意图）。重连后保留。 */
-  private readonly eventMasksValue: string | undefined;
+  private eventMasksValue: string | undefined;
 
   constructor(
     private readonly logicalRole: LogicalRole,
@@ -83,6 +64,12 @@ export class Handshake {
         return this.handleIdentify(payload);
       case RpcOp.Identified:
         return this.handleIdentified(payload);
+      case RpcOp.Reidentify:
+        if (this.logicalRole !== "server" || !this.isReady || payload.sid !== this.sidValue) {
+          return { becameReady: false };
+        }
+        this.eventMasksValue = payload.eventMasks;
+        return { outbound: identifiedMsg(this.sidValue), becameReady: true };
       default:
         return { becameReady: false };
     }
@@ -121,21 +108,11 @@ export class Handshake {
     return mixed.toString(16).padStart(8, "0");
   }
 
-  private handleHello(payload: HelloPayload): HandshakeResult {
+  private handleHello(_payload: HelloPayload): HandshakeResult {
     if (this.logicalRole !== "client") return { becameReady: false };
     if (this.stateValue === "LINK_CONNECTED") {
       // WS 模式下 Hello 可能在 LINK_CONNECTED 到达（无 CONTROL），直接推进。
       this.stateValue = "FRAMING_READY";
-    }
-    const version = payload.axtpVersion;
-    if (!isAxtpVersionCompatible(version)) {
-      return {
-        becameReady: false,
-        error: new AxtpError(
-          ErrorCode.RpcPayloadInvalid,
-          `unsupported or missing axtpVersion: ${version || "(absent)"}`
-        )
-      };
     }
     const randomSeed = (Math.floor(Math.random() * 0x100000000) || 1) >>> 0;
     return { outbound: identifyMsg("", randomSeed, this.eventMasksValue), becameReady: false };
@@ -143,6 +120,7 @@ export class Handshake {
 
   private handleIdentify(payload: IdentifyPayload): HandshakeResult {
     if (this.logicalRole !== "server") return { becameReady: false };
+    this.eventMasksValue = payload.eventMasks;
     this.sidValue = this.generateSid(payload.randomSeed);
     this.stateValue = "APP_READY";
     return { outbound: identifiedMsg(this.sidValue), becameReady: true };

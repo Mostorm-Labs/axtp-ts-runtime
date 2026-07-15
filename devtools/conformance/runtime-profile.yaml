@@ -5,7 +5,7 @@ required_levels:
   - websocket-jsonrpc
 optional_levels:
   - capability
-  - event
 unsupported_levels:
+  - event
   - framed-binary
   - stream

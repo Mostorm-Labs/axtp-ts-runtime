@@ -1,9 +1,9 @@
-// BasicBroker：入站 RPC 业务分发（broker 层）——零协议知识、零 I/O。
+// BasicBroker：入站 RPC 业务分发（broker 层）——不负责 wire 编解码或 transport I/O。
 //
 // dispatchRequest：router 查 handler → 异步执行 → BrokerSink.onResult(Response)。
-//   无 handler → MethodNotFound；handler 抛错 → 错误响应 + onError。
+//   未注册 method → MethodNotFound；已注册但无 handler/支持 → NotSupported；handler 抛错 → 错误响应 + onError。
 // dispatchEvent：router 取全部 handler，逐个同步调用，单个抛错不影响其它。
-// 结果（Response/Event 消息）经 BrokerSink 回流 Endpoint → core.outbound。
+// Response 经 BrokerSink 回流 Endpoint → core.outbound；handler 事件由注入的 emit 回流。
 // dispatch 为单一入口（未来中间件就包这一层，外部 API 不变）。
 
 import {
@@ -14,6 +14,7 @@ import {
 } from "../protocol/model.js";
 import { diagnosticData, emitDiagnostic, type AxtpDiagnostics } from "../diagnostics.js";
 import { AxtpError, ErrorCode } from "../types/error.js";
+import { EVENT_REGISTRY, METHOD_REGISTRY } from "../protocol/generated/registry.js";
 import type {
   CallContext,
   GlobalHandlerSource,
@@ -31,6 +32,7 @@ export interface BrokerSink {
 export class BasicBroker {
   private readonly router: HandlerRouter;
   private sink: BrokerSink | undefined;
+  private readonly unavailableMethods = new Set<string>();
   /** Endpoint 注入：handler 内 ctx.emit → core.emit（出站事件）。 */
   emit: ((event: string, payload: unknown) => void) | undefined;
   /** Server 注入：endpoint localId，传入 CallContext 供 handler 做 server 级定向操作。 */
@@ -48,6 +50,11 @@ export class BasicBroker {
 
   setMethod(name: string, handler: UntypedMethodHandler): () => void {
     return this.router.setMethod(name, handler);
+  }
+
+  setMethodUnavailable(name: string): () => void {
+    this.unavailableMethods.add(name);
+    return () => this.unavailableMethods.delete(name);
   }
 
   addEventListener(event: string, handler: UntypedEventHandler): () => void {
@@ -68,7 +75,10 @@ export class BasicBroker {
       emitRaw: emitFn
     };
     if (handler === undefined) {
-      this.sink?.onResult(responseMsg(msg.sid, msg.requestId, ErrorCode.RpcMethodNotFound));
+      const code = Object.hasOwn(METHOD_REGISTRY, msg.method) || this.unavailableMethods.has(msg.method)
+        ? ErrorCode.NotSupported
+        : ErrorCode.RpcMethodNotFound;
+      this.sink?.onResult(responseMsg(msg.sid, msg.requestId, code));
       return;
     }
     Promise.resolve()
@@ -93,6 +103,9 @@ export class BasicBroker {
 
   /** 入站 Event 分发：多 handler 同步调用，单个抛错不影响其它。 */
   dispatchEvent(msg: EventPayload): void {
+    // Qualified protocol events come from the generated registry. Ignore future/unknown
+    // qualified names while retaining the SDK's intentionally open unqualified raw-event API.
+    if (msg.eventName.includes(".") && !Object.hasOwn(EVENT_REGISTRY, msg.eventName)) return;
     const handlers = this.router.getEventHandlers(msg.eventName);
     emitDiagnostic(this.diagnostics, {
       level: handlers.size === 0 ? "warn" : "debug",

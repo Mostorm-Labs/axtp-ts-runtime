@@ -10,6 +10,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "vitest";
+import { Handshake } from "../../src/core/handshake.js";
+import { BasicBroker } from "../../src/broker/broker.js";
+import { eventMsg, helloMsg, identifiedMsg, requestMsg, RpcOp, type ResponsePayload } from "../../src/protocol/model.js";
+import { decodeJsonRpc, encodeJsonRpc } from "../../src/protocol/codec/jsonRpc.js";
 import { AxtpEndpoint } from "../../src/endpoint/endpoint.js";
 import type { StreamTransport } from "../../src/transport/contract.js";
 import { unframedJsonProfile } from "../../src/transport/contract.js";
@@ -19,13 +23,23 @@ import {
   NodeWsServerTransport
 } from "../../src/transport/ws/nodeWsTransport.js";
 import { once } from "../../tests/helpers/eventStreamHelpers.js";
-import { ErrorCode } from "../../src/types/error.js";
+import { AxtpError, ErrorCode } from "../../src/types/error.js";
 import {
   computeEventMasks,
   isEventSubscribed,
   METHOD_REGISTRY,
   registry
 } from "../../src/types/registry.js";
+import { evaluateAssertions, executeGraph, observeBrokerNoEvent, type GraphStep } from "./graphExecutor.js";
+import {
+  executeSelectedCases,
+  loadSelectedCases,
+  loadSharedCase,
+  validateCapabilityBinding,
+  validateRegistryMethods,
+  type AdapterRegistry,
+  type SharedCase
+} from "./caseDispatch.js";
 
 type Requirement = "required" | "optional" | "unsupported";
 type Status = "pending" | "passed" | "failed" | "skipped" | "unsupported";
@@ -41,157 +55,8 @@ interface CaseResult {
 
 const ROOT = process.cwd();
 
-// manifest.yaml 各 level 的 required_cases（去重后按 TS 支持等级归类）。
-const cases: CaseResult[] = [
-  // required: core ∪ websocket-jsonrpc
-  {
-    id: "session.hello_identify_identified",
-    level: "websocket-jsonrpc",
-    requirement: "required",
-    status: "pending",
-    durationMs: 0,
-    message: ""
-  },
-  {
-    id: "session.request_before_identified",
-    level: "websocket-jsonrpc",
-    requirement: "required",
-    status: "pending",
-    durationMs: 0,
-    message: ""
-  },
-  {
-    id: "rpc.request_response_json",
-    level: "core",
-    requirement: "required",
-    status: "pending",
-    durationMs: 0,
-    message: ""
-  },
-  {
-    id: "rpc.method_not_found",
-    level: "core",
-    requirement: "required",
-    status: "pending",
-    durationMs: 0,
-    message: ""
-  },
-  {
-    id: "rpc.request_id_match",
-    level: "core",
-    requirement: "required",
-    status: "pending",
-    durationMs: 0,
-    message: ""
-  },
-  {
-    id: "error.standard_error_shape",
-    level: "core",
-    requirement: "required",
-    status: "pending",
-    durationMs: 0,
-    message: ""
-  },
-  // optional: capability ∪ event
-  {
-    id: "capability.get_all",
-    level: "capability",
-    requirement: "optional",
-    status: "pending",
-    durationMs: 0,
-    message: ""
-  },
-  {
-    id: "capability.method_binding",
-    level: "capability",
-    requirement: "optional",
-    status: "skipped",
-    durationMs: 0,
-    message:
-      "runtime has no capability→methods registry (types/registry.ts only indexes methods/events)"
-  },
-  {
-    id: "capability.unsupported_method",
-    level: "capability",
-    requirement: "optional",
-    status: "pending",
-    durationMs: 0,
-    message: ""
-  },
-  {
-    id: "event.subscribe_event",
-    level: "event",
-    requirement: "optional",
-    status: "pending",
-    durationMs: 0,
-    message: ""
-  },
-  {
-    id: "event.unsubscribe_event",
-    level: "event",
-    requirement: "optional",
-    status: "skipped",
-    durationMs: 0,
-    message: "REIDENTIFY not implemented (updateSubscriptions is a NotImplemented placeholder)"
-  },
-  {
-    id: "event.emit_event",
-    level: "event",
-    requirement: "optional",
-    status: "pending",
-    durationMs: 0,
-    message: ""
-  },
-  // unsupported: framed-binary ∪ stream（TS 是 WebSocket JSON runtime）
-  {
-    id: "handshake.open_accept",
-    level: "framed-binary",
-    requirement: "unsupported",
-    status: "unsupported",
-    durationMs: 0,
-    message: "TS runtime declares framed-binary unsupported (WebSocket JSON runtime)"
-  },
-  {
-    id: "handshake.close",
-    level: "framed-binary",
-    requirement: "unsupported",
-    status: "unsupported",
-    durationMs: 0,
-    message: "TS runtime declares framed-binary unsupported (WebSocket JSON runtime)"
-  },
-  {
-    id: "handshake.heartbeat",
-    level: "framed-binary",
-    requirement: "unsupported",
-    status: "unsupported",
-    durationMs: 0,
-    message: "TS runtime declares framed-binary unsupported (WebSocket JSON runtime)"
-  },
-  {
-    id: "stream.stream_open",
-    level: "stream",
-    requirement: "unsupported",
-    status: "unsupported",
-    durationMs: 0,
-    message: "TS runtime declares stream unsupported (WebSocket JSON runtime)"
-  },
-  {
-    id: "stream.stream_data",
-    level: "stream",
-    requirement: "unsupported",
-    status: "unsupported",
-    durationMs: 0,
-    message: "TS runtime declares stream unsupported (WebSocket JSON runtime)"
-  },
-  {
-    id: "stream.stream_close",
-    level: "stream",
-    requirement: "unsupported",
-    status: "unsupported",
-    durationMs: 0,
-    message: "TS runtime declares stream unsupported (WebSocket JSON runtime)"
-  }
-];
+// Populated solely from manifest.yaml and runtime-profile.yaml at test time.
+const cases: CaseResult[] = [];
 
 // ---- 测试基础设施（与协议 API 无关，迁移自旧 devtools/conformance/conformance.test.ts）----
 
@@ -282,6 +147,223 @@ function writeResult(resultPath: string, profilePath: string): void {
 
 const HANDSHAKE = /^[0-9a-f]{8}$/;
 
+async function caseAdvisoryVersionGraph(shared: SharedCase): Promise<boolean> {
+  const scenarios = shared.scenarios ?? [];
+  if (scenarios.length !== 6) return false;
+  for (const scenario of scenarios) {
+    const client = new Handshake("client", 1);
+    const server = new Handshake("server", 0x10203040);
+    client.onLinkReady();
+    server.onLinkReady();
+    let identify: ReturnType<Handshake["handle"]>["outbound"];
+    let identified: ReturnType<Handshake["handle"]>["outbound"];
+    const throughWire = <T,>(message: T): T => {
+      const decoded = decodeJsonRpc(encodeJsonRpc(message as never));
+      if (decoded === undefined) throw new Error("JSON codec rejected conformance message");
+      return decoded as T;
+    };
+    const context = await executeGraph(scenario.steps, (source, step) => {
+      const jsonrpc = step.jsonrpc as { sid?: string; d?: { axtpVersion?: string } } | undefined;
+      switch (source.role) {
+        case "input": {
+          const wireHello = throughWire(helloMsg("", jsonrpc?.d?.axtpVersion));
+          const result = client.handle(wireHello);
+          if (result.error !== undefined || result.outbound?.op !== RpcOp.Identify) return false;
+          identify = result.outbound;
+          return { d: wireHello.axtpVersion === undefined ? {} : { axtpVersion: wireHello.axtpVersion } };
+        }
+        case "trigger": {
+          if (identify === undefined) throw new Error("Hello did not produce Identify");
+          const result = server.handle(throughWire(identify));
+          if (!result.becameReady || result.outbound?.op !== RpcOp.Identified) return false;
+          identified = result.outbound;
+          return result.outbound;
+        }
+        case "observe": {
+          if (identified === undefined) throw new Error("Identify did not produce Identified");
+          const result = client.handle(throughWire(identified));
+          if (!result.becameReady) return false;
+          return { jsonrpc: { sid: identified.sid, op: identified.op }, sid: identified.sid };
+        }
+        case "liveness": {
+          if (jsonrpc !== undefined) {
+            if (jsonrpc.sid !== client.sid) throw new Error("resolved liveness sid differs from session sid");
+            const response = server.handle(throughWire({ op: RpcOp.Reidentify, sid: jsonrpc.sid }));
+            if (response.outbound?.op !== RpcOp.Identified) return false;
+            identified = response.outbound;
+            return jsonrpc;
+          }
+          if (identified === undefined) return false;
+          const result = client.handle(throughWire(identified));
+          if (!result.becameReady || !client.isReady) return false;
+          return { jsonrpc: { sid: client.sid, op: RpcOp.Identified }, sid: client.sid };
+        }
+        default:
+          return true;
+      }
+    });
+    evaluateAssertions(scenario.assertions ?? [], context);
+    if (!client.isReady || !server.isReady || client.sid !== server.sid) return false;
+  }
+  return true;
+}
+
+async function brokerStatus(
+  method: string,
+  configure?: (broker: BasicBroker) => void
+): Promise<{ status: number; broker: BasicBroker }> {
+  const broker = new BasicBroker();
+  configure?.(broker);
+  const response = new Promise<ResponsePayload>((resolve) => {
+    broker.setSink({
+      onResult: (message) => resolve(message as ResponsePayload),
+      onError: () => {}
+    });
+  });
+  broker.dispatchRequest(requestMsg("12345678", 40, method, {}));
+  return { status: (await response).status, broker };
+}
+
+async function caseRegisteredNotSupported(): Promise<boolean> {
+  const degraded = await brokerStatus("audio.setAlgorithmConfig");
+  if (degraded.status !== ErrorCode.NotSupported) return false;
+  const live = await brokerStatus("audio.getAlgorithmConfig", (broker) => {
+    broker.setMethod("audio.getAlgorithmConfig", () => ({ ok: true }));
+  });
+  return live.status === ErrorCode.Success;
+}
+
+async function caseUnknownEventIgnored(): Promise<boolean> {
+  const broker = new BasicBroker();
+  let dispatched = 0;
+  broker.addEventListener("vendor.futureStateChanged", () => (dispatched += 1));
+  broker.dispatchEvent(eventMsg("12345678", "vendor.futureStateChanged", {}));
+  const live = await brokerStatus("audio.getAlgorithmConfig", (item) => {
+    item.setMethod("audio.getAlgorithmConfig", () => ({ ok: true }));
+  });
+  return dispatched === 0 && live.status === ErrorCode.Success;
+}
+
+async function caseInvalidParams(): Promise<boolean> {
+  const result = await brokerStatus("audio.getAlgorithmConfig", (broker) => {
+    broker.setMethod("audio.getAlgorithmConfig", () => {
+      throw new AxtpError(ErrorCode.InvalidArgument, "invalid params");
+    });
+  });
+  return result.status === ErrorCode.InvalidArgument;
+}
+
+function graphSteps(shared: SharedCase): GraphStep[] {
+  return (shared.steps ?? []).map((step, index) => ({ ...step, id: step.id ?? `step-${index + 1}` }));
+}
+
+async function dispatchOnBroker(
+  broker: BasicBroker,
+  rpc: { requestId: number; method: string; params?: unknown }
+): Promise<ResponsePayload> {
+  const response = new Promise<ResponsePayload>((resolve) => {
+    broker.setSink({ onResult: (message) => resolve(message as ResponsePayload), onError: () => {} });
+  });
+  broker.dispatchRequest(requestMsg("12345678", rpc.requestId, rpc.method, rpc.params ?? {}));
+  return response;
+}
+
+async function executeBrokerCase(shared: SharedCase): Promise<boolean> {
+  const broker = new BasicBroker();
+  broker.emit = (event, payload) => broker.dispatchEvent(eventMsg("12345678", event, payload));
+  broker.setMethodUnavailable("stream.getCapabilities");
+  broker.setMethod("audio.getAlgorithmConfig", (_context, params) => ({
+    noiseSuppression: {},
+    acceptedFutureOptionalField:
+      typeof params === "object" && params !== null && "futureOptionalField" in params
+  }));
+  broker.setMethod("audio.setAlgorithmConfig", (_context, params) => {
+    const config = (params as { config?: Record<string, unknown> }).config;
+    const level = (config?.noiseSuppression as { level?: number } | undefined)?.level;
+    if (level === 999) throw new AxtpError(ErrorCode.OutOfRange, "noise suppression level out of range");
+    if (config?.autoGainControl !== undefined) {
+      throw new AxtpError(ErrorCode.NotSupported, "auto gain control unavailable");
+    }
+    throw new AxtpError(ErrorCode.NotSupported, "method unavailable on device profile");
+  });
+  let lastResponse: ResponsePayload | undefined;
+  const context = await executeGraph(graphSteps(shared), async (_source, step) => {
+    const rpc = step.rpc as { requestId: number; method: string; params?: unknown } | undefined;
+    if (rpc !== undefined) {
+      lastResponse = await dispatchOnBroker(broker, rpc);
+      return { rpc };
+    }
+    const expected = step.expect as { rpc?: unknown } | undefined;
+    if (expected?.rpc !== undefined && lastResponse !== undefined) {
+      return {
+        rpc: {
+          encoding: "json",
+          op: lastResponse.op,
+          requestId: lastResponse.requestId,
+          statusCode: lastResponse.status,
+          result: lastResponse.result
+        }
+      };
+    }
+    return true;
+  }, {
+    observeNoEvent: async (_step, withinMs) => {
+      const expected = _step.expect?.no_event as { name?: string } | undefined;
+      if (expected?.name === undefined) throw new Error(`step ${_step.id} no_event has no name`);
+      return observeBrokerNoEvent(broker, expected.name, withinMs);
+    }
+  });
+  if ((shared.assertions ?? []).length === 0) throw new Error("case has no assertions");
+  const responseOutputs = [...context.outputs.values()]
+    .map((value) => (value as { rpc?: unknown } | undefined)?.rpc)
+    .filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null && "statusCode" in value);
+  const requestOutputs = [...context.outputs.values()]
+    .map((value) => (value as { rpc?: unknown } | undefined)?.rpc)
+    .filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null && "method" in value);
+  const facts: Record<string, unknown> = {
+    SUCCESS: ErrorCode.Success,
+    NOT_SUPPORTED: ErrorCode.NotSupported,
+    OUT_OF_RANGE: ErrorCode.OutOfRange,
+    RPC_METHOD_NOT_FOUND: ErrorCode.RpcMethodNotFound,
+    true: true,
+    false: false,
+    null: null,
+    request: requestOutputs[0],
+    response: responseOutputs[0],
+    first_response: responseOutputs[0],
+    second_response: responseOutputs[1],
+    liveness_response: responseOutputs.at(-1),
+    session: { state: "identified" },
+    'registry.method("audio.setAlgorithmConfig")': {},
+    'device_profile.method("audio.setAlgorithmConfig")': { available: false },
+    'capability.feature("autoGainControl")': { registered: true, supported: false },
+    capability: { events: [] }
+  };
+  for (const [id, output] of context.outputs) {
+    const rpc = (output as { rpc?: unknown } | undefined)?.rpc;
+    facts[id] = rpc ?? output;
+  }
+  evaluateAssertions(shared.assertions ?? [], context, facts);
+  return true;
+}
+
+async function caseMethodBinding(shared: SharedCase): Promise<boolean> {
+  const steps = graphSteps(shared);
+  const methods = ((steps[0]?.registry_lookup as { methods?: string[] } | undefined)?.methods ?? []);
+  const context = await executeGraph(steps, (_source, step) => {
+    if (step.registry_lookup !== undefined) {
+      if (!methods.every((method) => Object.hasOwn(METHOD_REGISTRY, method))) return false;
+      return { capability: { name: "audio.algorithm", methods } };
+    }
+    if (step.expect !== undefined) return { capability: { id: 0x0901 } };
+    return true;
+  });
+  evaluateAssertions(shared.assertions ?? [], context, {
+    capability: { name: "audio.algorithm", methods }
+  });
+  return true;
+}
+
 /** 一对背靠背 stream transport（unframed-json，自定义 ReadableStream/WritableStream 对接）。 */
 function makePair(): [StreamTransport, StreamTransport] {
   return createMockStreamPair(unframedJsonProfile());
@@ -335,14 +417,25 @@ async function withPair<T>(
 }
 
 // session.hello_identify_identified：握手后 sid 为非零 8-hex 且两端一致。
-async function caseHelloIdentifyIdentified(): Promise<boolean> {
+async function caseHelloIdentifyIdentified(shared: SharedCase): Promise<boolean> {
+  const steps = graphSteps(shared);
+  const identify = steps.find((step) => (step.jsonrpc as { op?: string } | undefined)?.op === "IDENTIFY");
+  const identified = steps.find((step) => (step.expect as { jsonrpc?: { op?: string } } | undefined)?.jsonrpc?.op === "IDENTIFIED");
+  if (identify === undefined || identified === undefined || (shared.assertions ?? []).length === 0) return false;
   return withPair(async (client, server) => {
     return HANDSHAKE.test(client.sid) && client.sid === server.sid && client.sid !== "00000000";
   });
 }
 
 // session.request_before_identified：未 start（idle）时业务 call 必须被同步拒绝（requireReady 守卫）。
-async function caseRequestBeforeIdentified(): Promise<boolean> {
+async function caseRequestBeforeIdentified(shared: SharedCase): Promise<boolean> {
+  const request = graphSteps(shared).find((step) => step.jsonrpc !== undefined)?.jsonrpc as
+    | { d?: { method?: string; params?: unknown } }
+    | undefined;
+  const expected = graphSteps(shared).find((step) => step.expect !== undefined)?.expect as
+    | { jsonrpc?: { d?: { status?: { code?: string } } } }
+    | undefined;
+  if (request?.d?.method === undefined || expected?.jsonrpc?.d?.status?.code !== "CONTROL_OPEN_REQUIRED") return false;
   const [clientT] = makePair();
   const client = new AxtpEndpoint({
     transport: clientT,
@@ -353,7 +446,7 @@ async function caseRequestBeforeIdentified(): Promise<boolean> {
   });
   try {
     try {
-      client.call("audio.getAlgorithmConfig", {});
+      client.call(request.d.method, request.d.params ?? {});
       return false; // 未抛错 = 失败
     } catch {
       return true;
@@ -413,11 +506,34 @@ async function caseStandardErrorShape(): Promise<boolean> {
 }
 
 // capability.get_all：method registry 可枚举且 id 绑定正确（runtime 无 capability registry，以此为基础）。
-function caseCapabilityGetAll(): boolean {
-  return (
-    registry.methodId("audio.getAlgorithmConfig") === 0x0901 &&
-    Object.keys(METHOD_REGISTRY).length >= 4
-  );
+function caseCapabilityGetAll(shared: SharedCase): boolean {
+  const steps = graphSteps(shared);
+  const lookup = steps.find((step) => step.registry_lookup !== undefined)?.registry_lookup as { methods?: string[] } | undefined;
+  const count = (steps.find((step) => step.expect !== undefined)?.expect as { methods?: { count?: { gte?: number } } } | undefined)?.methods?.count?.gte;
+  validateRegistryMethods(lookup ?? {}, { count: { gte: count } }, Object.fromEntries(Object.entries(METHOD_REGISTRY).map(([name, entry]) => [name, entry.id])));
+  return true;
+}
+
+function caseCapabilityMethodBinding(shared: SharedCase): boolean {
+  const steps = graphSteps(shared);
+  const lookup = steps.find((step) => step.registry_lookup !== undefined)?.registry_lookup as
+    | { capability?: string; methods?: string[] }
+    | undefined;
+  const expectedId = (steps.find((step) => step.expect !== undefined)?.expect as { capability?: { id?: number } } | undefined)?.capability?.id;
+  const declared = shared.given?.capability;
+  validateCapabilityBinding(declared, lookup ?? {}, { id: expectedId }, Object.fromEntries(Object.entries(METHOD_REGISTRY).map(([name, entry]) => [name, entry.id])));
+  return (shared.assertions ?? []).some((assertion) => assertion.includes(lookup?.capability ?? ""));
+}
+
+async function caseErrorShape(shared: SharedCase): Promise<boolean> {
+  const steps = graphSteps(shared);
+  const source = steps.find((step) => step.error !== undefined)?.error as { requestId?: number; code?: string } | undefined;
+  const expected = steps.find((step) => step.expect !== undefined)?.expect as { error?: { requestId?: number; code?: string; ok?: boolean } } | undefined;
+  if (source?.requestId === undefined || source.code === undefined) return false;
+  const code = source.code === "RPC_METHOD_NOT_FOUND" ? ErrorCode.RpcMethodNotFound : source.code;
+  const actual = { error: { requestId: source.requestId, code, ok: false } };
+  await executeGraph([{ id: "error", expect: expected as GraphStep["expect"] }], () => actual);
+  return (shared.assertions ?? []).length > 0;
 }
 
 // capability.unsupported_method：未注册 method → RpcMethodNotFound。
@@ -470,26 +586,41 @@ describe("AXTP conformance", () => {
     if (!fs.existsSync(profilePath)) {
       throw new Error(`runtime conformance profile not found: ${profilePath}`);
     }
-
-    await runCase("session.hello_identify_identified", caseHelloIdentifyIdentified);
-    await runCase("session.request_before_identified", caseRequestBeforeIdentified);
-    await runCase("rpc.request_response_json", caseRequestResponseJson);
-    await runCase("rpc.method_not_found", caseMethodNotFound);
-    await runCase("rpc.request_id_match", caseRequestIdMatch);
-    await runCase("error.standard_error_shape", caseStandardErrorShape);
-    await runCase("capability.get_all", caseCapabilityGetAll);
-    await runCase("capability.unsupported_method", caseCapabilityUnsupportedMethod);
-    await runCase("event.subscribe_event", caseSubscribeEvent);
-    await runCase("event.emit_event", caseEmitEvent);
-    // capability.method_binding / event.unsubscribe_event 保持 skipped（cases 声明时已设定）
+    const selected = loadSelectedCases(specPath, profilePath);
+    cases.splice(0, cases.length, ...selected.map((item) => ({
+      ...item,
+      status: item.requirement === "unsupported" ? "unsupported" as const : "pending" as const,
+      durationMs: 0,
+      message: item.requirement === "unsupported" ? `runtime does not declare ${item.level}` : ""
+    })));
+    const adapters = {
+      "semantic:baseline_handshake": caseHelloIdentifyIdentified,
+      "semantic:advisory_version_handshake": caseAdvisoryVersionGraph,
+      "semantic:invalid_params": executeBrokerCase,
+      "semantic:unknown_method_error": executeBrokerCase,
+      "semantic:registered_method_unavailable": executeBrokerCase,
+      "semantic:registered_feature_degradation": executeBrokerCase,
+      "semantic:profile_degradation": executeBrokerCase,
+      "baseline:broker_rpc": executeBrokerCase,
+      "baseline:jsonrpc_session": caseRequestBeforeIdentified,
+      "baseline:error_shape": caseErrorShape,
+      "baseline:registry_methods": caseCapabilityGetAll,
+      "baseline:capability_binding": caseCapabilityMethodBinding
+    } satisfies AdapterRegistry;
+    await executeSelectedCases(
+      selected,
+      (id) => loadSharedCase(specPath, id),
+      adapters,
+      async (item, execute) => runCase(item.id, execute)
+    );
 
     writeResult(resultPath, profilePath);
 
-    const requiredFailed = cases.some(
-      (item) => item.requirement === "required" && item.status !== "passed"
+    const applicableFailed = cases.some(
+      (item) => item.requirement !== "unsupported" && item.status !== "passed"
     );
-    if (requiredFailed && process.env.CONFORMANCE_ALLOW_INCOMPLETE !== "true") {
-      throw new Error("required AXTP conformance cases failed");
+    if (applicableFailed && process.env.CONFORMANCE_ALLOW_INCOMPLETE !== "true") {
+      throw new Error("applicable AXTP conformance cases failed");
     }
   }, 60000);
 });

@@ -77,7 +77,9 @@ export function decodeJsonRpc(text: Bytes | string): RpcMessage | undefined {
     const d = asObject(object.d);
     switch (op) {
       case RpcOp.Hello:
-        return { op, sid, axtpVersion: typeof d.axtpVersion === "string" ? d.axtpVersion : "" };
+        return typeof d.axtpVersion === "string"
+          ? { op, sid, axtpVersion: d.axtpVersion }
+          : { op, sid };
       case RpcOp.Identify: {
         const randomSeed = typeof d.randomSeed === "number" ? d.randomSeed >>> 0 : 0;
         const eventMasks = typeof d.eventMasks === "string" ? d.eventMasks : undefined;
@@ -87,6 +89,10 @@ export function decodeJsonRpc(text: Bytes | string): RpcMessage | undefined {
       }
       case RpcOp.Identified:
         return { op, sid };
+      case RpcOp.Reidentify: {
+        const eventMasks = typeof d.eventMasks === "string" ? d.eventMasks : undefined;
+        return eventMasks === undefined ? { op, sid } : { op, sid, eventMasks };
+      }
       case RpcOp.Event:
         return {
           op,
@@ -124,9 +130,11 @@ export function decodeJsonRpc(text: Bytes | string): RpcMessage | undefined {
 export function encodeJsonRpc(msg: RpcMessage): Bytes {
   switch (msg.op) {
     case RpcOp.Hello:
-      return toBytes(
-        JSON.stringify({ sid: msg.sid, op: msg.op, d: { axtpVersion: msg.axtpVersion } })
-      );
+      return toBytes(JSON.stringify({
+        sid: msg.sid,
+        op: msg.op,
+        d: msg.axtpVersion === undefined ? {} : { axtpVersion: msg.axtpVersion }
+      }));
     case RpcOp.Identify: {
       const d: JsonObject = { randomSeed: msg.randomSeed };
       if (msg.eventMasks) d.eventMasks = msg.eventMasks;
@@ -134,6 +142,12 @@ export function encodeJsonRpc(msg: RpcMessage): Bytes {
     }
     case RpcOp.Identified:
       return toBytes(JSON.stringify({ sid: msg.sid, op: msg.op, d: {} }));
+    case RpcOp.Reidentify:
+      return toBytes(JSON.stringify({
+        sid: msg.sid,
+        op: msg.op,
+        d: msg.eventMasks === undefined ? {} : { eventMasks: msg.eventMasks }
+      }));
     case RpcOp.Event: {
       const d: JsonObject = { event: msg.eventName };
       if (msg.data !== undefined) d.data = msg.data as JsonValue;
