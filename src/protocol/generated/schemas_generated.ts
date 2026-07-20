@@ -243,6 +243,9 @@ export interface AudioStreamCapabilities {
   supportsSyncGroup: boolean;
   flowControlManagedByRuntime: boolean;
   aacTransportFormats?: string[];
+  supportedAudioPtsModes?: string[];
+  supportedPacketizationModes?: string[];
+  supportsSourceCaptureTimestampCursor?: boolean;
 }
 
 export interface AudioStreamSource {
@@ -270,6 +273,12 @@ export interface AudioOpenStreamParams {
   clockDomain?: string;
   receiverClockDomain?: string;
   maxDataSize?: number;
+  audioPtsMode?: string;
+  timebase?: number;
+  samplesPerPacket?: number;
+  firstMediaSeqId?: number;
+  audioPtsBase?: number;
+  packetizationMode?: string;
 }
 
 export interface AudioOpenStreamResult {
@@ -289,6 +298,12 @@ export interface AudioOpenStreamResult {
   clockDomain?: string;
   receiverClockDomain?: string;
   maxDataSize?: number;
+  audioPtsMode?: string;
+  timebase?: number;
+  samplesPerPacket?: number;
+  firstMediaSeqId?: number;
+  audioPtsBase?: number;
+  packetizationMode?: string;
 }
 
 export interface AudioCloseStreamParams {
@@ -690,6 +705,42 @@ export interface CastSetFlowPolicyParams {
   scope?: string;
 }
 
+export interface CastSetVideoStreamParamsParams {
+  sessionId?: string;
+  frameRate?: number;
+  bitrateKbps?: number;
+  resetFields?: string[];
+}
+
+export interface CastSetVideoStreamParamsResult {
+  accepted: boolean;
+  state: string;
+  sessionId?: string;
+  reconfigureId?: string;
+  previousStreamId?: number;
+  activeStreamId?: number;
+  sourceVideo: CastVideoStreamParamsState;
+}
+
+export interface CastVideoStreamParamsState {
+  sessionId?: string;
+  source?: string;
+  desiredFrameRate?: number;
+  desiredBitrateKbps?: number;
+  effectiveFrameRate?: number;
+  effectiveBitrateKbps?: number;
+  streamProfile?: string;
+  encoder?: string;
+  reconfigureId?: string;
+  state?: string;
+  phase?: string;
+  previousStreamId?: number;
+  activeStreamId?: number;
+  rollbackApplied?: boolean;
+  lastError?: CastLastError;
+  changedFields?: string[];
+}
+
 export interface CastFlowControlState {
   targetRenderFps: unknown;
   inputFps?: unknown;
@@ -706,6 +757,7 @@ export interface CastFlowControlState {
   keyFrameOnDropBurst?: boolean;
   changedFields?: string[];
   sampledAt?: string;
+  sourceVideo?: CastVideoStreamParamsState;
 }
 
 export interface CastFlowControlChangedEvent {
@@ -713,6 +765,8 @@ export interface CastFlowControlChangedEvent {
   state: CastFlowControlState;
   reason?: string;
   sampledAt?: string;
+  sourceVideo?: CastVideoStreamParamsState;
+  reconfigureId?: string;
 }
 
 export interface CastGetStatusParams {
@@ -801,6 +855,11 @@ export interface CastFlowControlCapability {
   supportsOverlay?: boolean;
   supportsStats?: boolean;
   exposesExternalKeyframeRequest?: boolean;
+  supportsVideoStreamParams?: boolean;
+  supportsActiveVideoReconfigure?: boolean;
+  supportedVideoStreamProfiles?: string[];
+  supportedVideoEncoders?: string[];
+  supportsSourceSpecificVideoParams?: boolean;
 }
 
 export interface CastStatusCapability {
@@ -1528,6 +1587,129 @@ export interface SoftwareUpdatePolicyCapability {
   supportsReset?: boolean;
 }
 
+export interface StreamFlowControlCapabilities {
+  capability: string;
+  supportsAck: boolean;
+  supportsWindowUpdate: boolean;
+  supportsPauseResume: boolean;
+  supportsAbort: boolean;
+  supportsStats: boolean;
+  supportsClockReport: boolean;
+  defaultWindowBytes?: number;
+  clockReportIntervalMs?: number;
+}
+
+export interface StreamSelector {
+  streamId?: number;
+}
+
+export interface StreamState {
+  streamId?: number;
+  state: string;
+  paused?: boolean;
+  windowBytes?: number;
+  ackedSeqId?: number;
+  lastSeqId?: number;
+  lastCursor?: number;
+  reason?: string;
+}
+
+export interface StreamStats {
+  streamId?: number;
+  packets?: number;
+  bytes?: number;
+  droppedPackets?: number;
+  seqGaps?: number;
+  jitterMs?: number;
+  lastSeqId?: number;
+  lastCursor?: number;
+  latestClockReportAgeMs?: number;
+}
+
+export interface StreamAckParams {
+  streamId: number;
+  ackedSeqId: number;
+  ackedCursor?: number;
+  missingSeqIds?: number[];
+}
+
+export interface StreamAckResult {
+  accepted: boolean;
+  state?: StreamState;
+}
+
+export interface StreamWindowUpdateParams {
+  streamId: number;
+  windowBytes: number;
+  reason?: string;
+}
+
+export interface StreamWindowUpdateResult {
+  accepted: boolean;
+  state?: StreamState;
+}
+
+export interface StreamPauseParams {
+  streamId: number;
+  reason?: string;
+}
+
+export interface StreamResumeParams {
+  streamId: number;
+  reason?: string;
+}
+
+export interface StreamAbortParams {
+  streamId: number;
+  reason?: string;
+  message?: string;
+}
+
+export interface StreamActionResult {
+  accepted: boolean;
+  state?: StreamState;
+}
+
+export interface StreamStateChangedEvent {
+  streamId?: number;
+  state: StreamState;
+}
+
+export interface StreamStatsReportedEvent {
+  streamId?: number;
+  stats: StreamStats;
+}
+
+export interface StreamFlowControlChangedEvent {
+  streamId: number;
+  reason?: string;
+  state?: StreamState;
+}
+
+export interface StreamClockMediaAnchor {
+  streamId?: number;
+  mediaPts: number;
+  timebase: number;
+  anchorNt10MonotonicUs: number;
+  seqId?: number;
+  cursor?: number;
+}
+
+export interface StreamClockReportEvent {
+  reportSeq: number;
+  syncGroupId?: string;
+  sourceDeviceId?: string;
+  sourceClockDomain?: string;
+  nt10ReportMonotonicUs: number;
+  sentAtNt10MonotonicUs?: number;
+  na20ReceivedAtUs?: number;
+  na20SentAtUs?: number;
+  audio?: StreamClockMediaAnchor;
+  video?: StreamClockMediaAnchor;
+  discontinuity?: boolean;
+  reason?: string;
+}
+
 export interface VideoGetStreamCapabilitiesParams {
   source?: string;
   includeRuntimeState?: boolean;
@@ -1542,6 +1724,9 @@ export interface VideoStreamCapabilities {
   supportsSourceStateEvent: boolean;
   supportsSyncGroup: boolean;
   flowControlManagedByRuntime: boolean;
+  supportedVideoPtsModes?: string[];
+  supportedPacketizationModes?: string[];
+  supportsSourceCaptureTimestampCursor?: boolean;
 }
 
 export interface VideoStreamSource {
@@ -1551,6 +1736,10 @@ export interface VideoStreamSource {
   resolutions?: string[];
   frameRates?: unknown[];
   state?: string;
+  bitratesKbps?: number[];
+  encoder?: string;
+  supportsReconfigure?: boolean;
+  reconfigureFields?: string[];
 }
 
 export interface VideoOpenStreamParams {
@@ -1567,6 +1756,9 @@ export interface VideoOpenStreamParams {
   castSessionId?: string;
   clockDomain?: string;
   maxDataSize?: number;
+  videoPtsMode?: string;
+  timebase?: number;
+  packetizationMode?: string;
 }
 
 export interface VideoOpenStreamResult {
@@ -1583,6 +1775,9 @@ export interface VideoOpenStreamResult {
   cursorUnit: string;
   syncGroupId?: string;
   maxDataSize?: number;
+  videoPtsMode?: string;
+  timebase?: number;
+  packetizationMode?: string;
 }
 
 export interface VideoCloseStreamParams {
@@ -1615,6 +1810,8 @@ export interface VideoStreamState {
   lastCursor?: number;
   keyFrameRequested?: boolean;
   failureReason?: string;
+  frameRate?: number;
+  bitrateKbps?: number;
 }
 
 export interface VideoGetStreamSourceStateParams {
@@ -1645,6 +1842,8 @@ export interface VideoStreamStateChangedEvent {
   source: string;
   reason?: string;
   stats?: VideoStreamStats;
+  frameRate?: number;
+  bitrateKbps?: number;
 }
 
 export interface VideoStreamSourceStateChangedEvent {
