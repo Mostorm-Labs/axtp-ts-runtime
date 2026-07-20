@@ -31,6 +31,7 @@ import {
   registry
 } from "../../src/types/registry.js";
 import { evaluateAssertions, executeGraph, observeBrokerNoEvent, type GraphStep } from "./graphExecutor.js";
+import { buildBrokerFacts } from "./brokerFacts.js";
 import {
   executeSelectedCases,
   loadSelectedCases,
@@ -272,6 +273,7 @@ async function executeBrokerCase(shared: SharedCase): Promise<boolean> {
   const broker = new BasicBroker();
   broker.emit = (event, payload) => broker.dispatchEvent(eventMsg("12345678", event, payload));
   broker.setMethodUnavailable("stream.getCapabilities");
+  broker.setMethodUnavailable("cast.setVideoStreamParams");
   broker.setMethod("audio.getAlgorithmConfig", (_context, params) => ({
     noiseSuppression: {},
     acceptedFutureOptionalField:
@@ -321,23 +323,14 @@ async function executeBrokerCase(shared: SharedCase): Promise<boolean> {
     .map((value) => (value as { rpc?: unknown } | undefined)?.rpc)
     .filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null && "method" in value);
   const facts: Record<string, unknown> = {
-    SUCCESS: ErrorCode.Success,
-    NOT_SUPPORTED: ErrorCode.NotSupported,
-    OUT_OF_RANGE: ErrorCode.OutOfRange,
-    RPC_METHOD_NOT_FOUND: ErrorCode.RpcMethodNotFound,
-    true: true,
-    false: false,
-    null: null,
+    ...buildBrokerFacts(shared),
     request: requestOutputs[0],
     response: responseOutputs[0],
     first_response: responseOutputs[0],
     second_response: responseOutputs[1],
     liveness_response: responseOutputs.at(-1),
-    session: { state: "identified" },
-    'registry.method("audio.setAlgorithmConfig")': {},
     'device_profile.method("audio.setAlgorithmConfig")': { available: false },
-    'capability.feature("autoGainControl")': { registered: true, supported: false },
-    capability: { events: [] }
+    'capability.feature("autoGainControl")': { registered: true, supported: false }
   };
   for (const [id, output] of context.outputs) {
     const rpc = (output as { rpc?: unknown } | undefined)?.rpc;
@@ -620,6 +613,13 @@ describe("AXTP conformance", () => {
       (item) => item.requirement !== "unsupported" && item.status !== "passed"
     );
     if (applicableFailed && process.env.CONFORMANCE_ALLOW_INCOMPLETE !== "true") {
+      const failed = cases.filter(
+        (item) => item.requirement !== "unsupported" && item.status !== "passed"
+      );
+      console.error("Applicable AXTP conformance cases failed:");
+      for (const item of failed) {
+        console.error(`- ${item.id} [${item.level}/${item.requirement}]: ${item.message || item.status}`);
+      }
       throw new Error("applicable AXTP conformance cases failed");
     }
   }, 60000);
