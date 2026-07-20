@@ -2,8 +2,23 @@ import { describe, expect, it } from "vitest";
 import { BasicBroker } from "../../src/broker/broker.js";
 import { eventMsg } from "../../src/protocol/model.js";
 import { evaluateAssertions, executeGraph, observeBrokerNoEvent } from "../../devtools/conformance/graphExecutor.js";
+import { buildBrokerFacts } from "../../devtools/conformance/brokerFacts.js";
 
 describe("conformance graph executor", () => {
+  it("builds facts for generated methods and declared capability values", () => {
+    const facts = buildBrokerFacts({
+      id: "capability.video_stream_params_not_supported",
+      level: "capability",
+      given: {
+        capability: {
+          "cast.flowControl": { supportsVideoStreamParams: false }
+        }
+      }
+    });
+    expect(facts['registry.method("cast.setVideoStreamParams")']).toEqual({});
+    expect(facts['capability("cast.flowControl")']).toEqual({ supportsVideoStreamParams: false });
+  });
+
   it("orders dependencies, captures outputs, and resolves later references", async () => {
     const seen: unknown[] = [];
     const context = await executeGraph(
