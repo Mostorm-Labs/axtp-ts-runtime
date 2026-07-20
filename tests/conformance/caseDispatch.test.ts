@@ -11,20 +11,28 @@ describe("conformance case dispatch", () => {
     )).rejects.toThrow("unknown semantic kind future_kind");
   });
 
-  it("loads and classifies unsupported selected cases exactly once before reporting unsupported", async () => {
+  it("skips unsupported scenario cases before adapter classification", async () => {
     const load = vi.fn(() => ({
-      id: "fake.unknown",
-      level: "future-profile",
-      semantic: { kind: "future_kind" }
+      id: "stream.video_stream_params_rollback",
+      level: "stream",
+      scenarios: [{
+        name: "reopen_failure_rolls_back",
+        steps: [{
+          id: "set_params",
+          role: "trigger",
+          direction: "client_to_server",
+          rpc: { op: "REQUEST", method: "cast.setVideoStreamParams" }
+        }]
+      }]
     }));
     const run = vi.fn();
 
-    await expect(executeSelectedCases(
-      [{ id: "fake.unknown", level: "future-profile", requirement: "unsupported" }],
+    await executeSelectedCases(
+      [{ id: "stream.video_stream_params_rollback", level: "stream", requirement: "unsupported" }],
       load,
       {},
       run
-    )).rejects.toThrow("unknown semantic kind future_kind");
+    );
     expect(load).toHaveBeenCalledTimes(1);
     expect(run).not.toHaveBeenCalled();
   });

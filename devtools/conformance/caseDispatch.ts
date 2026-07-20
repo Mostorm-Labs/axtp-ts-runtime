@@ -153,14 +153,14 @@ export async function executeSelectedCases(
   adapters: Readonly<PartialAdapterRegistry>,
   run: (selected: SelectedCase, execute: () => Promise<boolean>) => Promise<void>
 ): Promise<void> {
-  const classified = selected.map((item) => {
+  const classified = selected.flatMap((item) => {
     const shared = load(item.id);
     if (shared.id !== item.id) throw new Error(`case file id ${shared.id} does not match ${item.id}`);
+    if (item.requirement === "unsupported") return [];
     const key = adapterKey(shared);
-    return { item, shared, key };
+    return [{ item, shared, key }];
   });
   for (const { item, shared, key } of classified) {
-    if (item.requirement === "unsupported") continue;
     await run(item, async () => {
       if (!isApplicableAdapter(key)) throw new Error(`unsupported selected adapter ${key}`);
       const adapter = adapters[key];
