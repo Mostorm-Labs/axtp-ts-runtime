@@ -1587,6 +1587,134 @@ export interface SoftwareUpdatePolicyCapability {
   supportsReset?: boolean;
 }
 
+export interface SportConfigTargetParams {
+  macAddress: string;
+  sportType: string;
+}
+
+export interface SportGoalShotWatermarkConfig {
+  macAddress: string;
+  sportType: string;
+  goalVisible: boolean;
+  shotVisible: boolean;
+}
+
+export interface SportSetGoalShotWatermarkConfigParams {
+  macAddress: string;
+  sportType: string;
+  goalVisible: boolean;
+  shotVisible: boolean;
+}
+
+export interface SportEventClipConfig {
+  macAddress: string;
+  sportType: string;
+  beforeOffsetSeconds: number;
+  afterOffsetSeconds: number;
+}
+
+export interface SportSetEventClipConfigParams {
+  macAddress: string;
+  sportType: string;
+  beforeOffsetSeconds: number;
+  afterOffsetSeconds: number;
+}
+
+export interface GetEventDetectionCapabilitiesParams {
+  sportTypes?: string[];
+  includeRuntimeState?: boolean;
+}
+
+export interface GetEventDetectionCapabilitiesResult {
+  capability: SportEventDetectionCapabilities;
+}
+
+export interface SportEventDetectionSportDescriptor {
+  sportType: string;
+  supportedEvents: string[];
+  supportsToggle: boolean;
+  detailsSchemas?: string[];
+  supportedConfigMethods?: string[];
+}
+
+export interface SportEventDetectionCapabilities {
+  capability: string;
+  supportedSports: SportEventDetectionSportDescriptor[];
+  concurrentSportTypes: boolean;
+  supportsStateEvent: boolean;
+  supportsUnifiedEvent: boolean;
+  persistencePolicy: string;
+}
+
+export interface GetEventDetectionConfigParams {
+  sportType: string;
+}
+
+export interface SportEventDetectionState {
+  sportType: string;
+  effectiveEnabled: boolean;
+  runtimeState: string;
+  applyState?: string;
+  reason?: string;
+  stateRevision?: number;
+  updatedAt?: string;
+}
+
+export interface SetEventDetectionConfigParams {
+  sportType: string;
+  enabled: boolean;
+  expectedStateRevision?: number;
+}
+
+export interface SetEventDetectionConfigResult {
+  accepted: boolean;
+  state: SportEventDetectionState;
+}
+
+export interface SportEventDetectionStateChangedEvent {
+  state: SportEventDetectionState;
+  source: string;
+  reason?: string;
+}
+
+export interface SportEventDetails {
+  shotId?: string;
+  goalId?: string;
+  releaseType?: string;
+  goalType?: string;
+}
+
+export interface SportEventDetectedEvent {
+  eventId: string;
+  sequence: number;
+  sportType: string;
+  eventType: string;
+  occurredAt: string;
+  confidence?: unknown;
+  trainingSessionId?: string;
+  details: SportEventDetails;
+}
+
+export interface SportBasketballCapability {
+  capability: string;
+  sportType: string;
+  supportedEvents: string[];
+  detailsSchemas: string[];
+  requiresEventDetectionToggle: boolean;
+  goalRequiresShotReference: boolean;
+}
+
+export interface SportBasketballShotDetails {
+  shotId: string;
+  releaseType?: string;
+}
+
+export interface SportBasketballGoalDetails {
+  goalId: string;
+  shotId: string;
+  goalType?: string;
+}
+
 export interface StreamFlowControlCapabilities {
   capability: string;
   supportsAck: boolean;

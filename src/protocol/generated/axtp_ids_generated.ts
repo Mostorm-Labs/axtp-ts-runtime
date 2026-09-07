@@ -135,6 +135,13 @@ export enum MethodId {
   SoftwareGetUpdatePolicy = 0x1704,
   SoftwareSetUpdatePolicy = 0x1705,
   SoftwareResetUpdatePolicy = 0x1706,
+  SportGetEventDetectionCapabilities = 0x1801,
+  SportGetEventDetectionConfig = 0x1802,
+  SportSetEventDetectionConfig = 0x1803,
+  SportGetGoalShotWatermarkConfig = 0x1804,
+  SportSetGoalShotWatermarkConfig = 0x1805,
+  SportGetEventClipConfig = 0x1806,
+  SportSetEventClipConfig = 0x1807,
 }
 
 export enum EventId {
@@ -175,6 +182,8 @@ export enum EventId {
   CastFlowControlChanged = 0x160C,
   SoftwareConfigChanged = 0x1701,
   SoftwareUpdatePolicyChanged = 0x1702,
+  SportEventDetectionStateChanged = 0x1801,
+  SportEventDetected = 0x1802,
 }
 
 export enum ErrorCode {
@@ -362,4 +371,6 @@ export enum CapabilityId {
   CastStatus = 0x1607,
   SoftwareConfig = 0x1701,
   SoftwareUpdatePolicy = 0x1702,
+  SportEventDetection = 0x1801,
+  SportBasketball = 0x1802,
 }
