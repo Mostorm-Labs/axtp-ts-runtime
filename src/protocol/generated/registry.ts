@@ -93,6 +93,13 @@ export const METHOD_REGISTRY = {
   "software.getUpdatePolicy": { id: 0x1704, status: "draft", bitOffset: 3, request: typeOnly<AxtpSchemas.SoftwareGetUpdatePolicyParams>(), response: typeOnly<AxtpSchemas.SoftwareUpdatePolicy>() },
   "software.setUpdatePolicy": { id: 0x1705, status: "draft", bitOffset: 4, request: typeOnly<AxtpSchemas.SoftwareSetUpdatePolicyParams>(), response: typeOnly<AxtpSchemas.SoftwareSetUpdatePolicyResult>() },
   "software.resetUpdatePolicy": { id: 0x1706, status: "draft", bitOffset: 5, request: typeOnly<AxtpSchemas.SoftwareResetUpdatePolicyParams>(), response: typeOnly<AxtpSchemas.SoftwareUpdatePolicy>() },
+  "sport.getEventDetectionCapabilities": { id: 0x1801, status: "draft", bitOffset: 0, request: typeOnly<AxtpSchemas.GetEventDetectionCapabilitiesParams>(), response: typeOnly<AxtpSchemas.GetEventDetectionCapabilitiesResult>() },
+  "sport.getEventDetectionConfig": { id: 0x1802, status: "draft", bitOffset: 1, request: typeOnly<AxtpSchemas.GetEventDetectionConfigParams>(), response: typeOnly<AxtpSchemas.SportEventDetectionState>() },
+  "sport.setEventDetectionConfig": { id: 0x1803, status: "draft", bitOffset: 2, request: typeOnly<AxtpSchemas.SetEventDetectionConfigParams>(), response: typeOnly<AxtpSchemas.SetEventDetectionConfigResult>() },
+  "sport.getGoalShotWatermarkConfig": { id: 0x1804, status: "draft", bitOffset: 3, request: typeOnly<AxtpSchemas.SportConfigTargetParams>(), response: typeOnly<AxtpSchemas.SportGoalShotWatermarkConfig>() },
+  "sport.setGoalShotWatermarkConfig": { id: 0x1805, status: "draft", bitOffset: 4, request: typeOnly<AxtpSchemas.SportSetGoalShotWatermarkConfigParams>(), response: typeOnly<AxtpSchemas.Empty>() },
+  "sport.getEventClipConfig": { id: 0x1806, status: "draft", bitOffset: 5, request: typeOnly<AxtpSchemas.SportConfigTargetParams>(), response: typeOnly<AxtpSchemas.SportEventClipConfig>() },
+  "sport.setEventClipConfig": { id: 0x1807, status: "draft", bitOffset: 6, request: typeOnly<AxtpSchemas.SportSetEventClipConfigParams>(), response: typeOnly<AxtpSchemas.Empty>() },
 } satisfies Record<string, { id: number; status: MethodStatus; bitOffset: number; request: unknown; response: unknown }>;
 
 export const EVENT_REGISTRY = {
@@ -133,6 +140,8 @@ export const EVENT_REGISTRY = {
   "cast.flowControlChanged": { id: 0x160C, status: "draft", bitOffset: 11, payload: typeOnly<AxtpSchemas.CastFlowControlChangedEvent>() },
   "software.configChanged": { id: 0x1701, status: "draft", bitOffset: 0, payload: typeOnly<AxtpSchemas.SoftwareConfigChangedEvent>() },
   "software.updatePolicyChanged": { id: 0x1702, status: "draft", bitOffset: 1, payload: typeOnly<AxtpSchemas.SoftwareUpdatePolicyChangedEvent>() },
+  "sport.eventDetectionStateChanged": { id: 0x1801, status: "draft", bitOffset: 0, payload: typeOnly<AxtpSchemas.SportEventDetectionStateChangedEvent>() },
+  "sport.eventDetected": { id: 0x1802, status: "draft", bitOffset: 1, payload: typeOnly<AxtpSchemas.SportEventDetectedEvent>() },
 } satisfies Record<string, { id: number; status: EventStatus; bitOffset: number; payload: unknown }>;
 
 export type MethodName = keyof typeof METHOD_REGISTRY;
