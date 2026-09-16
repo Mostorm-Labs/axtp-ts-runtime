@@ -77,6 +77,12 @@ function fieldTypeName(field: Field, knownSchemas: Set<string>): string {
   const scalar = scalarTypeName(field.type);
   if (scalar !== undefined) return scalar;
   if (knownSchemas.has(field.type)) return tsName(field.type);
+  if (field.type === "object" && field.variants) {
+    // Discriminated union: the variants mapping targets are validated to be
+    // registered object schemas, so unknown names surface as broken type
+    // references in the emitted file instead of being silently widened.
+    return [...new Set(Object.values(field.variants.mapping))].map((name) => tsName(name)).join(" | ");
+  }
   if (field.type === "object") return "Record<string, unknown>";
   return "unknown";
 }

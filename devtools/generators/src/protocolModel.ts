@@ -121,6 +121,11 @@ export interface CompatibilityDefinition {
   rules: string[];
 }
 
+export interface FieldVariants {
+  discriminator: string;
+  mapping: Record<string, string>;
+}
+
 export interface SchemaField {
   fieldId: number;
   name: string;
@@ -134,6 +139,7 @@ export interface SchemaField {
   derivedFrom?: string;
   schema?: string;
   enumValues?: string[];
+  variants?: FieldVariants;
   repeated?: boolean;
   array?: {
     itemType?: string;

@@ -5092,6 +5092,21 @@ Noise suppression configuration object.
 
 ---
 
+## AudioStreamSource
+
+One real-time audio stream source.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| source | String | 0x01 | Source identifier such as wireless_cast_audio. | maxLength=128 | N/A |
+| ?displayName | String | 0x02 | User-visible source name. | maxLength=128 | Omit if not used. |
+| codecs | Array<String> | 0x03 | Supported audio codecs. | array.itemType=string | N/A |
+| ?sampleRates | Array<UInt32> | 0x04 | Supported sample rates in Hz. | array.itemType=uint32 | Omit if not used. |
+| ?channels | Array<UInt8> | 0x05 | Supported channel counts. | array.itemType=uint8 | Omit if not used. |
+| ?state | Enum | 0x06 | Runtime source state, such as available, receiving, stopped, or unavailable. | None | Omit if not used. |
+
+---
+
 ## AudioStreamStats
 
 Bounded runtime statistics for an audio stream.
@@ -5400,6 +5415,19 @@ Firmware update error details.
 
 ---
 
+## FirmwareUpdateFile
+
+One file in the firmware update manifest.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| fileId | String | 0x01 | Manifest-scoped file identifier. | maxLength=128 | N/A |
+| ?target | String | 0x02 | Device-defined target component or partition. | maxLength=128 | Omit if not used. |
+| size | UInt64 | 0x03 | File size in bytes. | None | N/A |
+| md5 | String | 0x04 | File md5 digest as lowercase hexadecimal. | maxLength=32 | N/A |
+
+---
+
 ## FirmwareUpdateManifest
 
 Minimal firmware update manifest.
@@ -5410,6 +5438,17 @@ Minimal firmware update manifest.
 | ?version | String | 0x02 | Target firmware version string. | maxLength=64 | Omit if not used. |
 | files | Array<FirmwareUpdateFile> | 0x03 | Firmware update files. | schema=FirmwareUpdateFile, array.itemType=FirmwareUpdateFile, array.itemSchema=FirmwareUpdateFile | N/A |
 | ?devicePolicyVersion | String | 0x04 | Optional policy version used to interpret the package. | maxLength=64 | Omit if not used. |
+
+---
+
+## FirmwareUpdateStreamBinding
+
+Binding between a manifest file and a STREAM streamId.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| fileId | String | 0x01 | Manifest-scoped file identifier. | maxLength=128 | N/A |
+| streamId | UInt32 | 0x02 | STREAM data plane stream identifier. | None | N/A |
 
 ---
 
@@ -5449,6 +5488,20 @@ Update policy fragment for target launcher. Referenced by SoftwareUpdatePolicy.p
 
 ---
 
+## NetworkApClientInfo
+
+One AP client summary.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| clientId | String | 0x01 | Client identifier. | maxLength=128 | N/A |
+| ?macAddress | String | 0x02 | Client MAC address, if available and permitted. | maxLength=32 | Omit if not used. |
+| ?displayName | String | 0x03 | Client display name. | maxLength=128 | Omit if not used. |
+| ?rssi | Int32 | 0x04 | Client RSSI in dBm. | None | Omit if not used. |
+| ?connectedSeconds | UInt32 | 0x05 | Connection age in seconds. | None | Omit if not used. |
+
+---
+
 ## NetworkCredential
 
 Credential descriptor or secret reference.
@@ -5485,6 +5538,92 @@ Network interface administrative and link state.
 
 ---
 
+## NetworkInterfaceSummary
+
+Summary of one network interface.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| interfaceId | String | 0x01 | Interface identifier. | maxLength=64 | N/A |
+| type | Enum | 0x02 | Interface type; candidate values include ethernet, wifi, cellular, usb, virtual, and unknown. | None | N/A |
+| ?displayName | String | 0x03 | User-visible interface name. | maxLength=128 | Omit if not used. |
+| ?state | NetworkInterfaceState | 0x04 | Current interface state. | None | Omit if not used. |
+
+---
+
+## NetworkWifiProfile
+
+Wi-Fi profile object used for station connection.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| ?profileId | String | 0x01 | Profile identifier. | maxLength=128 | Omit if not used. |
+| ssid | String | 0x02 | Wi-Fi SSID. | maxLength=64 | N/A |
+| ?bssid | String | 0x03 | Optional AP BSSID. | maxLength=32 | Omit if not used. |
+| securityType | Enum | 0x04 | Security type, such as open, wpa2_psk, or wpa3_sae. | None | N/A |
+| ?credential | NetworkCredential | 0x05 | Credential descriptor or secret reference. Responses must not expose plaintext secrets. | None | Omit if not used. |
+| ?source | Enum | 0x06 | Profile source; candidate values include manual, pairing, migrated, and device_policy. | None | Omit if not used. |
+| ?persist | Boolean | 0x07 | Whether the profile should be persisted. This remains policy-controlled. | None | Omit if not used. |
+
+---
+
+## NetworkWifiScanResult
+
+One Wi-Fi scan result.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| ssid | String | 0x01 | SSID. | maxLength=64 | N/A |
+| ?bssid | String | 0x02 | BSSID. | maxLength=32 | Omit if not used. |
+| ?band | Enum | 0x03 | Wi-Fi band. | None | Omit if not used. |
+| ?channel | UInt16 | 0x04 | Channel number. | None | Omit if not used. |
+| ?rssi | Int32 | 0x05 | RSSI in dBm. | None | Omit if not used. |
+| ?securityType | Enum | 0x06 | Security type. | None | Omit if not used. |
+
+---
+
+## SignagePlaylist
+
+One playlist definition.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| id | String | 0x01 | Playlist unique identifier (UUID). | maxLength=64 | N/A |
+| type | Enum | 0x02 | Playlist type; candidate values include default (always-on default playlist) and scheduled (time-windowed playlist). | None | N/A |
+| ?startDate | String | 0x03 | Start date (YYYY-MM-DD). Required only when type is scheduled; MUST satisfy startDate <= endDate. | maxLength=16 | Omit if not used. |
+| ?endDate | String | 0x04 | End date (YYYY-MM-DD). Required only when type is scheduled; MUST satisfy startDate <= endDate. | maxLength=16 | Omit if not used. |
+| ?startTime | String | 0x05 | Start time (HH:mm:ss). Required only when type is scheduled. When startDate equals endDate, startTime MUST be <= endTime; when startDate < endDate, crossing midnight is allowed (startTime > endTime means D-day startTime to D+1 endTime). | maxLength=16 | Omit if not used. |
+| ?endTime | String | 0x06 | End time (HH:mm:ss). Required only when type is scheduled; see startTime for the cross-midnight rule. | maxLength=16 | Omit if not used. |
+| ?days | Array<UInt8> | 0x07 | Optional active weekday numbers (1-7, 1=Monday). Required only when type is scheduled and MUST be non-empty. | array.itemType=uint8 | Omit if not used. |
+| items | Array<SignagePlaylistItem> | 0x08 | Playlist item objects. MUST be non-empty; an empty items array returns INVALID_ARGUMENT. | schema=SignagePlaylistItem, array.itemType=SignagePlaylistItem, array.itemSchema=SignagePlaylistItem | N/A |
+
+---
+
+## SignagePlaylistClockEntry
+
+One clock entry for the clock item type.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| timezone | String | 0x01 | IANA timezone identifier. | maxLength=64 | N/A |
+| label | String | 0x02 | City label for the clock. | maxLength=64 | N/A |
+
+---
+
+## SignagePlaylistItem
+
+One playlist item.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| id | String | 0x01 | Playlist item unique identifier (UUID). | maxLength=64 | N/A |
+| type | Enum | 0x02 | Playlist item type; candidate values include image, website, video, clock, and unsplash. | None | N/A |
+| duration | UInt32 | 0x03 | Single playback duration in seconds; MUST be greater than 0. | min=1, max=86400 | Default: 60 |
+| sort | UInt32 | 0x04 | Playback order, ascending by sort. The sort value MUST be unique within the same playlist; duplicate sort values return INVALID_ARGUMENT. | None | Default: 0 |
+| settings | SignagePlaylistItemSettings | 0x05 | Playlist item settings; structure varies by type. | None | N/A |
+
+---
+
 ## SignagePlaylistItemSettings
 
 Aggregated playlist item settings spanning all item types. Only the subset matching the enclosing item type is meaningful; see the per-type rules in the signage.playlist draft.
@@ -5500,6 +5639,31 @@ Aggregated playlist item settings spanning all item types. Only the subset match
 | ?refreshIntervalSecs | UInt32 | 0x07 | website type: page refresh interval in seconds. 0 or absent means no refresh. | min=1 | Omit if not used. |
 | ?clocks | Array<SignagePlaylistClockEntry> | 0x08 | clock type: non-empty playlist clock entry objects. | schema=SignagePlaylistClockEntry, array.itemType=SignagePlaylistClockEntry, array.itemSchema=SignagePlaylistClockEntry | Omit if not used. |
 | ?photos | Array<SignagePlaylistUnsplashPhoto> | 0x09 | unsplash type: non-empty playlist unsplash photo objects. | schema=SignagePlaylistUnsplashPhoto, array.itemType=SignagePlaylistUnsplashPhoto, array.itemSchema=SignagePlaylistUnsplashPhoto | Omit if not used. |
+
+---
+
+## SignagePlaylistUnsplashPhoto
+
+One Unsplash photo entry, including photographer attribution.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| url | String | 0x01 | Photo URL. | maxLength=2048 | N/A |
+| userName | String | 0x02 | Photographer name. | maxLength=128 | N/A |
+| userLink | String | 0x03 | Photographer Unsplash profile link. | maxLength=2048 | N/A |
+
+---
+
+## SoftwareComponent
+
+One software component running on or hosted by the device.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| id | String | 0x01 | Component identifier. | maxLength=64 | N/A |
+| ?name | String | 0x02 | Component display name. | maxLength=128 | Omit if not used. |
+| ?version | String | 0x03 | Component version. | maxLength=64 | Omit if not used. |
+| ?role | Enum | 0x04 | Component role, such as axtpHost, launcher, signagePlayer, agent, or unknown. | None | Omit if not used. |
 
 ---
 
@@ -5539,6 +5703,20 @@ Common discriminator-qualified detail carrier. Fields are interpreted according 
 
 ---
 
+## SportEventDetectionSportDescriptor
+
+Capability descriptor for one supported sport type, its registered event types, and optional sport-specific configuration methods.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| sportType | String | 0x01 | Stable sport type discriminator, such as basketball, football, baseball, or tennis. | maxLength=32 | N/A |
+| supportedEvents | Array<String> | 0x02 | Event type discriminators supported for this sport type. | array.itemType=string | N/A |
+| supportsToggle | Boolean | 0x03 | Whether sport.setEventDetectionConfig can control this sport type. | None | N/A |
+| ?detailsSchemas | Array<String> | 0x04 | Registered sport-specific detail schema names for the supported event types. | array.itemType=string | Omit if not used. |
+| ?supportedConfigMethods | Array<String> | 0x05 | Optional registered sport configuration methods supported for this sport type, such as Goal/Shot watermark or event clip configuration. | array.itemType=string | Omit if not used. |
+
+---
+
 ## StreamClockMediaAnchor
 
 One media timeline anchor carried by stream.clockReport.
@@ -5574,6 +5752,25 @@ Automatic update time window, nested under LauncherUpdatePolicy.schedule.
 | start | String | 0x01 | Window start time in local time, matching the regex ^([01]\d\|2[0-3]):[0-5]\d$ (HH:mm). A value that does not match returns INVALID_ARGUMENT. | None | N/A |
 | end | String | 0x02 | Window end time in local time, matching the regex ^([01]\d\|2[0-3]):[0-5]\d$ (HH:mm). A value that does not match returns INVALID_ARGUMENT. When end is earlier than start it denotes a cross-midnight window (from start on the current day to end on the next day). | None | N/A |
 | ?timezone | String | 0x03 | IANA timezone ID. Omitted means the device local timezone. | None | Omit if not used. |
+
+---
+
+## VideoStreamSource
+
+One real-time video stream source.
+
+| Name | Type | Field ID | Description | Value Restrictions | ?Default Behavior |
+| ---- | :---: | :---: | ---- | :---: | ---- |
+| source | String | 0x01 | Source identifier such as wireless_cast_video. | maxLength=128 | N/A |
+| ?displayName | String | 0x02 | User-visible source name. | maxLength=128 | Omit if not used. |
+| codecs | Array<String> | 0x03 | Supported video codecs. | array.itemType=string | N/A |
+| ?resolutions | Array<String> | 0x04 | Supported resolution descriptors. | array.itemType=string | Omit if not used. |
+| ?frameRates | Array<Number> | 0x05 | Supported frame rates. | array.itemType=number | Omit if not used. |
+| ?state | Enum | 0x06 | Runtime source state, such as available, receiving, stopped, or unavailable. | None | Omit if not used. |
+| ?bitratesKbps | Array<UInt32> | 0x07 | Supported encoded video bitrates in kbps. | array.itemType=uint32 | Omit if not used. |
+| ?encoder | String | 0x08 | Encoder or encoder profile identifier used by this source. | maxLength=128 | Omit if not used. |
+| ?supportsReconfigure | Boolean | 0x09 | Whether active downstream video encoding parameters can be reconfigured via close then open without restarting the upstream source. | None | Default: false |
+| ?reconfigureFields | Array<String> | 0x0A | Video stream fields that can be changed by an encoding reconfiguration. | array.itemType=string | Omit if not used. |
 
 ---
 
