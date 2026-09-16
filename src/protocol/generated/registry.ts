@@ -49,6 +49,7 @@ export const METHOD_REGISTRY = {
   "signage.setPlaylistConfig": { id: 0x0D03, status: "draft", bitOffset: 2, request: typeOnly<AxtpSchemas.SignageSetPlaylistConfigParams>(), response: typeOnly<AxtpSchemas.SignageSetPlaylistConfigResult>() },
   "signage.resetPlaylistConfig": { id: 0x0D04, status: "draft", bitOffset: 3, request: typeOnly<AxtpSchemas.SignageResetPlaylistConfigParams>(), response: typeOnly<AxtpSchemas.SignagePlaylistConfigResult>() },
   "signage.getPlaylistItemUrl": { id: 0x0D05, status: "draft", bitOffset: 4, request: typeOnly<AxtpSchemas.SignageGetPlaylistItemUrlParams>(), response: typeOnly<AxtpSchemas.SignageGetPlaylistItemUrlResult>() },
+  "signage.getPlaylistItem": { id: 0x0D06, status: "draft", bitOffset: 5, request: typeOnly<AxtpSchemas.SignageGetPlaylistItemParams>(), response: typeOnly<AxtpSchemas.SignageGetPlaylistItemResult>() },
   "network.getIpConfig": { id: 0x0E02, status: "draft", bitOffset: 2, request: typeOnly<AxtpSchemas.NetworkGetIpConfigParams>(), response: typeOnly<AxtpSchemas.NetworkIpConfig>() },
   "network.setIpConfig": { id: 0x0E03, status: "draft", bitOffset: 3, request: typeOnly<AxtpSchemas.NetworkSetIpConfigParams>(), response: typeOnly<AxtpSchemas.NetworkSetIpConfigResult>() },
   "network.getWifiConfig": { id: 0x0E04, status: "draft", bitOffset: 5, request: typeOnly<AxtpSchemas.NetworkGetWifiConfigParams>(), response: typeOnly<AxtpSchemas.NetworkWifiConfig>() },

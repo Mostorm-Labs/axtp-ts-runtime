@@ -1428,7 +1428,15 @@ export interface SignageGetPlaylistItemUrlParams {
 
 export interface SignageGetPlaylistItemUrlResult {
   type: string;
-  settings: SignagePlaylistItemSettings;
+  settings: SignageImageItemSettings | SignageVideoItemSettings | SignageWebsiteItemSettings | SignageUnsplashItemSettings;
+}
+
+export interface SignageGetPlaylistItemParams {
+  itemId: string;
+}
+
+export interface SignageGetPlaylistItemResult {
+  item: SignagePlaylistItem;
 }
 
 export interface SignagePlaylistConfigChangedEvent {
@@ -1452,19 +1460,43 @@ export interface SignagePlaylistItem {
   type: string;
   duration: number;
   sort: number;
-  settings: SignagePlaylistItemSettings;
+  settings: SignageImageItemSettings | SignageWebsiteItemSettings | SignageVideoItemSettings | SignageClockItemSettings | SignageUnsplashItemSettings | SignagePowerBiItemSettings;
 }
 
-export interface SignagePlaylistItemSettings {
-  urls?: string[];
-  delaySeconds?: number;
+export interface SignageImageItemSettings {
+  urls: string[];
+  delaySeconds: number;
   expiresAt?: number;
-  url?: string;
+}
+
+export interface SignageVideoItemSettings {
+  url: string;
+  expiresAt?: number;
   muted?: boolean;
+}
+
+export interface SignageWebsiteItemSettings {
+  url: string;
   ignoreCertificateError?: boolean;
   refreshIntervalSecs?: number;
-  clocks?: SignagePlaylistClockEntry[];
-  photos?: SignagePlaylistUnsplashPhoto[];
+}
+
+export interface SignageClockItemSettings {
+  clocks: SignagePlaylistClockEntry[];
+}
+
+export interface SignageUnsplashItemSettings {
+  photos: SignagePlaylistUnsplashPhoto[];
+  delaySeconds: number;
+  expiresAt?: number;
+}
+
+export interface SignagePowerBiItemSettings {
+  groupId: string;
+  dashboardId: string;
+  embedUrl: string;
+  token: string;
+  expiresAt: number;
 }
 
 export interface SignagePlaylistClockEntry {
@@ -1474,8 +1506,12 @@ export interface SignagePlaylistClockEntry {
 
 export interface SignagePlaylistUnsplashPhoto {
   url: string;
-  userName: string;
-  userLink: string;
+  user: SignagePlaylistUnsplashUser;
+}
+
+export interface SignagePlaylistUnsplashUser {
+  name: string;
+  link: string;
 }
 
 export interface SignagePlaylistCapability {
