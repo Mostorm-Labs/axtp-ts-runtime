@@ -91,6 +91,7 @@ export enum MethodId {
   SignageSetPlaylistConfig = 0x0D03,
   SignageResetPlaylistConfig = 0x0D04,
   SignageGetPlaylistItemUrl = 0x0D05,
+  SignageGetPlaylistItem = 0x0D06,
   NetworkGetIpConfig = 0x0E02,
   NetworkSetIpConfig = 0x0E03,
   NetworkGetWifiConfig = 0x0E04,
