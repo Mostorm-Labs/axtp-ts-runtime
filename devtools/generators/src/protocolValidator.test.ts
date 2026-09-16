@@ -170,6 +170,204 @@ describe("protocol definition validator", () => {
     expect(() => validateProtocolDefinition(model)).toThrow(/duplicate fieldId/);
   });
 
+  it("accepts a valid variants binding on an object field", async () => {
+    const model = cloneModel(await loadCurrentProtocol());
+    model.schemas.push({
+      name: "VariantCarrier",
+      kind: "object",
+      fields: [
+        { fieldId: 0x01, name: "kind", type: "enum", required: true, enumValues: ["a", "b"] },
+        {
+          fieldId: 0x02,
+          name: "payload",
+          type: "object",
+          required: true,
+          variants: {
+            discriminator: "kind",
+            mapping: { a: "VariantCarrier", b: "VariantCarrier" }
+          }
+        }
+      ]
+    });
+    expect(() => validateProtocolDefinition(model)).not.toThrow();
+  });
+
+  it("rejects variants on a non-object carrier field", async () => {
+    const model = cloneModel(await loadCurrentProtocol());
+    model.schemas.push({
+      name: "VariantCarrier",
+      kind: "object",
+      fields: [
+        { fieldId: 0x01, name: "kind", type: "enum", required: true, enumValues: ["a"] },
+        {
+          fieldId: 0x02,
+          name: "payload",
+          type: "string",
+          required: true,
+          variants: { discriminator: "kind", mapping: { a: "VariantCarrier" } }
+        }
+      ]
+    });
+    expect(() => validateProtocolDefinition(model)).toThrow(/with variants must use type object/);
+  });
+
+  it("rejects a variants discriminator without a matching sibling field", async () => {
+    const model = cloneModel(await loadCurrentProtocol());
+    model.schemas.push({
+      name: "VariantCarrier",
+      kind: "object",
+      fields: [
+        { fieldId: 0x01, name: "kind", type: "enum", required: true, enumValues: ["a"] },
+        {
+          fieldId: 0x02,
+          name: "payload",
+          type: "object",
+          required: true,
+          variants: { discriminator: "missing", mapping: { a: "VariantCarrier" } }
+        }
+      ]
+    });
+    expect(() => validateProtocolDefinition(model)).toThrow(
+      /variants\.discriminator must reference a sibling field/
+    );
+  });
+
+  it("rejects a variants discriminator that is not a declared enum field", async () => {
+    const model = cloneModel(await loadCurrentProtocol());
+    model.schemas.push({
+      name: "VariantCarrier",
+      kind: "object",
+      fields: [
+        { fieldId: 0x01, name: "kind", type: "enum", required: true },
+        {
+          fieldId: 0x02,
+          name: "payload",
+          type: "object",
+          required: true,
+          variants: { discriminator: "kind", mapping: { a: "VariantCarrier" } }
+        }
+      ]
+    });
+    expect(() => validateProtocolDefinition(model)).toThrow(
+      /variants\.discriminator must reference an enum field with declared enum values/
+    );
+  });
+
+  it("rejects a variants mapping key outside the declared enum values", async () => {
+    const model = cloneModel(await loadCurrentProtocol());
+    model.schemas.push({
+      name: "VariantCarrier",
+      kind: "object",
+      fields: [
+        { fieldId: 0x01, name: "kind", type: "enum", required: true, enumValues: ["a"] },
+        {
+          fieldId: 0x02,
+          name: "payload",
+          type: "object",
+          required: true,
+          variants: {
+            discriminator: "kind",
+            mapping: { a: "VariantCarrier", c: "VariantCarrier" }
+          }
+        }
+      ]
+    });
+    expect(() => validateProtocolDefinition(model)).toThrow(
+      /variants\.mapping key is not a declared enum value/
+    );
+  });
+
+  it("rejects a variants mapping that does not cover all enum values", async () => {
+    const model = cloneModel(await loadCurrentProtocol());
+    model.schemas.push({
+      name: "VariantCarrier",
+      kind: "object",
+      fields: [
+        { fieldId: 0x01, name: "kind", type: "enum", required: true, enumValues: ["a", "b"] },
+        {
+          fieldId: 0x02,
+          name: "payload",
+          type: "object",
+          required: true,
+          variants: { discriminator: "kind", mapping: { a: "VariantCarrier" } }
+        }
+      ]
+    });
+    expect(() => validateProtocolDefinition(model)).toThrow(
+      /variants\.mapping must cover all enum values/
+    );
+  });
+
+  it("rejects an uncovered enum value that collides with an Object prototype key", async () => {
+    const model = cloneModel(await loadCurrentProtocol());
+    model.schemas.push({
+      name: "VariantCarrier",
+      kind: "object",
+      fields: [
+        {
+          fieldId: 0x01,
+          name: "kind",
+          type: "enum",
+          required: true,
+          enumValues: ["toString", "error"]
+        },
+        {
+          fieldId: 0x02,
+          name: "payload",
+          type: "object",
+          required: true,
+          variants: { discriminator: "kind", mapping: { error: "VariantCarrier" } }
+        }
+      ]
+    });
+    expect(() => validateProtocolDefinition(model)).toThrow(
+      /variants\.mapping must cover all enum values/
+    );
+  });
+
+  it("rejects a variants mapping value without a registered schema", async () => {
+    const model = cloneModel(await loadCurrentProtocol());
+    model.schemas.push({
+      name: "VariantCarrier",
+      kind: "object",
+      fields: [
+        { fieldId: 0x01, name: "kind", type: "enum", required: true, enumValues: ["a"] },
+        {
+          fieldId: 0x02,
+          name: "payload",
+          type: "object",
+          required: true,
+          variants: { discriminator: "kind", mapping: { a: "MissingVariantSchema" } }
+        }
+      ]
+    });
+    expect(() => validateProtocolDefinition(model)).toThrow(
+      /variants\.mapping references missing schema/
+    );
+  });
+
+  it("rejects a variants mapping value that is not an object schema", async () => {
+    const model = cloneModel(await loadCurrentProtocol());
+    model.schemas.push({ name: "NotAnObjectSchema", kind: "enum", fields: [] });
+    model.schemas.push({
+      name: "VariantCarrier",
+      kind: "object",
+      fields: [
+        { fieldId: 0x01, name: "kind", type: "enum", required: true, enumValues: ["a"] },
+        {
+          fieldId: 0x02,
+          name: "payload",
+          type: "object",
+          required: true,
+          variants: { discriminator: "kind", mapping: { a: "NotAnObjectSchema" } }
+        }
+      ]
+    });
+    expect(() => validateProtocolDefinition(model)).toThrow(
+      /variants\.mapping references non-object schema/
+    );
+  });
+
   it("rejects error categories outside their code range", async () => {
     const model = cloneModel(await loadCurrentProtocol());
     model.errors.find((error) => error.name === "FW_VERIFY_FAILED")!.category = "stream";

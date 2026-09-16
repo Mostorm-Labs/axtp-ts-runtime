@@ -207,9 +207,13 @@ function assertSchemaDefinitions(schemas: SchemaDefinition[]): void {
     "bytes",
     "enum",
     "bitmap",
-    "array"
+    "array",
+    "object"
   ]);
   const schemaNames = new Set(schemas.map((schema) => schema.name));
+  const objectSchemaNames = new Set(
+    schemas.filter((schema) => schema.kind === "object").map((schema) => schema.name)
+  );
   for (const schema of schemas) {
     if (!allowedKinds.has(schema.kind))
       fail(schema.name, "kind", `unsupported schema kind: ${schema.kind}`);
@@ -253,6 +257,61 @@ function assertSchemaDefinitions(schemas: SchemaDefinition[]): void {
           "array.itemType",
           `field ${field.name} references missing item type: ${field.array.itemType}`
         );
+      }
+      if (field.variants) {
+        const variants = field.variants;
+        if (field.type !== "object") {
+          fail(schema.name, "variants", `field ${field.name} with variants must use type object: ${field.type}`);
+        }
+        const discriminator = schema.fields.find((item) => item.name === variants.discriminator);
+        if (!discriminator) {
+          fail(
+            schema.name,
+            "variants.discriminator",
+            `field ${field.name} variants.discriminator must reference a sibling field in the same schema: ${variants.discriminator}`
+          );
+        } else if (discriminator.type !== "enum" || !discriminator.enumValues?.length) {
+          fail(
+            schema.name,
+            "variants.discriminator",
+            `field ${field.name} variants.discriminator must reference an enum field with declared enum values: ${discriminator.name}`
+          );
+        } else {
+          const declared = new Set(discriminator.enumValues);
+          for (const key of Object.keys(variants.mapping)) {
+            if (!declared.has(key)) {
+              fail(
+                schema.name,
+                "variants.mapping",
+                `field ${field.name} variants.mapping key is not a declared enum value of ${discriminator.name}: ${key}`
+              );
+            }
+          }
+          for (const value of discriminator.enumValues) {
+            if (!Object.hasOwn(variants.mapping, value)) {
+              fail(
+                schema.name,
+                "variants.mapping",
+                `field ${field.name} variants.mapping must cover all enum values of ${discriminator.name}: missing ${value}`
+              );
+            }
+          }
+          for (const value of Object.values(variants.mapping)) {
+            if (!schemaNames.has(value)) {
+              fail(
+                schema.name,
+                "variants.mapping",
+                `field ${field.name} variants.mapping references missing schema: ${value}`
+              );
+            } else if (!objectSchemaNames.has(value)) {
+              fail(
+                schema.name,
+                "variants.mapping",
+                `field ${field.name} variants.mapping references non-object schema: ${value}`
+              );
+            }
+          }
+        }
       }
     }
   }

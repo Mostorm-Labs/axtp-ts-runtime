@@ -58,6 +58,15 @@ function optionalString(value: unknown): string | undefined {
 
 function mapSchemaField(field: any, schemaName: string): SchemaField {
   const enumValues = field.enumValues ?? field.enum;
+  const variants =
+    field.variants === undefined
+      ? undefined
+      : {
+          discriminator: String(field.variants.discriminator),
+          mapping: Object.fromEntries(
+            Object.entries(field.variants.mapping ?? {}).map(([key, value]) => [String(key), String(value)])
+          )
+        };
   return {
     fieldId: normalizeId(field.fieldId, `${schemaName}.${field.name}`),
     name: String(field.name),
@@ -71,6 +80,7 @@ function mapSchemaField(field: any, schemaName: string): SchemaField {
     derivedFrom: optionalString(field.derivedFrom),
     schema: optionalString(field.schema),
     enumValues: enumValues === undefined ? undefined : asStringArray(enumValues),
+    variants,
     repeated: field.repeated === undefined ? undefined : Boolean(field.repeated),
     array:
       field.array === undefined
