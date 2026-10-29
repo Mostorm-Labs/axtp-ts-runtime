@@ -555,6 +555,9 @@ export interface CastAudioChangedEvent {
 
 export interface CastGetPinCodeConfigParams {
   includeSecret?: boolean;
+  protocol?: string;
+  includeSensitive?: boolean;
+  attemptId?: string;
 }
 
 export interface CastSetPinCodeConfigParams {
@@ -570,6 +573,14 @@ export interface CastSetPinCodeParams {
   visibility?: string;
 }
 
+export interface CastPinCodeChallenge {
+  attemptId: string;
+  challengeId: string;
+  displayRequestId: string;
+  pinCode?: string;
+  codeGeneration?: string;
+}
+
 export interface CastPinCodeConfig {
   enabled: boolean;
   hasPinCode: boolean;
@@ -582,6 +593,11 @@ export interface CastPinCodeConfig {
   changedFields?: string[];
   updatedAt?: string;
   redacted?: boolean;
+  protocol?: string;
+  backend?: string;
+  challenges?: CastPinCodeChallenge[];
+  scope?: string;
+  codeGeneration?: string;
 }
 
 export interface CastPinCodeChangedEvent {
@@ -589,6 +605,7 @@ export interface CastPinCodeChangedEvent {
   config: CastPinCodeConfig;
   reason?: string;
   updatedAt?: string;
+  challenge?: CastPinCodeChallenge;
 }
 
 export interface CastPinCodeRequiredEvent {
@@ -598,6 +615,7 @@ export interface CastPinCodeRequiredEvent {
   visibility?: string;
   redactionRequired?: boolean;
   requestedAt?: string;
+  config?: CastPinCodeConfig;
 }
 
 export interface CastPinCodeAuthFailedEvent {
@@ -639,6 +657,7 @@ export interface CastWindowChangedEvent {
   state: CastWindowState;
   reason?: string;
   updatedAt?: string;
+  controlContext?: CastControlEventContext;
 }
 
 export interface CastGetBackendStatusParams {
@@ -772,6 +791,7 @@ export interface CastFlowControlChangedEvent {
 export interface CastGetStatusParams {
   include?: string[];
   includeSensitive?: boolean;
+  controlVersion?: number;
 }
 
 export interface CastReceiverSummary {
@@ -808,6 +828,14 @@ export interface CastStatus {
   flowControl?: CastFlowControlState;
   sampledAt: string;
   redacted?: boolean;
+  controlSync?: CastControlSnapshotCursor;
+  receivers?: CastReceiverState[];
+  sessions?: CastMultiSessionState[];
+  presentation?: CastPresentationState;
+  audioPolicy?: CastAudioPolicyState;
+  presentationSettings?: CastPresentationSettingsState;
+  webcastBackend?: CastWebCastBackendSnapshot;
+  airplay?: CastAirPlayControlState;
 }
 
 export interface CastSessionCapability {
@@ -865,6 +893,442 @@ export interface CastFlowControlCapability {
 export interface CastStatusCapability {
   sections: string[];
   supportsSensitiveRedaction?: boolean;
+  supportedControlVersions?: number[];
+  supportsAtomicUnifiedSnapshot?: boolean;
+}
+
+export interface CastSessionRef {
+  id: string;
+  generation: string;
+}
+
+export interface CastControlTarget {
+  session: CastSessionRef;
+  slotId: number;
+  bindingGeneration: string;
+  lifecycleGeneration: string;
+}
+
+export interface CastControlSnapshotCursor {
+  controlVersion: number;
+  runtimeInstanceId: string;
+  revision: string;
+  eventSequence: string;
+}
+
+export interface CastControlEventContext {
+  controlVersion: number;
+  runtimeInstanceId: string;
+  revision: string;
+  eventSequence: string;
+  batchId: string;
+  partIndex: number;
+  partCount: number;
+}
+
+export interface CastControlCapabilities {
+  supportedControlVersions: number[];
+  runtimeInstanceId: string;
+  methods: string[];
+  events: string[];
+  statusSections: string[];
+  presentation?: CastPresentationCapability;
+  audioPolicy?: CastAudioPolicyCapability;
+  operations?: CastControlOperationsCapability;
+  profileHints?: string[];
+  presentationSettings?: CastPresentationSettingsCapability;
+  webcastBackend?: CastWebCastBackendCapability;
+  meetingPresentation?: CastMeetingPresentationCapability;
+  airplayControl?: CastAirPlayControlCapability;
+}
+
+export interface CastPresentationCapability {
+  protocols: string[];
+  supportsAtomicSnapshot: boolean;
+  supportsStrictTargets: boolean;
+  maxPresentationCapacity: number;
+  capacityChoices?: number[];
+  layoutModes: string[];
+  contentAdaptations: string[];
+}
+
+export interface CastAudioPolicyCapability {
+  controlModes: string[];
+  mixModes: string[];
+  supportsPerSessionEnable: boolean;
+  reportsEffectiveSet: boolean;
+  supportsMasterMute?: boolean;
+}
+
+export interface CastControlOperationsCapability {
+  supportsQuery: boolean;
+  supportsDedup: boolean;
+  limits: CastControlLimits;
+}
+
+export interface CastControlLimits {
+  maxPendingOperations: number;
+  maxPendingPerClient: number;
+  maxRetainedResults: number;
+  replayWindowMs: number;
+  maxEventBufferEvents: number;
+  maxEventBufferBytes: number;
+  maxRequestBytes: number;
+  maxSnapshotBytes: number;
+}
+
+export interface CastReceiverState {
+  receiverId: string;
+  protocol: string;
+  state: string;
+  observedAt: string;
+  displayName?: string;
+  lastError?: CastLastError;
+}
+
+export interface CastMultiSessionState {
+  session: CastSessionRef;
+  receiverId: string;
+  protocol: string;
+  receiverState: string;
+  presentationEligibility: string;
+  videoTrackOpen: boolean;
+  audioTrackOpen: boolean;
+  audioReadiness?: string;
+  displayName?: string;
+}
+
+export interface CastPresentationSlotState {
+  slotId: number;
+  bindingGeneration: string;
+  occupied: boolean;
+  target?: CastControlTarget;
+}
+
+export interface CastPresentationState {
+  started: boolean;
+  lifecycleGeneration: string;
+  configuredCapacity: number;
+  validationAvailable: boolean;
+  validatedCapacity?: number;
+  effectiveCapacity: number;
+  appliedCapacity: number;
+  layoutMode: string;
+  layoutSettling: boolean;
+  slots: CastPresentationSlotState[];
+  meeting?: CastMeetingPresentationState;
+  contentAdaptation: string;
+}
+
+export interface CastAudioPolicyState {
+  controlMode: string;
+  mixMode: string;
+  enabledSessions: CastSessionRef[];
+  effectiveAudioSessions: CastSessionRef[];
+  appliedGains?: CastMeetingAudioGain[];
+  masterMuted: boolean;
+}
+
+export interface CastStopPresentationParams {
+  controlVersion: number;
+  runtimeInstanceId: string;
+  clientInstanceId: string;
+  commandId: string;
+  target: CastControlTarget;
+  reason?: string;
+}
+
+export interface CastSetSessionAudioEnabledParams {
+  controlVersion: number;
+  runtimeInstanceId: string;
+  clientInstanceId: string;
+  commandId: string;
+  target: CastControlTarget;
+  enabled: boolean;
+}
+
+export interface CastGetControlOperationParams {
+  controlVersion: number;
+  runtimeInstanceId: string;
+  clientInstanceId: string;
+  commandId: string;
+}
+
+export interface CastControlOperation {
+  operationId: string;
+  runtimeInstanceId: string;
+  clientInstanceId: string;
+  commandId: string;
+  kind: string;
+  state: string;
+  submittedAt: string;
+  target?: CastControlTarget;
+  completedAt?: string;
+  appliedRevision?: string;
+  statusCode?: number;
+  outcomeReason?: string;
+  ownerCleanup?: string;
+  settingsResult?: CastPresentationSettingsOperationResult;
+}
+
+export interface CastSetPresentationSettingsParams {
+  controlVersion: number;
+  runtimeInstanceId: string;
+  clientInstanceId: string;
+  commandId: string;
+  expectedSettingsRevision: string;
+  patch: CastPresentationSettingsPatch;
+  persist: boolean;
+}
+
+export interface CastPresentationSettingsPatch {
+  layoutMode?: string;
+  audioControlMode?: string;
+  audioMixMode?: string;
+  capacity?: number;
+  enabledProtocols?: string[];
+  profileHint?: string;
+  contentAdaptation?: string;
+  presentationMode?: string;
+  presentationSidebar?: string;
+  presentationAudioFollow?: boolean;
+  presentationFocusOnDoubleClick?: boolean;
+  presentationGridOnDoubleClick?: boolean;
+  presentationAutoEnter?: boolean;
+}
+
+export interface CastPresentationSettingsValues {
+  layoutMode?: string;
+  audioControlMode?: string;
+  audioMixMode?: string;
+  capacity?: number;
+  enabledProtocols?: string[];
+  profileHint?: string;
+  contentAdaptation?: string;
+  presentationMode?: string;
+  presentationSidebar?: string;
+  presentationAudioFollow?: boolean;
+  presentationFocusOnDoubleClick?: boolean;
+  presentationGridOnDoubleClick?: boolean;
+  presentationAutoEnter?: boolean;
+}
+
+export interface CastPresentationStartupSettings {
+  layoutMode?: string;
+  audioControlMode?: string;
+  audioMixMode?: string;
+  capacity?: number;
+  enabledProtocols?: string[];
+  profileHint?: string;
+  contentAdaptation?: string;
+  presentationMode?: string;
+  presentationSidebar?: string;
+  presentationAudioFollow?: boolean;
+  presentationFocusOnDoubleClick?: boolean;
+  presentationGridOnDoubleClick?: boolean;
+  presentationAutoEnter?: boolean;
+}
+
+export interface CastPresentationSettingsState {
+  settingsRevision: string;
+  settingsEventSequence: string;
+  configured: CastPresentationSettingsValues;
+  applied: CastPresentationSettingsValues;
+  activeStartup: CastPresentationStartupSettings;
+  pendingRestart: string[];
+  persisted: boolean;
+  unsavedFields: string[];
+  unappliedFields: string[];
+  storageState: string;
+  lockedFields: string[];
+  applicationIssues: CastPresentationSettingIssue[];
+  persistedValues?: CastPresentationSettingsValues;
+  storeRevision?: string;
+  appliedControlRevision?: string;
+  persistError?: string;
+}
+
+export interface CastPresentationSettingIssue {
+  field: string;
+  kind: string;
+  reason?: string;
+  statusCode?: number;
+}
+
+export interface CastPresentationSettingsCapability {
+  fields: string[];
+  liveFields: string[];
+  restartOnlyFields: string[];
+  supportsPersistence: boolean;
+  capacityChoices?: number[];
+  layoutModes?: string[];
+  contentAdaptations?: string[];
+  profileHints?: string[];
+  minEnabledProtocols?: number;
+}
+
+export interface CastPresentationSettingsOperationResult {
+  field: string;
+  settingsRevision: string;
+  configurationStatus: string;
+  applicationStatus: string;
+  persistenceStatus: string;
+  appliedControlRevision?: string;
+}
+
+export interface CastSettingsEventContext {
+  controlVersion: number;
+  runtimeInstanceId: string;
+  settingsRevision: string;
+  settingsEventSequence: string;
+}
+
+export interface CastPresentationSettingsChangedEvent {
+  settingsContext: CastSettingsEventContext;
+  settings: CastPresentationSettingsState;
+}
+
+export interface CastReceiversChangedEvent {
+  context: CastControlEventContext;
+  receivers: CastReceiverState[];
+}
+
+export interface CastSessionsChangedEvent {
+  context: CastControlEventContext;
+  sessions: CastMultiSessionState[];
+}
+
+export interface CastPresentationChangedEvent {
+  context: CastControlEventContext;
+  presentation: CastPresentationState;
+}
+
+export interface CastAudioPolicyChangedEvent {
+  context: CastControlEventContext;
+  audioPolicy: CastAudioPolicyState;
+}
+
+export interface CastControlOperationChangedEvent {
+  context: CastControlEventContext;
+  operation: CastControlOperation;
+}
+
+export interface CastGetWebCastBackendStateParams {
+  controlVersion: number;
+}
+
+export interface CastWebCastBackendContext {
+  controlVersion: number;
+  runtimeInstanceId: string;
+  backendRevision: string;
+  backendEventSequence: string;
+}
+
+export interface CastWebCastSignalingState {
+  state: string;
+  transportConnected: boolean;
+  retainedPeerCount: number;
+  connectedPeerCount: number;
+  lastNetworkError?: number;
+}
+
+export interface CastWebCastLocalBackendState {
+  fallbackEnabled: boolean;
+  serviceState: string;
+  servicePort?: number;
+  startAttempts: string;
+  lastStartError?: number;
+  signaling: CastWebCastSignalingState;
+}
+
+export interface CastWebCastBackendState {
+  enabled: boolean;
+  state: string;
+  selectedBackend: string;
+  cloud: CastWebCastSignalingState;
+  local: CastWebCastLocalBackendState;
+}
+
+export interface CastWebCastBackendSnapshot {
+  backendContext: CastWebCastBackendContext;
+  state: CastWebCastBackendState;
+}
+
+export interface CastWebCastBackendCapability {
+  supportsSnapshot: boolean;
+  supportsEvents: boolean;
+  backendTypes: string[];
+  sequenceModel: string;
+}
+
+export interface CastMeetingPresentationState {
+  mode: string;
+  sidebar: string;
+  audioFollow: boolean;
+  revision: string;
+  primary?: CastSessionRef;
+  sidebarPage: number;
+  sidebarPageCount: number;
+  mainSharePermille: number;
+  audioFollowActive: boolean;
+  view?: string;
+  focusOnDoubleClick?: boolean;
+  gridOnDoubleClick?: boolean;
+  autoEnter?: boolean;
+  autoEnterSuppressed?: boolean;
+}
+
+export interface CastSetPresentationFocusParams {
+  controlVersion: number;
+  runtimeInstanceId: string;
+  clientInstanceId: string;
+  commandId: string;
+  target: CastControlTarget;
+  expectedMeetingRevision: string;
+  display: string;
+  sidebarPage?: number;
+}
+
+export interface CastMeetingAudioGain {
+  session: CastSessionRef;
+  gainPpm: number;
+}
+
+export interface CastMeetingPresentationCapability {
+  modes: string[];
+  sidebars: string[];
+  mainSharePermille: number;
+  supportsAudioFollow: boolean;
+  supportsPaging: boolean;
+  supportsFocusView?: boolean;
+}
+
+export interface CastAirPlayControlCapability {
+  supportsEvents: boolean;
+  supportsLiveRename: boolean;
+  passwordPolicy: string;
+}
+
+export interface CastAirPlayAuthenticationAttempt {
+  attemptId: string;
+  challengeId: string;
+  displayRequestId: string;
+  state: string;
+  reason?: string;
+}
+
+export interface CastAirPlayControlState {
+  enabled: boolean;
+  displayName: string;
+  publishState: string;
+  randomPasswordEnabled: boolean;
+  attempts: CastAirPlayAuthenticationAttempt[];
+  observationDrops?: string;
+}
+
+export interface CastAirPlayChangedEvent {
+  context: CastControlEventContext;
+  airplay: CastAirPlayControlState;
 }
 
 export interface GetDeviceInfoParams {
