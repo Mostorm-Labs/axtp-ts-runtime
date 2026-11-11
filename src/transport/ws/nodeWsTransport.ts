@@ -38,7 +38,12 @@ function wsToTransport(ws: WebSocket): KeepaliveStreamTransport {
     start(controller) {
       ws.on("message", (data: WsMessageData, isBinary: boolean) => {
         if (isBinary) return; // WS-JSON profile 仅承载文本 JSON，拒绝二进制帧
-        controller.enqueue(wsMessageToBytes(data));
+        try {
+          controller.enqueue(wsMessageToBytes(data));
+        } catch {
+          // 流已取消/关闭后到达的缓冲帧直接丢弃：close 握手与 readable cancel 竞态下
+          // 对已关闭 controller enqueue 同步抛 ERR_INVALID_STATE，会作为未捕获异常击穿进程
+        }
       });
       ws.on("close", () => {
         try {
