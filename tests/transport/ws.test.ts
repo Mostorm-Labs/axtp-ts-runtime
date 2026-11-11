@@ -54,4 +54,42 @@ describe("AxtpEndpoint over 真实 WebSocket", () => {
     serverEp.close();
     await server.close();
   });
+
+  // 回归：readable 取消（endpoint.close → pipe 链 abort，如「同设备新会话踢旧」）后，
+  // close 握手竞态下 ws 仍会派发缓冲的迟到 message 帧——不得向已关闭 controller enqueue，
+  // 否则同步抛 ERR_INVALID_STATE 成为未捕获异常击穿进程（aw-saas-platform 曾以 pnpm patch 修复）。
+  it("readable 取消后的迟到 message 帧被丢弃，不产生未捕获异常", async () => {
+    const uncaught: Error[] = [];
+    const onUncaught = (err: Error): void => {
+      uncaught.push(err);
+    };
+    process.on("uncaughtException", onUncaught);
+    try {
+      const server = new NodeWsServerTransport({ port: 0 });
+      await server.listen();
+      const port = server.boundPort as number;
+
+      const serverTPromise = once(server.onConnection);
+      const clientT = await new NodeWsClientTransport({
+        url: `ws://127.0.0.1:${port}`
+      }).connect();
+      const serverT = await serverTPromise;
+
+      // 模拟被踢端 endpoint.close → pipe 链 abort → readable cancel
+      await serverT.readable.getReader().cancel();
+
+      // 取消后从对端再发一帧（迟到帧，message 事件仍会派发）
+      await clientT.writable.getWriter().write(new TextEncoder().encode('{"late":true}'));
+
+      // 等待 ws message 事件派发完毕
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      clientT.close();
+      serverT.close();
+      await server.close();
+    } finally {
+      process.off("uncaughtException", onUncaught);
+    }
+    expect(uncaught).toEqual([]);
+  });
 }, 15000);
