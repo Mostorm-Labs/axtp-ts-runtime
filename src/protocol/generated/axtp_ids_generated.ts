@@ -150,6 +150,11 @@ export enum MethodId {
   SportSetGoalShotWatermarkConfig = 0x1805,
   SportGetEventClipConfig = 0x1806,
   SportSetEventClipConfig = 0x1807,
+  LicenseRegisterIdentity = 0x1901,
+  LicenseReportReceipt = 0x1902,
+  LicenseReconcile = 0x1903,
+  LicenseDeliverCredential = 0x1904,
+  LicenseResolveCredential = 0x1905,
 }
 
 export enum EventId {
@@ -351,6 +356,9 @@ export enum ErrorCode {
   SecSignatureInvalid = 0x1406,
   SecCertInvalid = 0x1407,
   SecTokenExpired = 0x1408,
+  LicenseIdentityInvalid = 0x7001,
+  LicenseDeviceNotFound = 0x7002,
+  LicenseCredentialStale = 0x7003,
   LegacyCmdUnmapped = 0x7F01,
   LegacyStatusUnmapped = 0x7F02,
   LegacyPayloadInvalid = 0x7F03,
@@ -396,4 +404,7 @@ export enum CapabilityId {
   SoftwareUpdatePolicy = 0x1702,
   SportEventDetection = 0x1801,
   SportBasketball = 0x1802,
+  LicenseRegistration = 0x1901,
+  LicenseCredentialDelivery = 0x1902,
+  LicenseReconciliation = 0x1903,
 }

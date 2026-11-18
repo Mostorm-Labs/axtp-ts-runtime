@@ -1546,6 +1546,84 @@ export interface FirmwareUpdateStateChangedEvent {
   error?: FirmwareUpdateErrorInfo;
 }
 
+export interface RegisterIdentityResult {
+  deviceId: string;
+  status: string;
+  credentialPending: boolean;
+}
+
+export interface ReportReceiptParams {
+  deviceId: string;
+  credentialId: string;
+  outcome: string;
+  errorCode?: string;
+  deliveryRef?: string;
+}
+
+export interface ReportReceiptResult {
+  accepted: boolean;
+}
+
+export interface ReconcileParams {
+  deviceId: string;
+  version?: LicenseVersionTriple;
+}
+
+export interface ReconcileResult {
+  upToDate: boolean;
+  policyVersion?: number;
+  credential?: LicenseCredentialInfo;
+  reissueAccepted?: boolean;
+}
+
+export interface ResolveCredentialParams {
+  deviceId: string;
+}
+
+export interface ResolveCredentialResult {
+  hasCredential: boolean;
+  version?: LicenseVersionTriple;
+}
+
+export interface DeliverCredentialParams {
+  deliveryId: string;
+  policyVersion: number;
+  credential: LicenseCredentialInfo;
+}
+
+export interface DeliverCredentialResult {
+  accepted: boolean;
+  errorCode?: string;
+}
+
+export interface LicenseCredentialInfo {
+  credentialId: string;
+  authorityRevision: number;
+  credentialGeneration: number;
+  reason: string;
+  cborBase64: string;
+}
+
+export interface LicenseVersionTriple {
+  authorityRevision: number;
+  credentialGeneration: number;
+  policyVersion: number;
+}
+
+export interface LicenseRegistrationCapabilities {
+  deviceIdFormat: string;
+}
+
+export interface LicenseCredentialDeliveryCapabilities {
+  maxArtifactBytes: number;
+  maxEntitlements: number;
+  supportedReasons: string[];
+}
+
+export interface LicenseReconciliationCapabilities {
+  persistentPolicyVersion: boolean;
+}
+
 export interface NetworkGetInterfacesParams {
   includeDisabled?: boolean;
 }

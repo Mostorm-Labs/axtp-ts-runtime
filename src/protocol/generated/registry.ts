@@ -108,6 +108,11 @@ export const METHOD_REGISTRY = {
   "sport.setGoalShotWatermarkConfig": { id: 0x1805, status: "draft", bitOffset: 4, request: typeOnly<AxtpSchemas.SportSetGoalShotWatermarkConfigParams>(), response: typeOnly<AxtpSchemas.Empty>() },
   "sport.getEventClipConfig": { id: 0x1806, status: "draft", bitOffset: 5, request: typeOnly<AxtpSchemas.SportConfigTargetParams>(), response: typeOnly<AxtpSchemas.SportEventClipConfig>() },
   "sport.setEventClipConfig": { id: 0x1807, status: "draft", bitOffset: 6, request: typeOnly<AxtpSchemas.SportSetEventClipConfigParams>(), response: typeOnly<AxtpSchemas.Empty>() },
+  "license.registerIdentity": { id: 0x1901, status: "draft", bitOffset: 0, request: typeOnly<AxtpSchemas.Empty>(), response: typeOnly<AxtpSchemas.RegisterIdentityResult>() },
+  "license.reportReceipt": { id: 0x1902, status: "draft", bitOffset: 1, request: typeOnly<AxtpSchemas.ReportReceiptParams>(), response: typeOnly<AxtpSchemas.ReportReceiptResult>() },
+  "license.reconcile": { id: 0x1903, status: "draft", bitOffset: 2, request: typeOnly<AxtpSchemas.ReconcileParams>(), response: typeOnly<AxtpSchemas.ReconcileResult>() },
+  "license.deliverCredential": { id: 0x1904, status: "draft", bitOffset: 3, request: typeOnly<AxtpSchemas.DeliverCredentialParams>(), response: typeOnly<AxtpSchemas.DeliverCredentialResult>() },
+  "license.resolveCredential": { id: 0x1905, status: "draft", bitOffset: 4, request: typeOnly<AxtpSchemas.ResolveCredentialParams>(), response: typeOnly<AxtpSchemas.ResolveCredentialResult>() },
 } satisfies Record<string, { id: number; status: MethodStatus; bitOffset: number; request: unknown; response: unknown }>;
 
 export const EVENT_REGISTRY = {
