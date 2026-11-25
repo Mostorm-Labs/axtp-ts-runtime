@@ -9,12 +9,19 @@
 import { describe, expect, it } from "vitest";
 import { AxtpCore } from "../../src/core/core.js";
 import { concatBytes, type Bytes } from "../../src/io/bytes.js";
-import { decodeControl, defaultOpenParams, encodeOpen } from "../../src/protocol/codec/control.js";
+import {
+  decodeControl,
+  defaultOpenParams,
+  encodeHeartbeat,
+  encodeHeartbeatAck,
+  encodeOpen
+} from "../../src/protocol/codec/control.js";
 import { encodeJsonRpc } from "../../src/protocol/codec/jsonRpc.js";
 import { FramedWireAdapter } from "../../src/core/wire/framed.js";
 
 import type { CoreEvent } from "../../src/core/events.js";
 import type { WireSink } from "../../src/core/wire/adapter.js";
+import type { AxtpDiagnosticEntry } from "../../src/diagnostics.js";
 import {
   ControlOpcode,
   RpcOp,
@@ -91,6 +98,39 @@ describe("AxtpCore — framed server 端到端", () => {
     if (control === undefined) throw new Error("expected control frame");
     expect(decodeControl(control).opcode).toBe(ControlOpcode.Accept);
     expect(decodeFrame(outs[1]).rpc?.op).toBe(RpcOp.Hello);
+  });
+
+  it.each([undefined, true])("exchanges heartbeats with includeKeepalive=%s", async (includeKeepalive) => {
+    const entries: AxtpDiagnosticEntry[] = [];
+    const core = framedServer({ diagnostics: { includeKeepalive, logger: (entry) => entries.push(entry) } });
+    const peer = new FramedWireAdapter(4096);
+    const w = core.inbound.writable.getWriter();
+    await w.write(concatBytes(peer.encodeControlBody(encodeOpen(1, defaultOpenParams(4096, 1000)))));
+    await readEvents(core, 1);
+    await readOut(core, 2);
+
+    await w.write(concatBytes(peer.encodeControlBody(encodeHeartbeat(42))));
+    const [ack] = await readOut(core, 1);
+    expect(decodeControl(decodeFrame(ack).control!)).toMatchObject({
+      opcode: ControlOpcode.HeartbeatAck,
+      controlId: 42
+    });
+
+    core.sendHeartbeat();
+    const [heartbeat] = await readOut(core, 1);
+    const { opcode, controlId } = decodeControl(decodeFrame(heartbeat).control!);
+    expect(opcode).toBe(ControlOpcode.Heartbeat);
+    await w.write(concatBytes(peer.encodeControlBody(encodeHeartbeatAck(controlId))));
+    expect(await readEvents(core, 1)).toEqual([{ kind: "heartbeatAck" }]);
+    w.releaseLock();
+
+    const events = entries.map((entry) => entry.event);
+    expect(events).toContain("handshake.out");
+    expect(events.filter((event) => event.startsWith("control."))).toEqual(
+      includeKeepalive
+        ? ["control.in.heartbeat", "control.out.heartbeatAck", "control.out.heartbeat", "control.in.heartbeatAck"]
+        : []
+    );
   });
 
   it("OPEN→Identify → handshakeReady(sid) + 发 Identified + isAppReady", async () => {

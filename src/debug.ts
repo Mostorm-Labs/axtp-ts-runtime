@@ -25,6 +25,8 @@ export interface AxtpDiagnosticsCollectorOptions {
   readonly capacity?: number;
   /** Forwarded to AxtpDiagnostics. Payload capture still happens at runtime via diagnosticData(). */
   readonly includePayload?: boolean;
+  /** Whether to record routine CONTROL heartbeats and acknowledgements. Defaults to false. */
+  readonly includeKeepalive?: boolean;
   /** Minimum diagnostics level. Defaults to debug. */
   readonly level?: AxtpDiagnostics["level"];
 }
@@ -75,6 +77,7 @@ export function createAxtpDiagnosticsCollector(
       enabled: true,
       level: options.level ?? "debug",
       includePayload: options.includePayload !== false,
+      includeKeepalive: options.includeKeepalive,
       logger: (entry) => collector.push(entry)
     },
     push(entry) {

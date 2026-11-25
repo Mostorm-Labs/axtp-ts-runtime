@@ -150,6 +150,8 @@ const server = new AxtpServer(new NodeWsServerTransport({ port: 8080 }), {
 });
 ```
 
+Routine CONTROL heartbeats and acknowledgements are omitted from diagnostics by default. To trace them, set `includeKeepalive: true` in `createAxtpDebugServer` or in your custom SDK `diagnostics` options. This does not change heartbeat behavior.
+
 Security defaults:
 
 - `enabled` defaults to `false`; opt in explicitly.

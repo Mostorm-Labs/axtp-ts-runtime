@@ -339,6 +339,12 @@ export class AxtpCore {
     name: string,
     controlId: number | undefined
   ): void {
+    if (
+      (name === "heartbeat" || name === "heartbeatAck") &&
+      this.diagnostics?.includeKeepalive !== true
+    ) {
+      return;
+    }
     emitDiagnostic(this.diagnostics, {
       level: "debug",
       scope: "core",
