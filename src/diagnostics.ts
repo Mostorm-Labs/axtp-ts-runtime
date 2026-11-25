@@ -38,6 +38,8 @@ export interface AxtpDiagnostics {
   readonly enabled?: boolean;
   /** 最低输出级别；默认 debug。 */
   readonly level?: AxtpDiagnosticLevel;
+  /** 是否记录常规 CONTROL 心跳和应答；默认 false。 */
+  readonly includeKeepalive?: boolean;
   /** 是否把 payload/params 放入 data；默认 false，避免日志泄露敏感信息。 */
   readonly includePayload?: boolean;
   readonly logger: (entry: AxtpDiagnosticEntry) => void;

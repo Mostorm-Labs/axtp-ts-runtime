@@ -944,7 +944,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
     await server.close();
   });
 
-  it("diagnostics records control heartbeat probes and acknowledgements", async () => {
+  it("diagnostics records control heartbeat probes and acknowledgements when opted in", async () => {
     const clientLogs: AxtpDiagnosticEntry[] = [];
     const serverLogs: AxtpDiagnosticEntry[] = [];
     const loop = createMockStreamLoopback();
@@ -952,6 +952,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
       logicalRole: "server",
       heartbeatIntervalMs: 500,
       diagnostics: {
+        includeKeepalive: true,
         logger: (entry) => serverLogs.push(entry)
       }
     });
@@ -959,6 +960,7 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
       logicalRole: "client",
       heartbeatIntervalMs: 500,
       diagnostics: {
+        includeKeepalive: true,
         logger: (entry) => clientLogs.push(entry)
       }
     });
@@ -985,6 +987,14 @@ describe("AxtpClient / AxtpServer（新栈）", () => {
         scope: "core",
         event: "control.in.heartbeat",
         direction: "in",
+        controlId: expect.any(Number)
+      })
+    );
+    expect(serverLogs).toContainEqual(
+      expect.objectContaining({
+        scope: "core",
+        event: "control.out.heartbeatAck",
+        direction: "out",
         controlId: expect.any(Number)
       })
     );
