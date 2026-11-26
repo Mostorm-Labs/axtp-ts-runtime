@@ -85,6 +85,20 @@ describe("protocol definition validator", () => {
     expect(() => validateProtocolDefinition(model)).toThrow(/duplicate eventId/);
   });
 
+  it("accepts a declared retired method slot without letting live methods reuse its ID or bit", async () => {
+    const model = cloneModel(await loadCurrentProtocol());
+    const method = model.methods.find((entry) => entry.name === "audio.setAlgorithmConfig")!;
+    const { methodId: id, domain, bitOffset } = method;
+    model.retiredAllocations = [...(model.retiredAllocations ?? []), { kind: "method", id, domain, bitOffset }];
+    expect(() => validateProtocolDefinition(model)).toThrow(/reused retired method ID/);
+    method.methodId = Math.max(...model.methods.filter((entry) => entry.domain === domain).map((entry) => entry.methodId)) + 1;
+    expect(() => validateProtocolDefinition(model)).toThrow(/duplicate method bitOffset/);
+    method.bitOffset = Math.max(...model.methods.filter((entry) => entry.domain === domain).map((entry) => entry.bitOffset)) + 1;
+    expect(validateProtocolDefinition(model)).toContain(
+      `[OK] protocol/axtp.protocol.yaml: ${model.methods.length} methods checked`
+    );
+  });
+
   it("rejects non-contiguous method bitOffset values in the same domain", async () => {
     const model = cloneModel(await loadCurrentProtocol());
     const maxAudioBitOffset = Math.max(

@@ -27,6 +27,7 @@ import type {
   WireExample,
   WireExampleStep
 } from "./protocolModel.js";
+import { readRetiredAllocations } from "./retiredAllocations.js";
 import { normalizeId } from "./util.js";
 
 function asArray(value: unknown): any[] {
@@ -397,6 +398,7 @@ export function loadProtocolDefinitionFromRaw(
     wireExamples: mapWireExamples(raw.wire_examples ?? raw.wireExamples),
     methods: mapMethods(raw.methods),
     events: mapEvents(raw.events),
+    retiredAllocations: readRetiredAllocations(raw.retiredAllocations, sourcePath),
     errors: mapErrors(raw.errors),
     capabilities: mapCapabilities(raw.capabilities),
     profiles: mapProfiles(raw.profiles),

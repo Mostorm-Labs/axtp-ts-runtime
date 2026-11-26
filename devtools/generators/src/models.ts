@@ -1,3 +1,5 @@
+import type { RetiredAllocation } from "./retiredAllocations.js";
+
 export type Status = "draft" | "mvp" | "stable" | "deprecated" | "reserved" | string;
 
 export interface RegistryItem {
@@ -112,6 +114,7 @@ export interface SpecModel {
   domainRegistry: DomainRange[];
   methods: Method[];
   events: Event[];
+  retiredAllocations?: RetiredAllocation[];
   errors: ErrorCode[];
   capabilities: Capability[];
   legacyMappings: LegacyMapping[];

@@ -194,6 +194,7 @@ export function buildProtocolDefinitionRaw(source: ProtocolSourceModel): Record<
     schemas: buildSchemas(source.schemas),
     methods: source.methods.map((method) => methodToProtocol(method, emptyNames)),
     events: source.events.map((event) => eventToProtocol(event, emptyNames)),
+    ...(source.retiredAllocations?.length ? { retiredAllocations: source.retiredAllocations } : {}),
     errors: source.errors.map((error) => errorToProtocol(error, domainByHighByte)),
     capabilities: source.capabilities.map(capabilityToProtocol),
     profiles: [...defaultProfiles(source), ...source.profiles]
