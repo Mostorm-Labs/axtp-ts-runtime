@@ -836,6 +836,7 @@ export interface CastStatus {
   presentationSettings?: CastPresentationSettingsState;
   webcastBackend?: CastWebCastBackendSnapshot;
   airplay?: CastAirPlayControlState;
+  touchback?: CastTouchbackState[];
 }
 
 export interface CastSessionCapability {
@@ -940,6 +941,7 @@ export interface CastControlCapabilities {
   webcastBackend?: CastWebCastBackendCapability;
   meetingPresentation?: CastMeetingPresentationCapability;
   airplayControl?: CastAirPlayControlCapability;
+  touchback?: CastTouchbackCapability;
 }
 
 export interface CastPresentationCapability {
@@ -1095,6 +1097,19 @@ export interface CastPresentationSettingsPatch {
   presentationFocusOnDoubleClick?: boolean;
   presentationGridOnDoubleClick?: boolean;
   presentationAutoEnter?: boolean;
+  canvasMode?: string;
+  baseWidth?: number;
+  baseHeight?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  topBarTrigger?: string;
+  topBarShowCastCode?: boolean;
+  topBarShowDebug?: boolean;
+  startupWindowMode?: string;
+  topBarShowLayout?: boolean;
+  topBarShowMinimize?: boolean;
+  topBarShowMaximize?: boolean;
+  topBarShowBackground?: boolean;
 }
 
 export interface CastPresentationSettingsValues {
@@ -1111,6 +1126,94 @@ export interface CastPresentationSettingsValues {
   presentationFocusOnDoubleClick?: boolean;
   presentationGridOnDoubleClick?: boolean;
   presentationAutoEnter?: boolean;
+  canvasMode?: string;
+  baseWidth?: number;
+  baseHeight?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  topBarTrigger?: string;
+  topBarShowCastCode?: boolean;
+  topBarShowDebug?: boolean;
+  startupWindowMode?: string;
+  topBarShowLayout?: boolean;
+  topBarShowMinimize?: boolean;
+  topBarShowMaximize?: boolean;
+  topBarShowBackground?: boolean;
+}
+
+export interface CastReceiverPreferenceValues {
+  airplayName?: string;
+  airplayRandomPassword?: boolean;
+  controlPort?: number;
+  controlListenOnLan?: boolean;
+}
+
+export interface CastReceiverPersistedOverrides {
+  layoutMode?: string;
+  audioControlMode?: string;
+  audioMixMode?: string;
+  capacity?: number;
+  enabledProtocols?: string[];
+  profileHint?: string;
+  contentAdaptation?: string;
+  presentationMode?: string;
+  presentationSidebar?: string;
+  presentationAudioFollow?: boolean;
+  presentationFocusOnDoubleClick?: boolean;
+  presentationGridOnDoubleClick?: boolean;
+  presentationAutoEnter?: boolean;
+  canvasMode?: string;
+  baseWidth?: number;
+  baseHeight?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  topBarTrigger?: string;
+  topBarShowCastCode?: boolean;
+  topBarShowDebug?: boolean;
+  startupWindowMode?: string;
+  topBarShowLayout?: boolean;
+  topBarShowMinimize?: boolean;
+  topBarShowMaximize?: boolean;
+  topBarShowBackground?: boolean;
+  airplayName?: string;
+  airplayRandomPassword?: boolean;
+  controlPort?: number;
+  controlListenOnLan?: boolean;
+}
+
+export interface CastReceiverSettingsState {
+  runtimeInstanceId: string;
+  storeRevision: string;
+  storageState: string;
+  backupAvailable: boolean;
+  recoveredFromBackup: boolean;
+  supportsPersistence: boolean;
+  restartOnlyFields: string[];
+  configured: CastReceiverPreferenceValues;
+  applied: CastReceiverPreferenceValues;
+  airplayEnabled: boolean;
+  publishState: string;
+  pendingRestart: string[];
+  persistedOverrides: CastReceiverPersistedOverrides;
+}
+
+export interface CastSetReceiverSettingsParams {
+  runtimeInstanceId: string;
+  expectedStoreRevision: string;
+  persist: boolean;
+  patch: CastReceiverPreferenceValues;
+}
+
+export interface CastRestoreReceiverSettingsParams {
+  runtimeInstanceId: string;
+  expectedStoreRevision: string;
+  source: string;
+}
+
+export interface CastReceiverSettingsWriteResult {
+  persistenceStatus: string;
+  applicationStatus: string;
+  settings: CastReceiverSettingsState;
 }
 
 export interface CastPresentationStartupSettings {
@@ -1127,6 +1230,19 @@ export interface CastPresentationStartupSettings {
   presentationFocusOnDoubleClick?: boolean;
   presentationGridOnDoubleClick?: boolean;
   presentationAutoEnter?: boolean;
+  canvasMode?: string;
+  baseWidth?: number;
+  baseHeight?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  topBarTrigger?: string;
+  topBarShowCastCode?: boolean;
+  topBarShowDebug?: boolean;
+  startupWindowMode?: string;
+  topBarShowLayout?: boolean;
+  topBarShowMinimize?: boolean;
+  topBarShowMaximize?: boolean;
+  topBarShowBackground?: boolean;
 }
 
 export interface CastPresentationSettingsState {
@@ -1165,6 +1281,9 @@ export interface CastPresentationSettingsCapability {
   contentAdaptations?: string[];
   profileHints?: string[];
   minEnabledProtocols?: number;
+  canvasModes?: string[];
+  canvasMaxWidth?: number;
+  canvasMaxHeight?: number;
 }
 
 export interface CastPresentationSettingsOperationResult {
@@ -1329,6 +1448,119 @@ export interface CastAirPlayControlState {
 export interface CastAirPlayChangedEvent {
   context: CastControlEventContext;
   airplay: CastAirPlayControlState;
+}
+
+export interface CastTouchbackTarget {
+  sessionId: string;
+  sessionGeneration: string;
+  slotId: string;
+  bindingGeneration: string;
+  lifecycleGeneration: string;
+}
+
+export interface CastTouchbackTargetRequest {
+  target: CastTouchbackTarget;
+}
+
+export interface CastTouchbackState {
+  target: CastTouchbackTarget;
+  receiverOptIn: boolean;
+  controllerRequested: boolean;
+  effectiveEnabled: boolean;
+  resolutionPreference: string;
+  streamId?: number;
+  canvasRevision: string;
+  geometryRevision: string;
+  revision: string;
+  diagnosticReason?: string;
+  acceptedInputTypes: string[];
+  lifecycleState: string;
+  format?: string;
+  resolutionState?: string;
+}
+
+export interface CastTouchbackEnabledRequest {
+  target: CastTouchbackTarget;
+  enabled: boolean;
+  commandId: string;
+}
+
+export interface CastTouchbackResolutionRequest {
+  target: CastTouchbackTarget;
+  resolutionPreference: string;
+  commandId: string;
+}
+
+export interface CastTouchbackChangedEvent {
+  state: CastTouchbackState;
+  changedFields: string[];
+  accepted: boolean;
+}
+
+export interface CastGestureSettings {
+  rightClick: string;
+  rightHoldMs: number;
+  scrollDirection: string;
+  feedback: boolean;
+  scrollSpeed?: unknown;
+}
+
+export interface CastInputSourceInfo {
+  platform: string;
+  clientKind: string;
+  product: string;
+  displaySurface: string;
+  displayRole?: string;
+}
+
+export interface CastInputModeState {
+  target: CastTouchbackTarget;
+  inputMode: string;
+  gestureSettings: CastGestureSettings;
+  switching: boolean;
+  supported: boolean;
+  source: CastInputSourceInfo;
+  gestureControlSupported: boolean;
+  state: CastTouchbackState;
+}
+
+export interface CastSetInputModeRequest {
+  target: CastTouchbackTarget;
+  commandId: string;
+  inputMode?: string;
+  gestureSettings?: CastGestureSettings;
+  controlVersion: number;
+  runtimeInstanceId: string;
+}
+
+export interface CastTouchbackMasterQuery {
+
+}
+
+export interface CastTouchbackMasterState {
+  enabled: boolean;
+  revision: string;
+  runtimeInstanceId: string;
+}
+
+export interface CastSetTouchbackMasterRequest {
+  enabled: boolean;
+  commandId: string;
+  controlVersion: number;
+  runtimeInstanceId: string;
+}
+
+export interface CastTouchbackMasterChangedEvent {
+  state: CastTouchbackMasterState;
+}
+
+export interface CastTouchbackCapability {
+  capability: string;
+  protocols: string[];
+  supportsPerTarget: boolean;
+  supportsControlPlane: boolean;
+  inputTypes: string[];
+  formats: string[];
 }
 
 export interface GetDeviceInfoParams {
@@ -1544,6 +1776,81 @@ export interface FirmwareUpdateStateChangedEvent {
   updateSessionId: string;
   state: string;
   error?: FirmwareUpdateErrorInfo;
+}
+
+export interface InputStreamTarget {
+  sessionId: string;
+  sessionGeneration: string;
+  slotId: string;
+  bindingGeneration: string;
+  lifecycleGeneration: string;
+}
+
+export interface InputOpenStreamParams {
+  controlVersion: number;
+  runtimeInstanceId: string;
+  target: InputStreamTarget;
+  streamKind: string;
+  format: string;
+  commandId: string;
+  sourceBindingId: string;
+  inputTypes: string[];
+  maxDataBytes: number;
+  touch?: InputTouchConstraints;
+  mouse?: InputMouseConstraints;
+}
+
+export interface InputOpenStreamResult {
+  streamId: number;
+  format: string;
+  revision: string;
+  accepted: boolean;
+  acceptedInputTypes: string[];
+  maxDataBytes: number;
+  touch?: InputTouchConstraints;
+  mouse?: InputMouseConstraints;
+}
+
+export interface InputCloseStreamParams {
+  controlVersion: number;
+  runtimeInstanceId: string;
+  target: InputStreamTarget;
+  streamKind: string;
+  streamId: number;
+  reason?: string;
+  finalSeqId?: number;
+  commandId: string;
+}
+
+export interface InputCloseStreamResult {
+  streamId: number;
+  closed: boolean;
+  alreadyClosed?: boolean;
+  revision: string;
+}
+
+export interface InputStreamCapability {
+  capability: string;
+  direction: string;
+  formats: string[];
+  reliability: string;
+  inputTypes: string[];
+  maxDataBytes: number;
+  touch?: InputTouchConstraints;
+  mouse?: InputMouseConstraints;
+  profiles: string[];
+}
+
+export interface InputTouchConstraints {
+  maxContacts: number;
+}
+
+export interface InputMouseConstraints {
+  buttonsMask: number;
+  modifierMask: number;
+  allowChords: boolean;
+  wheelUnits: string[];
+  continuousScroll: boolean;
 }
 
 export interface RegisterIdentityResult {
