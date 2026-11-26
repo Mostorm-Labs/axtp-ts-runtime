@@ -21,7 +21,7 @@ on:
         required: false
         type: string
       dry_run:
-        description: Run pnpm publish --dry-run without publishing
+        description: Run npm publish --dry-run without publishing
         required: false
         default: false
         type: boolean
@@ -126,7 +126,7 @@ jobs:
           REGISTRY_URL="${NPM_REGISTRY_URL%/}/"
 
           if [[ "$DRY_RUN" == "true" ]]; then
-            pnpm publish --registry "$REGISTRY_URL" --no-git-checks --dry-run
+            npm publish --registry "$REGISTRY_URL" --dry-run
           else
-            pnpm publish --registry "$REGISTRY_URL" --no-git-checks
+            npm publish --registry "$REGISTRY_URL"
           fi
