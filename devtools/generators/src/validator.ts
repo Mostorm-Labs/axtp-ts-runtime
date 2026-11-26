@@ -1,6 +1,7 @@
 import { GeneratorError } from "./errors.js";
 import { buildSourceDomainByHighByte, type DomainByHighByte } from "./domainRegistry.js";
 import type { Capability, ErrorCode, Event, Field, Method, Schema, SpecModel } from "./models.js";
+import { retiredBits } from "./retiredAllocations.js";
 import { hex } from "./util.js";
 
 function assertUniqueIds<T extends { id: number; name: string }>(
@@ -393,8 +394,10 @@ export function validateSpec(spec: SpecModel): string[] {
     domainByHighByte
   );
   assertRegistryDomainRanges(spec.events, "eventId", "event_registry.yaml", [], domainByHighByte);
-  assertDomainBitOffsets(spec.methods, "method", "method_registry.yaml");
-  assertDomainBitOffsets(spec.events, "event", "event_registry.yaml");
+  const methodBits = retiredBits(spec.retiredAllocations, "method", spec.methods.map((item) => item.id), "method_registry.yaml");
+  const eventBits = retiredBits(spec.retiredAllocations, "event", spec.events.map((item) => item.id), "event_registry.yaml");
+  assertDomainBitOffsets([...spec.methods, ...methodBits], "method", "method_registry.yaml");
+  assertDomainBitOffsets([...spec.events, ...eventBits], "event", "event_registry.yaml");
   assertUniqueIds(spec.errors, "errorCode", "error_code.yaml");
   assertUniqueNames(spec.errors, "error", "error_code.yaml");
   assertUniqueIds(spec.capabilities, "capabilityId", "capability_registry.yaml");

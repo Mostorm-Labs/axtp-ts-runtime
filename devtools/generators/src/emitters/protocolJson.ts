@@ -20,6 +20,7 @@ export function toProtocolJson(model: ProtocolModel): Record<string, unknown> {
     wireExamples: model.wireExamples,
     methods: model.methods,
     events: model.events,
+    ...(model.retiredAllocations?.length ? { retiredAllocations: model.retiredAllocations } : {}),
     errors: model.errors,
     capabilities: model.capabilities,
     profiles: model.profiles

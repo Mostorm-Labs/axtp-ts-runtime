@@ -15,3 +15,8 @@ pnpm --dir devtools/generators generate:runtime
 ```
 
 Generated TypeScript artifacts are written to `src/protocol/generated/`.
+
+Registry `retired_allocations` (Protocol IR `retiredAllocations`) reserve the
+original method or event ID and bit offset. Active and retired slots are checked
+together for continuity; retired slots are not emitted as callable methods or
+subscribable events.

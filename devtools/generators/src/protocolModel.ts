@@ -1,3 +1,5 @@
+import type { RetiredAllocation } from "./retiredAllocations.js";
+
 export type ProtocolStatus =
   | "draft"
   | "experimental"
@@ -262,6 +264,7 @@ export interface ProtocolModel {
   wireExamples: WireExample[];
   methods: MethodDefinition[];
   events: EventDefinition[];
+  retiredAllocations?: RetiredAllocation[];
   errors: ErrorDefinition[];
   capabilities: CapabilityDefinition[];
   profiles: ProfileDefinition[];

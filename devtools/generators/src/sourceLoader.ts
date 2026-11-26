@@ -4,6 +4,7 @@ import path from "node:path";
 import YAML from "yaml";
 import { GeneratorError } from "./errors.js";
 import { loadSpec, resolveContractRoot } from "./loader.js";
+import { readRetiredAllocations, type RetiredAllocation } from "./retiredAllocations.js";
 import type { ProtocolSourceModel } from "./sourceModel.js";
 import type {
   Capability,
@@ -205,12 +206,14 @@ export async function loadProtocolSources(specRoot: string): Promise<ProtocolSou
     ...domainFiles
   ];
   const profiles: Array<Record<string, unknown>> = [];
+  const retiredAllocations: RetiredAllocation[] = [];
 
   for (const file of domainFiles) {
     const doc = await loadYamlFile(file);
     const defaultDomain = String(doc.domain ?? path.basename(path.dirname(file)));
     spec.methods.push(...asArray(doc.methods).map((item) => mapMethod(item, file, defaultDomain)));
     spec.events.push(...asArray(doc.events).map((item) => mapEvent(item, file, defaultDomain)));
+    retiredAllocations.push(...readRetiredAllocations(doc.retired_allocations, file));
     spec.errors.push(...asArray(doc.errors).map((item) => mapErrorCode(item, file, defaultDomain)));
     spec.capabilities.push(
       ...asArray(doc.capabilities).map((item) => mapCapability(item, file, defaultDomain))
@@ -222,5 +225,5 @@ export async function loadProtocolSources(specRoot: string): Promise<ProtocolSou
     profiles.push(...asArray(doc.profiles));
   }
 
-  return { ...spec, protocolMeta, sourceFiles, profiles };
+  return { ...spec, protocolMeta, sourceFiles, profiles, retiredAllocations };
 }

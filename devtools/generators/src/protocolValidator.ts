@@ -7,6 +7,7 @@ import type {
   ProtocolModel,
   SchemaDefinition
 } from "./protocolModel.js";
+import { retiredBits } from "./retiredAllocations.js";
 import { hex } from "./util.js";
 
 function fail(entry: string, field: string, message: string): never {
@@ -564,8 +565,10 @@ export function validateProtocolDefinition(model: ProtocolModel): string[] {
   assertUnique(model.transports, (item) => item.name, "transport name", "name");
   assertUnique(model.profiles, (item) => item.name, "profile name", "name");
 
-  assertDomainBits(model.methods, "method");
-  assertDomainBits(model.events, "event");
+  const methodBits = retiredBits(model.retiredAllocations, "method", model.methods.map((item) => item.methodId), model.sourcePath);
+  const eventBits = retiredBits(model.retiredAllocations, "event", model.events.map((item) => item.eventId), model.sourcePath);
+  assertDomainBits([...model.methods, ...methodBits], "method");
+  assertDomainBits([...model.events, ...eventBits], "event");
   assertDomainIdAlignment(model.methods, model.events);
   assertSchemaDefinitions(model.schemas);
   assertEmptySchemaUsage(model);
