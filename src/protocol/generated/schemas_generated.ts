@@ -1873,12 +1873,11 @@ export interface ReportReceiptResult {
 
 export interface ReconcileParams {
   deviceId: string;
-  version?: LicenseVersionTriple;
+  version?: LicenseVersionPair;
 }
 
 export interface ReconcileResult {
   upToDate: boolean;
-  policyVersion?: number;
   credential?: LicenseCredentialInfo;
   reissueAccepted?: boolean;
 }
@@ -1889,12 +1888,11 @@ export interface ResolveCredentialParams {
 
 export interface ResolveCredentialResult {
   hasCredential: boolean;
-  version?: LicenseVersionTriple;
+  version?: LicenseVersionPair;
 }
 
 export interface DeliverCredentialParams {
   deliveryId: string;
-  policyVersion: number;
   credential: LicenseCredentialInfo;
 }
 
@@ -1911,10 +1909,9 @@ export interface LicenseCredentialInfo {
   cborBase64: string;
 }
 
-export interface LicenseVersionTriple {
+export interface LicenseVersionPair {
   authorityRevision: number;
   credentialGeneration: number;
-  policyVersion: number;
 }
 
 export interface LicenseRegistrationCapabilities {
@@ -1928,7 +1925,7 @@ export interface LicenseCredentialDeliveryCapabilities {
 }
 
 export interface LicenseReconciliationCapabilities {
-  persistentPolicyVersion: boolean;
+  persistentHeldVersion: boolean;
 }
 
 export interface NetworkGetInterfacesParams {
